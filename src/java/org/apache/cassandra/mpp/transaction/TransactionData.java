@@ -23,7 +23,7 @@ import java.util.Collection;
 import org.apache.cassandra.db.Mutation;
 
 /**
- * Is stored inside {@link org.apache.cassandra.mpp.transaction.PrivateMemtable}
+ * Stores {@link org.apache.cassandra.mpp.transaction.PrivateMemtable} for that transaction.
  *
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 01/11/15
