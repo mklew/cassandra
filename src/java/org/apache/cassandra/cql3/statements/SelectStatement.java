@@ -737,14 +737,17 @@ public class SelectStatement implements CQLStatement
         public final List<RawSelector> selectClause;
         public final WhereClause whereClause;
         public final Term.Raw limit;
+        public final Term.Raw transactionId;
 
-        public RawStatement(CFName cfName, Parameters parameters, List<RawSelector> selectClause, WhereClause whereClause, Term.Raw limit)
+        public RawStatement(CFName cfName, Parameters parameters, List<RawSelector> selectClause, WhereClause whereClause,
+                            Term.Raw limit, Term.Raw transactionId)
         {
             super(cfName);
             this.parameters = parameters;
             this.selectClause = selectClause;
             this.whereClause = whereClause;
             this.limit = limit;
+            this.transactionId = transactionId;
         }
 
         public ParsedStatement.Prepared prepare() throws InvalidRequestException

@@ -506,6 +506,7 @@ public class QueryProcessor implements QueryHandler
 
     public static ParsedStatement parseStatement(String queryStr) throws SyntaxException
     {
+        // TODO [MPP] Modify parser to support transactional statements?
         try
         {
             return CQLFragmentParser.parseAnyUnhandled(CqlParser::query, queryStr);

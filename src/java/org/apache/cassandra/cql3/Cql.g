@@ -296,8 +296,11 @@ selectStatement returns [SelectStatement.RawStatement expr]
         Map<ColumnIdentifier.Raw, Boolean> orderings = new LinkedHashMap<ColumnIdentifier.Raw, Boolean>();
         boolean allowFiltering = false;
         boolean isJson = false;
+        Term.Raw transactionId = null;
+
     }
-    : K_SELECT 
+    : ( K_TRANSACTIONAL txId=transactionIdValue { transactionId = txId; } )?
+      K_SELECT
       ( K_JSON { isJson = true; } )?
       ( ( K_DISTINCT { isDistinct = true; } )? sclause=selectClause )
       K_FROM cf=columnFamilyName
@@ -311,7 +314,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              allowFiltering,
                                                                              isJson);
           WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
-          $expr = new SelectStatement.RawStatement(cf, params, sclause, where, limit);
+          $expr = new SelectStatement.RawStatement(cf, params, sclause, where, limit, transactionId);
       }
     ;
 
@@ -1305,6 +1308,10 @@ intValue returns [Term.Raw value]
     | QMARK         { $value = newBindVariables(null); }
     ;
 
+transactionIdValue returns [Term.Raw value]
+    : c=UUID { $value = Constants.Literal.uuid($c.text); }
+    ;
+
 functionName returns [FunctionName s]
     : (ks=keyspaceName '.')? f=allowedFunctionName   { $s = new FunctionName(ks, f); }
     ;
@@ -1765,6 +1772,8 @@ K_OR:          O R;
 K_REPLACE:     R E P L A C E;
 
 K_JSON:        J S O N;
+
+K_TRANSACTIONAL: T R A N S A C T I O N A L;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');
