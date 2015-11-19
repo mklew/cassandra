@@ -2,6 +2,15 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-core/cassandra-driver-core.iml" filepath="$PROJECT_DIR$/../java-driver/driver-core/cassandra-driver-core.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-dist/cassandra-driver-dist.iml" filepath="$PROJECT_DIR$/../java-driver/driver-dist/cassandra-driver-dist.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-dse/cassandra-driver-dse.iml" filepath="$PROJECT_DIR$/../java-driver/driver-dse/cassandra-driver-dse.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-examples/osgi/cassandra-driver-examples-osgi.iml" filepath="$PROJECT_DIR$/../java-driver/driver-examples/osgi/cassandra-driver-examples-osgi.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-examples/cassandra-driver-examples-parent.iml" filepath="$PROJECT_DIR$/../java-driver/driver-examples/cassandra-driver-examples-parent.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-examples/stress/cassandra-driver-examples-stress.iml" filepath="$PROJECT_DIR$/../java-driver/driver-examples/stress/cassandra-driver-examples-stress.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-extras/cassandra-driver-extras.iml" filepath="$PROJECT_DIR$/../java-driver/driver-extras/cassandra-driver-extras.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-mapping/cassandra-driver-mapping.iml" filepath="$PROJECT_DIR$/../java-driver/driver-mapping/cassandra-driver-mapping.iml" group="java-driver" />
+      <module fileurl="file://$PROJECT_DIR$/../java-driver/cassandra-driver-parent.iml" filepath="$PROJECT_DIR$/../java-driver/cassandra-driver-parent.iml" group="java-driver" />
       <module fileurl="file://$PROJECT_DIR$/cassandra-trunk.iml" filepath="$PROJECT_DIR$/cassandra-trunk.iml" />
     </modules>
   </component>

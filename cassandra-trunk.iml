@@ -156,6 +156,14 @@
     <orderEntry type="library" name="xmlParserAPIs-2.6.2" level="project" />
     <orderEntry type="library" name="xmlenc-0.52" level="project" />
     <orderEntry type="library" name="xom-1.0b3" level="project" />
-    <orderEntry type="library" name="cassandra-driver-core-3.0.0-beta1-bb1bce4-SNAPSHOT-shaded" level="project" />
+    <orderEntry type="module-library">
+      <library>
+        <CLASSES>
+          <root url="jar://$MODULE_DIR$/lib/cassandra-driver-core-2.2.0-rc2-shaded.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+      </library>
+    </orderEntry>
   </component>
 </module>
