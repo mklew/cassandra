@@ -186,6 +186,20 @@ public abstract class ModificationStatement implements CQLStatement
         return attrs.isTimestampSet();
     }
 
+    public boolean isTransactionIdSet()
+    {
+        return attrs.isTransactionIdSet();
+    }
+
+    public Optional<UUID> getTransactionId(QueryOptions options) {
+        if(isTransactionIdSet()) {
+            return Optional.of(attrs.getTransactionId(options));
+        }
+        else {
+            return Optional.empty();
+        }
+    }
+
     public int getTimeToLive(QueryOptions options) throws InvalidRequestException
     {
         return attrs.getTimeToLive(options);
@@ -550,12 +564,14 @@ public abstract class ModificationStatement implements CQLStatement
     {
         for (IMutation mutation : getMutations(options, true, queryState.getTimestamp()))
         {
-            assert mutation instanceof Mutation || mutation instanceof CounterMutation;
+            assert mutation instanceof Mutation || mutation instanceof CounterMutation || mutation instanceof TransactionalMutation;
 
             if (mutation instanceof Mutation)
                 ((Mutation) mutation).apply();
             else if (mutation instanceof CounterMutation)
                 ((CounterMutation) mutation).apply();
+            else if (mutation instanceof TransactionalMutation)
+                ((TransactionalMutation) mutation).apply();
         }
         return null;
     }
@@ -637,7 +653,7 @@ public abstract class ModificationStatement implements CQLStatement
                 ThriftValidation.validateKey(cfm, key);
                 DecoratedKey dk = cfm.decorateKey(key);
 
-                PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency());
+                PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency(), getTransactionId(options));
 
                 for (Slice slice : slices)
                     addUpdateForKey(upd, slice, params);
@@ -654,7 +670,7 @@ public abstract class ModificationStatement implements CQLStatement
                 ThriftValidation.validateKey(cfm, key);
                 DecoratedKey dk = cfm.decorateKey(key);
 
-                PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency());
+                PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency(), getTransactionId(options));
 
                 if (clusterings.isEmpty())
                 {

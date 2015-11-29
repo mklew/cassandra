@@ -726,15 +726,21 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
+    private static boolean mayAffectViews(Collection<? extends IMutation> mutations) {
+        final IMutation mutation = mutations.iterator().next();
+        return !(mutation instanceof TransactionalMutation);
+    }
+
     @SuppressWarnings("unchecked")
     public static void mutateWithTriggers(Collection<? extends IMutation> mutations,
                                           ConsistencyLevel consistencyLevel,
                                           boolean mutateAtomically)
     throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
     {
+        // TODO [MPP] Skip triggers step if this is transactional mutation?
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
 
-        boolean updatesView = Keyspace.open(mutations.iterator().next().getKeyspaceName())
+        boolean updatesView = mayAffectViews(mutations) && Keyspace.open(mutations.iterator().next().getKeyspaceName())
                               .viewManager
                               .updatesAffectView(mutations, true);
 

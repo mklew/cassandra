@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.UUID;
 
-import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -33,6 +32,7 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.serializers.UUIDSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -42,14 +42,13 @@ public class TransactionStateSerializer implements IVersionedSerializer<Transact
 {
     public static final TransactionStateSerializer instance = new TransactionStateSerializer();
 
-    private static final int uuidLength = UUIDSerializer.instance.serialize(UUID.randomUUID()).array().length;
-    public static final int SIZE_OF_UUID = TypeSizes.sizeof(UUIDs.random());
+    private static final int SIZE_OF_UUID = TypeSizes.sizeof(UUIDGen.getTimeUUID());
 
     public void serialize(TransactionState transactionState, DataOutputPlus out, int version) throws IOException
     {
         out.write(UUIDSerializer.instance.serialize(transactionState.getTransactionId()));
 
-            /* serialize size of transaction items */
+        /* serialize size of transaction items */
         int size = transactionState.getTransactionItems().size();
         out.writeInt(size);
 

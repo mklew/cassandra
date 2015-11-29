@@ -37,6 +37,8 @@ import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.transport.ProtocolException;
 
+// TODO [MPP] I added two consistency levels: TRANSACTIONAL and LOCAL_TRANSACTIONAL. That must have some implications
+// that have to be handled.
 public enum ConsistencyLevel
 {
     ANY         (0),
@@ -49,7 +51,9 @@ public enum ConsistencyLevel
     EACH_QUORUM (7),
     SERIAL      (8),
     LOCAL_SERIAL(9),
-    LOCAL_ONE   (10, true);
+    LOCAL_ONE   (10, true),
+    TRANSACTIONAL (11),
+    LOCAL_TRANSACTIONAL (12, true);
 
     private static final Logger logger = LoggerFactory.getLogger(ConsistencyLevel.class);
 
@@ -121,6 +125,7 @@ public enum ConsistencyLevel
                 return keyspace.getReplicationStrategy().getReplicationFactor();
             case LOCAL_QUORUM:
             case LOCAL_SERIAL:
+            case LOCAL_TRANSACTIONAL: // TODO [MPP] Need to look exactly how is it used.
                 return localQuorumFor(keyspace, DatabaseDescriptor.getLocalDataCenter());
             case EACH_QUORUM:
                 if (keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
@@ -395,5 +400,10 @@ public enum ConsistencyLevel
         AbstractReplicationStrategy strategy = Keyspace.open(keyspaceName).getReplicationStrategy();
         if (!(strategy instanceof NetworkTopologyStrategy))
             throw new InvalidRequestException(String.format("consistency level %s not compatible with replication strategy (%s)", this, strategy.getClass().getName()));
+    }
+
+    public boolean isTransactionalConsistency()
+    {
+        return this == TRANSACTIONAL || this == LOCAL_TRANSACTIONAL;
     }
 }

@@ -428,6 +428,7 @@ usingClause[Attributes.Raw attrs]
 usingClauseObjective[Attributes.Raw attrs]
     : K_TIMESTAMP ts=intValue { attrs.timestamp = ts; }
     | K_TTL t=intValue { attrs.timeToLive = t; }
+    | K_TRANSACTION tx=transactionIdValue { attrs.transactionId = tx; }
     ;
 
 /**
@@ -1774,6 +1775,7 @@ K_REPLACE:     R E P L A C E;
 K_JSON:        J S O N;
 
 K_TRANSACTIONAL: T R A N S A C T I O N A L;
+K_TRANSACTION: T R A N S A C T I O N;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

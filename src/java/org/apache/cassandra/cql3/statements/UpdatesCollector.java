@@ -64,9 +64,9 @@ final class UpdatesCollector
      * @param consistency the consistency level
      * @return the <code>PartitionUpdate</code> for the specified column family and key
      */
-    public PartitionUpdate getPartitionUpdate(CFMetaData cfm, DecoratedKey dk, ConsistencyLevel consistency)
+    public PartitionUpdate getPartitionUpdate(CFMetaData cfm, DecoratedKey dk, ConsistencyLevel consistency, Optional<UUID> transactionId)
     {
-        Mutation mut = getMutation(cfm, dk, consistency);
+        Mutation mut = getMutation(cfm, dk, consistency, transactionId);
         PartitionUpdate upd = mut.get(cfm);
         if (upd == null)
         {
@@ -90,7 +90,7 @@ final class UpdatesCollector
                     Keyspace.openAndGetStore(update.metadata()).indexManager.validate(update);
     }
 
-    private Mutation getMutation(CFMetaData cfm, DecoratedKey dk, ConsistencyLevel consistency)
+    private Mutation getMutation(CFMetaData cfm, DecoratedKey dk, ConsistencyLevel consistency, Optional<UUID> transactionId)
     {
         String ksName = cfm.ksName;
         IMutation mutation = keyspaceMap(ksName).get(dk.getKey());
@@ -98,6 +98,7 @@ final class UpdatesCollector
         {
             Mutation mut = new Mutation(ksName, dk);
             mutation = cfm.isCounter() ? new CounterMutation(mut, consistency) : mut;
+            mutation = transactionId.map(id -> (IMutation) new TransactionalMutation(mut, consistency, id)).orElse(mutation);
             keyspaceMap(ksName).put(dk.getKey(), mutation);
             return mut;
         }

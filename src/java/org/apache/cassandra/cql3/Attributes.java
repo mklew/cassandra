@@ -19,12 +19,14 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.Collections;
+import java.util.UUID;
 
 import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -39,26 +41,30 @@ public class Attributes
 
     private final Term timestamp;
     private final Term timeToLive;
+    private final Term transactionId;
 
     public static Attributes none()
     {
-        return new Attributes(null, null);
+        return new Attributes(null, null, null);
     }
 
-    private Attributes(Term timestamp, Term timeToLive)
+    private Attributes(Term timestamp, Term timeToLive, Term transactionId)
     {
         this.timestamp = timestamp;
         this.timeToLive = timeToLive;
+        this.transactionId = transactionId;
     }
 
     public Iterable<Function> getFunctions()
     {
-        if (timestamp != null && timeToLive != null)
-            return Iterables.concat(timestamp.getFunctions(), timeToLive.getFunctions());
+        if (timestamp != null && timeToLive != null && transactionId != null)
+            return Iterables.concat(timestamp.getFunctions(), timeToLive.getFunctions(), transactionId.getFunctions());
         else if (timestamp != null)
             return timestamp.getFunctions();
         else if (timeToLive != null)
             return timeToLive.getFunctions();
+        else if (transactionId != null)
+            return transactionId.getFunctions();
         else
             return Collections.emptySet();
     }
@@ -71,6 +77,26 @@ public class Attributes
     public boolean isTimeToLiveSet()
     {
         return timeToLive != null;
+    }
+
+    public boolean isTransactionIdSet() {
+        return transactionId != null;
+    }
+
+    public UUID getTransactionId(QueryOptions options) throws InvalidRequestException
+    {
+        final ByteBuffer id = transactionId.bindAndGet(options);
+        if(id == null)
+            throw new InvalidRequestException("Invalid null value of transactionId");
+
+        try {
+            UUIDType.instance.validate(id);
+        }
+        catch (MarshalException e)
+        {
+            throw new InvalidRequestException("Invalid transactionId value: " + id);
+        }
+        return UUIDType.instance.compose(id);
     }
 
     public long getTimestamp(long now, QueryOptions options) throws InvalidRequestException
@@ -134,18 +160,23 @@ public class Attributes
             timestamp.collectMarkerSpecification(boundNames);
         if (timeToLive != null)
             timeToLive.collectMarkerSpecification(boundNames);
+        if (transactionId != null)
+            transactionId.collectMarkerSpecification(boundNames);
     }
 
     public static class Raw
     {
         public Term.Raw timestamp;
         public Term.Raw timeToLive;
+        public Term.Raw transactionId;
 
         public Attributes prepare(String ksName, String cfName) throws InvalidRequestException
         {
             Term ts = timestamp == null ? null : timestamp.prepare(ksName, timestampReceiver(ksName, cfName));
             Term ttl = timeToLive == null ? null : timeToLive.prepare(ksName, timeToLiveReceiver(ksName, cfName));
-            return new Attributes(ts, ttl);
+            // TODO [MPP] I need to understand what is going on here
+            Term tId = transactionId == null ? null : transactionId.prepare(ksName, new ColumnSpecification(ksName, cfName, new ColumnIdentifier("[transactionId]", true), UUIDType.instance));
+            return new Attributes(ts, ttl, tId);
         }
 
         private ColumnSpecification timestampReceiver(String ksName, String cfName)
