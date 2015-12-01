@@ -18,11 +18,16 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
@@ -36,8 +41,8 @@ public class TransactionDataImpl implements TransactionData
     private final TransactionId txId;
     private final long creationNano = System.nanoTime();
 
-    // TODO this will be changed to actual private memtables
-    private Collection<Mutation> mutations = new ArrayList<>();
+    // TODO [MPP] this will be changed to actual private memtables, or maybe not.
+    private final Map<String, Map<DecoratedKey, Mutation>> ksToKeyToMutation = new HashMap<>();
 
     public TransactionDataImpl(TransactionId txId)
     {
@@ -57,11 +62,45 @@ public class TransactionDataImpl implements TransactionData
 
     public void addMutation(Mutation mutation)
     {
-        mutations.add(mutation);
+        final String ksName = mutation.getKeyspaceName();
+
+        final Map<DecoratedKey, Mutation> keyToMutation = ksToKeyToMutation.get(ksName);
+        if (keyToMutation != null)
+        {
+            final Mutation mutationToMergeWith = keyToMutation.get(mutation.key());
+
+            Mutation toPut;
+            if (mutationToMergeWith != null)
+            {
+                // merge and put
+                toPut = Mutation.merge(Arrays.asList(mutationToMergeWith, mutation));
+            }
+            else
+            {
+                toPut = mutation;
+            }
+
+            keyToMutation.put(toPut.key(), toPut);
+        }
+        else
+        {
+            Map<DecoratedKey, Mutation> newKeyToMutationsMap = new HashMap<>();
+            newKeyToMutationsMap.put(mutation.key(), mutation);
+            ksToKeyToMutation.put(ksName, newKeyToMutationsMap);
+        }
     }
 
     public Collection<String> modifiedCfs()
     {
-        return mutations.stream().flatMap(m -> m.getPartitionUpdates().stream().map(x -> x.metadata().cfName)).collect(Collectors.toSet());
+        return getMutations().stream().flatMap(m -> m.getPartitionUpdates().stream().map(x -> x.metadata().cfName)).collect(Collectors.toSet());
+    }
+
+    /**
+     * TODO [MPP] What about timestamps in these mutations? Should I change something? Copy them?
+     */
+    public Collection<Mutation> getMutations()
+    {
+        final List<Mutation> allMutations = ksToKeyToMutation.entrySet().stream().flatMap(e -> e.getValue().entrySet().stream().map(Map.Entry::getValue)).collect(Collectors.toList());
+        return Collections.unmodifiableCollection(allMutations);
     }
 }
