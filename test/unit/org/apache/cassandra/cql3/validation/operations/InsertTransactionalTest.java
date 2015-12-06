@@ -63,7 +63,8 @@ public class InsertTransactionalTest extends CQLTester
         PrivateMemtableStorageLocator.instance.setFakePrivateMemtableStorage(fakeStorage);
 
         // WHEN
-        execute("INSERT INTO %s (k, s, i) VALUES (10, ?, ?) USING TRANSACTION " + txId, "text123", 10);
+        final String expectedTextValue = "text123";
+        execute("INSERT INTO %s (k, s, i) VALUES (10, ?, ?) USING TRANSACTION " + txId, expectedTextValue, 10);
 
         // THEN
 
@@ -84,7 +85,7 @@ public class InsertTransactionalTest extends CQLTester
         final Integer deserialize = Int32Type.instance.getSerializer().deserialize(iCell.value());
         Assert.assertEquals(new Integer(10), deserialize);
         final String actualText = UTF8Type.instance.getSerializer().deserialize(sCell.value());
-        Assert.assertEquals("text123", actualText);
+        Assert.assertEquals(expectedTextValue, actualText);
     }
 
     public static <T> Stream<T> asStream(Iterator<T> sourceIterator) {
