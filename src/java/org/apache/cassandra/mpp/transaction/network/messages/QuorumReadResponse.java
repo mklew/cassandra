@@ -16,35 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.network.messages;
 
-import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Stream;
 
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 
 /**
- * Stores {@link org.apache.cassandra.mpp.transaction.PrivateMemtable} for that transaction.
- *
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 01/11/15
+ * @since 06/12/15
  */
-public interface TransactionData
+public class QuorumReadResponse implements MppResponseMessage
 {
-    TransactionId getTxId();
+    private final UUID transactionId;
 
-    /**
-     * @param ttl in ms
-     * @return
-     */
-    boolean isExpired(int ttl);
+    private final Map<TransactionItem, List<PartitionUpdate>> items;
 
-    void addMutation(Mutation mutation);
+    private final boolean hasMissingItems;
 
-    Collection<String> modifiedCfs();
-
-    Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token);
+    public QuorumReadResponse(UUID transactionId, Map<TransactionItem, List<PartitionUpdate>> items, boolean hasMissingItems)
+    {
+        this.transactionId = transactionId;
+        this.items = items;
+        this.hasMissingItems = hasMissingItems;
+    }
 }

@@ -18,13 +18,19 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
+import org.apache.cassandra.mpp.transaction.NodeContext;
+
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/12/15
  */
-public interface MppRequestMessage<T, R extends MppMessageResponseExpectations<T>> extends MppMessage<T,R>
+public interface MppRequestMessage extends MppMessage
 {
     default boolean isRequest() {
         return true;
     }
+
+
+
+    MppResponseMessage executeInLocalContext(NodeContext context);
 }

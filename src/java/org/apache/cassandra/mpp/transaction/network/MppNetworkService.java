@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.network;
 
 import java.net.InetAddress;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -39,7 +40,9 @@ public interface MppNetworkService
      * @param <R>
      * @return future or {@code null}
      */
-    <T, R extends MppMessageResponseExpectations<T>> CompletableFuture<T> sendMessage(MppMessage<T,R> message, MessageReceipient receipient);
+    <T> CompletableFuture<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> expectations, Collection<MessageReceipient> receipient);
 
-    <T, R extends MppMessageResponseExpectations<T>> void handleIncomingMessage(MppMessage<T, R> incommingMessage, MessageReceipient from);
+    void handleIncomingMessage(long id, MppMessage incommingMessage, MessageReceipient from);
+
+    MessageReceipient createReceipient(InetAddress addr);
 }

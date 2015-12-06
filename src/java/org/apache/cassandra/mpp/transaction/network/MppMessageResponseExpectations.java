@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
-import java.util.List;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -31,7 +31,7 @@ public interface MppMessageResponseExpectations<T>
 
     boolean expectsResponse();
 
-    MppMessageResponseDataHolder<T> createDataHolder(MppMessage message, List<MppNetworkService.MessageReceipient> receipients);
+    MppMessageResponseDataHolder<T> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients);
 
     /**
      * Keeps state of incoming responses until response can be evaluted.

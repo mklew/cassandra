@@ -18,13 +18,23 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -39,6 +49,7 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
         return new TransactionDataImpl(txId);
     }
 
+    // TODO [MPP] I need TTL for private memtables. Something already exists in cassadra, prepared statements maybe?
     public void storeMutation(TransactionId txId, Mutation mutation)
     {
         final TransactionData transactionData = txIdToData.computeIfAbsent(txId, PrivateMemtableStorageImpl::createNewTransactionData);
@@ -55,5 +66,29 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
         {
             return new EmptyTransactionData(txId);
         }
+    }
+
+    public Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems)
+    {
+        final TransactionData transactionData = readTransactionData(transactionId);
+        final Stream<Pair<TransactionItem, List<PartitionUpdate>>> pairStream = transactionItems.stream().map(readTransaction(transactionData));
+
+        return pairStream.collect(Collectors.toMap(p -> p.left, v -> v.right));
+    }
+
+    private static Function<TransactionItem, Pair<TransactionItem, List<PartitionUpdate>>> readTransaction(TransactionData transactionData)
+    {
+        return item -> {
+            final List<PartitionUpdate> partitionUpdates = transactionData.readData(item.getKsName(),
+                                                                                    findColumnFamilyId(item),
+                                                                                    item.getToken())
+                                                                          .collect(Collectors.toList());
+            return Pair.create(item, partitionUpdates);
+        };
+    }
+
+    private static UUID findColumnFamilyId(TransactionItem item)
+    {
+        return Schema.instance.getId(item.getKsName(), item.getCfName());
     }
 }

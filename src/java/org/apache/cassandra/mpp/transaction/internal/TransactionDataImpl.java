@@ -24,11 +24,15 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 
@@ -95,12 +99,35 @@ public class TransactionDataImpl implements TransactionData
         return getMutations().stream().flatMap(m -> m.getPartitionUpdates().stream().map(x -> x.metadata().cfName)).collect(Collectors.toSet());
     }
 
+    public Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
+    {
+        final Map<DecoratedKey, Mutation> keysToMutation = ksToKeyToMutation.get(ksName);
+
+        final Stream<PartitionUpdate> partitionUpdates = keysToMutation.entrySet()
+                                                              .stream()
+                                                              .filter(e -> sameToken(token, e) && modifiesColumnFamily(cfId, e))
+                                                              .map(v->v.getValue().getPartitionUpdate(cfId));
+        return partitionUpdates;
+    }
+
+    private static boolean modifiesColumnFamily(UUID cfId, Map.Entry<DecoratedKey, Mutation> e)
+    {
+        return e.getValue().getPartitionUpdate(cfId) != null;
+    }
+
+    private static boolean sameToken(Token token, Map.Entry<DecoratedKey, Mutation> e)
+    {
+        return e.getKey().getToken().equals(token);
+    }
+
     /**
      * TODO [MPP] What about timestamps in these mutations? Should I change something? Copy them?
      */
     public Collection<Mutation> getMutations()
     {
-        final List<Mutation> allMutations = ksToKeyToMutation.entrySet().stream().flatMap(e -> e.getValue().entrySet().stream().map(Map.Entry::getValue)).collect(Collectors.toList());
+        final List<Mutation> allMutations = ksToKeyToMutation.entrySet()
+                                                             .stream()
+                                                             .flatMap(e -> e.getValue().entrySet().stream().map(Map.Entry::getValue)).collect(Collectors.toList());
         return Collections.unmodifiableCollection(allMutations);
     }
 }

@@ -18,10 +18,16 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
+import java.net.InetAddress;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.apache.cassandra.mpp.transaction.MppMessageExecutor;
+import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -43,43 +49,66 @@ public class MppNetworkServiceImpl implements MppNetworkService
         }
     }
 
+    private AtomicLong idGen = new AtomicLong(1);
+
     private Map<Long, ResponseHolder> idToResponseHolder = new ConcurrentHashMap<>();
 
-    private <T, R extends MppMessageResponseExpectations<T>> void registerOutgoingMessage(MppMessage<T, R> message,
-                                                                                          MppMessageResponseExpectations<T> mppMessageResponseExpectations,
-                                                                                          MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder)
+    private MppMessageExecutor messageExecutor;
+
+    public void setMessageExecutor(MppMessageExecutor messageExecutor)
     {
-        idToResponseHolder.put(message.id(), new ResponseHolder<T>(mppMessageResponseExpectations, dataHolder));
+        this.messageExecutor = messageExecutor;
     }
 
-    private <T, R extends MppMessageResponseExpectations<T>>  void sendMessageOverNetwork(MppMessage<T, R> message, MessageReceipient receipient) {
+    private <T> MppMessageEnvelope registerOutgoingMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations,
+                                                           MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder)
+    {
+        final long id = nextId();
+        idToResponseHolder.put(id, new ResponseHolder<T>(mppMessageResponseExpectations, dataHolder));
+        return new MppMessageEnvelope(id, message);
+    }
+
+    private <T>  void sendMessageOverNetwork(MppMessageEnvelope message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<MessageReceipient> receipient) {
         // TODO [MPP] implementation over netty.
         // TODO [MPP] handle timeout
         // TODO [MPP] Just open channel; send; close channel ?
     }
 
-    public <T, R extends MppMessageResponseExpectations<T>> CompletableFuture<T> sendMessage(MppMessage<T, R> message, MessageReceipient receipient)
+    private long nextId()
     {
-        final MppMessageResponseExpectations<T> mppMessageResponseExpectations = message.responseExpectations();
-        final MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder = mppMessageResponseExpectations.createDataHolder(message, Collections.singletonList(receipient));
-        if (mppMessageResponseExpectations.expectsResponse())
-        {
-            registerOutgoingMessage(message, mppMessageResponseExpectations, dataHolder);
-        }
-        sendMessageOverNetwork(message, receipient);
-        return dataHolder.getFuture();
+        return idGen.getAndIncrement();
     }
 
-    public <T, R extends MppMessageResponseExpectations<T>> void handleIncomingMessage(MppMessage<T, R> incommingMessage, MessageReceipient from)
+    public <T> CompletableFuture<T> sendMessage(MppMessage message,
+                                                MppMessageResponseExpectations<T> mppMessageResponseExpectations,
+                                                Collection<MessageReceipient> receipients)
+    {
+        MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder = null;
+        final MppMessageEnvelope envelope;
+        if (mppMessageResponseExpectations.expectsResponse())
+        {
+            dataHolder = mppMessageResponseExpectations.createDataHolder(message, receipients);
+            envelope = registerOutgoingMessage(message, mppMessageResponseExpectations, dataHolder);
+        }
+        else {
+            envelope = new MppMessageEnvelope(0, message);
+        }
+        sendMessageOverNetwork(envelope, mppMessageResponseExpectations, receipients);
+        return dataHolder != null ? dataHolder.getFuture() : null;
+    }
+
+    public void handleIncomingMessage(long id, MppMessage incommingMessage, MessageReceipient from)
     {
         if (incommingMessage.isRequest())
         {
-            // TODO [MPP] We are supposed to fulfil this request.
+            messageExecutor.executeRequest((MppRequestMessage) incommingMessage).thenAcceptAsync(response -> {
+                final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response);
+                sendMessageOverNetwork(envelope, MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, Collections.singleton(from));
+            });
         }
         else
         {
             // It is response to one of previous messages.
-            final long id = incommingMessage.id();
             final ResponseHolder responseHolder = idToResponseHolder.get(id);
             if(responseHolder == null) {
                 // TODO [MPP] It can be null if timeout has occured and response holder was already removed.
@@ -99,6 +128,23 @@ public class MppNetworkServiceImpl implements MppNetworkService
                 }
             }
         }
+    }
+
+    public MessageReceipient createReceipient(InetAddress addr)
+    {
+        return new MessageReceipient()
+        {
+            public InetAddress host()
+            {
+                return addr;
+            }
+
+            public int port()
+            {
+                // TODO [MPP] get port from netty service.
+                throw new NotImplementedException();
+            }
+        };
     }
 
     private void unregisterResponseHolder(long id)

@@ -16,35 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
-
-import java.util.Collection;
-import java.util.UUID;
-import java.util.stream.Stream;
-
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.dht.Token;
+package org.apache.cassandra.mpp.transaction.network;
 
 /**
- * Stores {@link org.apache.cassandra.mpp.transaction.PrivateMemtable} for that transaction.
- *
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 01/11/15
+ * @since 06/12/15
  */
-public interface TransactionData
+public class MppMessageEnvelope
 {
-    TransactionId getTxId();
+    private final long id;
 
-    /**
-     * @param ttl in ms
-     * @return
-     */
-    boolean isExpired(int ttl);
+    private final MppMessage message;
 
-    void addMutation(Mutation mutation);
-
-    Collection<String> modifiedCfs();
-
-    Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token);
+    public MppMessageEnvelope(long id, MppMessage message)
+    {
+        this.id = id;
+        this.message = message;
+    }
 }

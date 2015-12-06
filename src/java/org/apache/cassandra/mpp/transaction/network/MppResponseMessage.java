@@ -22,7 +22,7 @@ package org.apache.cassandra.mpp.transaction.network;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/12/15
  */
-public interface MppResponseMessage<T, R extends MppMessageResponseExpectations<T>> extends MppMessage<T,R>
+public interface MppResponseMessage extends MppMessage
 {
     @Override
     default boolean isRequest() {

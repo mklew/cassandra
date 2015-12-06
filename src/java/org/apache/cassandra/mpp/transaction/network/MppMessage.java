@@ -18,13 +18,13 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
+import java.io.Serializable;
+
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/12/15
  */
-public interface MppMessage<T, R extends MppMessageResponseExpectations<T>> extends MppIdentifiedMessage
+public interface MppMessage extends Serializable
 {
-    MppMessageResponseExpectations<T> responseExpectations();
-
     boolean isRequest();
 }

@@ -18,7 +18,13 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
  *
@@ -48,4 +54,10 @@ public interface PrivateMemtableStorage
      * @return transactionData for this txId if it exists or empty transaction data.
      */
     TransactionData readTransactionData(TransactionId txId);
+
+    Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems);
+
+    default Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(UUID transactionId, List<TransactionItem> transactionItems) {
+        return readTransactionItems(new TransactionTimeUUID(transactionId), transactionItems);
+    }
 }

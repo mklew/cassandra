@@ -16,19 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction.network;
+package org.apache.cassandra.mpp.transaction;
 
-import java.io.Serializable;
+import java.util.concurrent.CompletableFuture;
+
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/12/15
  */
-public interface MppIdentifiedMessage extends Serializable
+public interface ReadTransactionDataService
 {
     /**
+     * This Node is replica for transaction data. Others have to be queried.
      *
-     * @return id of message, should be unique per node in order to correlate request with responses.
+     * @param transactionState
+     * @return
      */
-    long id();
+    CompletableFuture<TransactionData> readTransactionDataUsingQuorum(TransactionState transactionState);
 }
