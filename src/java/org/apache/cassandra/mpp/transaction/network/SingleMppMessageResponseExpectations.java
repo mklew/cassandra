@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
-import java.util.List;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 import com.google.common.base.Preconditions;
@@ -39,14 +39,11 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
 
         final CompletableFuture<MppResponseMessage> future;
 
-        final Long id;
-
         final MppNetworkService.MessageReceipient receipient;
 
-        private SingleResponseDataHolder(CompletableFuture<MppResponseMessage> future, Long id, MppNetworkService.MessageReceipient receipient)
+        private SingleResponseDataHolder(CompletableFuture<MppResponseMessage> future, MppNetworkService.MessageReceipient receipient)
         {
             this.future = future;
-            this.id = id;
             this.receipient = receipient;
         }
 
@@ -57,17 +54,16 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
     }
 
     @Override
-    public MppMessageResponseDataHolder<MppResponseMessage> createDataHolder(MppMessage message, List<MppNetworkService.MessageReceipient> receipients)
+    public MppMessageResponseDataHolder<MppResponseMessage> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients)
     {
         Preconditions.checkArgument(receipients.size() == 1, "Expected single receipient, but had %s", receipients);
-        return new SingleResponseDataHolder(new CompletableFuture<>(), message.id(), receipients.get(0));
+        return new SingleResponseDataHolder(new CompletableFuture<>(), receipients.iterator().next());
     }
 
     @Override
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
     {
         SingleResponseDataHolder singleResponseDataHolder = (SingleResponseDataHolder) dataHolder;
-        Preconditions.checkArgument(singleResponseDataHolder.id.equals(incomingMessage.id()), "Id does not match. Message id: %s Expected %s", incomingMessage.id(), singleResponseDataHolder.id);
         Preconditions.checkArgument(singleResponseDataHolder.receipient.equals(from));
         dataHolder.getFuture().complete(incomingMessage);
         return true;

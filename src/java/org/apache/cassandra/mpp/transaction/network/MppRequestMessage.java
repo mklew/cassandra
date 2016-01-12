@@ -31,6 +31,5 @@ public interface MppRequestMessage extends MppMessage
     }
 
 
-
     MppResponseMessage executeInLocalContext(NodeContext context);
 }

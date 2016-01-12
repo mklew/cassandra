@@ -26,6 +26,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
 import org.apache.cassandra.mpp.transaction.MppMessageExecutor;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
@@ -35,6 +43,79 @@ import sun.reflect.generics.reflectiveObjects.NotImplementedException;
  */
 public class MppNetworkServiceImpl implements MppNetworkService
 {
+
+    private int listeningPort;
+
+    public void setListeningPort(int listeningPort)
+    {
+        this.listeningPort = listeningPort;
+    }
+
+    public void initialize()
+    {
+        assert listeningPort != 0;
+        assert messageExecutor != null;
+        initializeInternal();
+    }
+
+    public void shutdown()
+    {
+        nettyServer.shutdown();
+    }
+
+    private NettyServer nettyServer;
+
+    private static class NettyServer {
+
+        EventLoopGroup bossGroup;
+        EventLoopGroup workerGroup;
+
+        void start(int listenOnPort) throws InterruptedException
+        {
+            bossGroup = new NioEventLoopGroup(); // (1)
+            workerGroup = new NioEventLoopGroup();
+            ServerBootstrap b = new ServerBootstrap(); // (2)
+            b.group(bossGroup, workerGroup)
+            .channel(NioServerSocketChannel.class) // (3)
+            .childHandler(new ChannelInitializer<SocketChannel>() { // (4)
+                @Override
+                public void initChannel(SocketChannel ch) throws Exception {
+//                        ch.pipeline().addLast(new ObjectEncoder());
+//                        ch.pipeline().addLast(new ObjectDecoder(ClassResolvers.softCachingConcurrentResolver(getClass().getClassLoader())));
+//                        ch.pipeline().addLast(new ObjectLogicHandler());
+                }
+            })
+            .option(ChannelOption.SO_BACKLOG, 128)          // (5)
+            .childOption(ChannelOption.SO_KEEPALIVE, true); // (6)
+
+            // Bind and start to accept incoming connections.
+            ChannelFuture f = b.bind(listenOnPort).sync(); // (7)
+
+            // Wait until the server socket is closed.
+            // In this example, this does not happen, but you can do that to gracefully
+            // shut down your server.
+//                f.channel().closeFuture().sync();
+        }
+
+        void shutdown() {
+            workerGroup.shutdownGracefully();
+            bossGroup.shutdownGracefully();
+        }
+
+    }
+
+    private void initializeInternal()
+    {
+        nettyServer = new NettyServer();
+        try
+        {
+            nettyServer.start(listeningPort);
+        }
+        catch (InterruptedException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
 
     private static class ResponseHolder<T>
     {
@@ -54,6 +135,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
     private Map<Long, ResponseHolder> idToResponseHolder = new ConcurrentHashMap<>();
 
     private MppMessageExecutor messageExecutor;
+
 
     public void setMessageExecutor(MppMessageExecutor messageExecutor)
     {

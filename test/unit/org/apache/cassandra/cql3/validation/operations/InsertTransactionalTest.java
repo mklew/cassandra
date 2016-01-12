@@ -21,6 +21,7 @@ package org.apache.cassandra.cql3.validation.operations;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -41,6 +42,7 @@ import org.apache.cassandra.mpp.transaction.PrivateMemtableStorageLocator;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.utils.UUIDGen;
 import org.joda.time.DateTime;
 
@@ -122,6 +124,11 @@ public class InsertTransactionalTest extends CQLTester
         public TransactionData readTransactionData(TransactionId txId)
         {
             throw new IllegalStateException("Does not expect read");
+        }
+
+        public Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems)
+        {
+            return null;
         }
     }
 

@@ -20,8 +20,12 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 
@@ -57,5 +61,10 @@ public class EmptyTransactionData implements TransactionData
     public Collection<String> modifiedCfs()
     {
         return Collections.emptyList();
+    }
+
+    public Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
+    {
+        return Stream.empty();
     }
 }

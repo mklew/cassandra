@@ -37,7 +37,6 @@ public interface MppNetworkService
     /**
      *
      * @param message to be sent
-     * @param <R>
      * @return future or {@code null}
      */
     <T> CompletableFuture<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> expectations, Collection<MessageReceipient> receipient);
