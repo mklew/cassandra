@@ -80,21 +80,22 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         }
     }
 
-    public static class MergedTransactionDataAfterQuorum {
+    public static class TransactionItemToUpdates
+    {
         private final Map<TransactionItem, List<PartitionUpdate>> txItemToUpdates;
 
-        private MergedTransactionDataAfterQuorum(Map<TransactionItem, List<PartitionUpdate>> txItemToUpdates)
+        private TransactionItemToUpdates(Map<TransactionItem, List<PartitionUpdate>> txItemToUpdates)
         {
             this.txItemToUpdates = txItemToUpdates;
         }
 
-        public MergedTransactionDataAfterQuorum addMoreItems(MergedTransactionDataAfterQuorum m) {
+        public TransactionItemToUpdates merge(TransactionItemToUpdates m) {
             Map<TransactionItem, List<PartitionUpdate>> mergedMap = new HashMap<>(txItemToUpdates);
             m.txItemToUpdates.entrySet().forEach(entry -> mergedMap.merge(entry.getKey(), entry.getValue(), (v1, v2) -> {
                 final List<PartitionUpdate> collect = Stream.concat(v1.stream(), v2.stream()).collect(Collectors.toList());
                 return collect;
             }));
-            return new MergedTransactionDataAfterQuorum(mergedMap);
+            return new TransactionItemToUpdates(mergedMap);
         }
 
     }
@@ -136,13 +137,13 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         final CompletableFuture<Collection<MppResponseMessage>> futureOfAllResults = collectionOfFuturesToFutureOfCollection(futures);
 
         return futureOfAllResults.thenApplyAsync(allResults -> {
-            MergedTransactionDataAfterQuorum m = new MergedTransactionDataAfterQuorum(new HashMap<>());
-            final MergedTransactionDataAfterQuorum reduced = allResults.stream().map(x -> (QuorumReadResponse) x)
-                                                                      .map(x -> new MergedTransactionDataAfterQuorum(x.getItems()))
-                                                                      .reduce(m, MergedTransactionDataAfterQuorum::addMoreItems);
+            TransactionItemToUpdates m = new TransactionItemToUpdates(new HashMap<>());
+            final Map<TransactionItem, List<PartitionUpdate>> mergedTxItemToUpdates = allResults.stream().map(x -> (QuorumReadResponse) x)
+                                                                                          .map(x -> new TransactionItemToUpdates(x.getItems()))
+                                                                                          .reduce(m, TransactionItemToUpdates::merge).txItemToUpdates;
 
             final Stream<Pair<TransactionItem, PartitionUpdate>> pairStream = ownedByThisNode.map(x -> x.txItem).map(txItem -> {
-                final List<PartitionUpdate> partitionUpdates = reduced.txItemToUpdates.get(txItem);
+                final List<PartitionUpdate> partitionUpdates = mergedTxItemToUpdates.get(txItem);
                 // TODO not sure if this is correct way to go because I am not sure whether timestamps are correct
                 final PartitionUpdate mergedPartitionUpdate = PartitionUpdate.merge(partitionUpdates);
                 return Pair.create(txItem, mergedPartitionUpdate);
