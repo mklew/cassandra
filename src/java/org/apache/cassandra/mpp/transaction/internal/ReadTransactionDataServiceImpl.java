@@ -22,6 +22,7 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -35,18 +36,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
-import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.mpp.transaction.network.QuorumMppMessageResponseExpectations;
 import org.apache.cassandra.mpp.transaction.network.messages.QuorumReadRequest;
+import org.apache.cassandra.mpp.transaction.network.messages.QuorumReadResponse;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import sun.reflect.generics.reflectiveObjects.NotImplementedException;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Service that reads private memtables of given transaction for this node.
@@ -78,15 +80,34 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         }
     }
 
+    public static class MergedTransactionDataAfterQuorum {
+        private final Map<TransactionItem, List<PartitionUpdate>> txItemToUpdates;
+
+        private MergedTransactionDataAfterQuorum(Map<TransactionItem, List<PartitionUpdate>> txItemToUpdates)
+        {
+            this.txItemToUpdates = txItemToUpdates;
+        }
+
+        public MergedTransactionDataAfterQuorum addMoreItems(MergedTransactionDataAfterQuorum m) {
+            Map<TransactionItem, List<PartitionUpdate>> mergedMap = new HashMap<>(txItemToUpdates);
+            m.txItemToUpdates.entrySet().forEach(entry -> mergedMap.merge(entry.getKey(), entry.getValue(), (v1, v2) -> {
+                final List<PartitionUpdate> collect = Stream.concat(v1.stream(), v2.stream()).collect(Collectors.toList());
+                return collect;
+            }));
+            return new MergedTransactionDataAfterQuorum(mergedMap);
+        }
+
+    }
+
 
     /**
      * Invoked when data has to be read from this node and it's replicas for sake of consistency.
      *
-     * Then received {@link TransactionData} is guaranteed to be consistent.
+     * Then received {@link TransactionDataPart} is guaranteed to be consistent.
      * @param transactionState
      * @return
      */
-    public CompletableFuture<TransactionData> readTransactionDataUsingQuorum(TransactionState transactionState) {
+    public CompletableFuture<TransactionDataPart> readTransactionDataUsingQuorum(TransactionState transactionState) {
 
         final Stream<ItemWithAddresses> itemsWithAddresses = mapTransactionItemsToTheirEndpoints(transactionState);
         // Each item belongs to this node plus some other nodes.
@@ -112,22 +133,26 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
             });
         }).collect(Collectors.toList());
 
-        CompletableFuture<Collection<MppResponseMessage>> all = new CompletableFuture<>();
-        all.complete(Collections.emptyList());
+        final CompletableFuture<Collection<MppResponseMessage>> futureOfAllResults = collectionOfFuturesToFutureOfCollection(futures);
 
-        final CompletableFuture<Collection<MppResponseMessage>> futureOfAllResults = futures.stream().reduce(all, (f1, f2) -> f1.thenCombineAsync(f2, (r1, r2) -> {
-            final Collection<MppResponseMessage> objects = new ArrayList<>();
-            objects.addAll(r1);
-            objects.addAll(r2);
-            return objects;
-        }));
+        return futureOfAllResults.thenApplyAsync(allResults -> {
+            MergedTransactionDataAfterQuorum m = new MergedTransactionDataAfterQuorum(new HashMap<>());
+            final MergedTransactionDataAfterQuorum reduced = allResults.stream().map(x -> (QuorumReadResponse) x)
+                                                                      .map(x -> new MergedTransactionDataAfterQuorum(x.getItems()))
+                                                                      .reduce(m, MergedTransactionDataAfterQuorum::addMoreItems);
 
+            final Stream<Pair<TransactionItem, PartitionUpdate>> pairStream = ownedByThisNode.map(x -> x.txItem).map(txItem -> {
+                final List<PartitionUpdate> partitionUpdates = reduced.txItemToUpdates.get(txItem);
+                // TODO not sure if this is correct way to go because I am not sure whether timestamps are correct
+                final PartitionUpdate mergedPartitionUpdate = PartitionUpdate.merge(partitionUpdates);
+                return Pair.create(txItem, mergedPartitionUpdate);
+            });
 
-        futureOfAllResults.thenApplyAsync(allResults -> {
-            // TODO merge everything together.
+            final Map<TransactionItem, PartitionUpdate> ownedData = pairStream.collect(Collectors.toMap(p -> p.left, p -> p.right));
+
+            return (TransactionDataPart) () -> ownedData;
         });
 
-//        groupedByKeyspace.entrySet().stream().map(e -> )
         /**
          * 1. Filter transaction items to only those owned by this replica
          * 2. Read this and other replicas.
@@ -136,10 +161,19 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
          *      Group by keyspace and by key, then add mutations from all responses (can just create new TransactionData and then add all)
          * 5. Return that merged TransactionData which should be valid to be applied locally.
          */
+    }
 
+    private static CompletableFuture<Collection<MppResponseMessage>> collectionOfFuturesToFutureOfCollection(List<CompletableFuture<Collection<MppResponseMessage>>> futures)
+    {
+        CompletableFuture<Collection<MppResponseMessage>> allZeroArg = new CompletableFuture<>();
+        allZeroArg.complete(Collections.emptyList());
 
-        // TODO [MPP] Implement it.
-        throw new NotImplementedException();
+        return futures.stream().reduce(allZeroArg, (f1, f2) -> f1.thenCombineAsync(f2, (r1, r2) -> {
+            final Collection<MppResponseMessage> responses = new ArrayList<>();
+            responses.addAll(r1);
+            responses.addAll(r2);
+            return responses;
+        }));
     }
 
     private List<MppNetworkService.MessageReceipient> getReceipients(Collection<InetAddress> receipientsAddresses)

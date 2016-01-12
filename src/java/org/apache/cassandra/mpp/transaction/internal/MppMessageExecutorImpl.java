@@ -41,8 +41,10 @@ public class MppMessageExecutorImpl implements MppMessageExecutor
 
     public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
     {
-        requestMessage.executeInLocalContext(createNodeContext());
-        return null;
+        final CompletableFuture<MppResponseMessage> f = new CompletableFuture<>();
+        final MppResponseMessage mppResponseMessage = requestMessage.executeInLocalContext(createNodeContext());
+        f.complete(mppResponseMessage);
+        return f;
     }
 
     private NodeContext createNodeContext()

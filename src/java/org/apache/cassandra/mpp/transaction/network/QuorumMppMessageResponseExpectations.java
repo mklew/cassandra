@@ -21,7 +21,6 @@ package org.apache.cassandra.mpp.transaction.network;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -45,16 +44,13 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
 
         private final CompletableFuture<Collection<MppResponseMessage>> future;
 
-        private final Long id;
-
         private final Map<MppNetworkService.MessageReceipient, MppResponseMessage> messagesReceivedSoFar;
 
         private final Set<MppNetworkService.MessageReceipient> expectedReceipients;
 
-        private QuorumDataHolder(CompletableFuture<Collection<MppResponseMessage>> future, Long id, Map<MppNetworkService.MessageReceipient, MppResponseMessage> messagesReceivedSoFar, Set<MppNetworkService.MessageReceipient> expectedReceipients)
+        private QuorumDataHolder(CompletableFuture<Collection<MppResponseMessage>> future, Map<MppNetworkService.MessageReceipient, MppResponseMessage> messagesReceivedSoFar, Set<MppNetworkService.MessageReceipient> expectedReceipients)
         {
             this.future = future;
-            this.id = id;
             this.messagesReceivedSoFar = messagesReceivedSoFar;
             this.expectedReceipients = expectedReceipients;
         }
@@ -77,16 +73,16 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
         return false;
     }
 
-    public MppMessageResponseDataHolder<Collection<MppResponseMessage>> createDataHolder(MppMessage message, List<MppNetworkService.MessageReceipient> receipients)
+    public MppMessageResponseDataHolder<Collection<MppResponseMessage>> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients)
     {
         CompletableFuture<Collection<MppResponseMessage>> f = new CompletableFuture<>();
-        return new QuorumDataHolder(f, message.id(), new HashMap<>((receipients.size() * 3 / 4 ) + 1), new HashSet<>(receipients));
+        return new QuorumDataHolder(f, new HashMap<>((receipients.size() * 3 / 4 ) + 1), new HashSet<>(receipients));
     }
 
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
     {
         QuorumDataHolder q = (QuorumDataHolder) dataHolder;
-        Preconditions.checkArgument(q.id.equals(incomingMessage.id()), "Id does not match. Message id: %s Expected %s", incomingMessage.id(), q.id);
+//        Preconditions.checkArgument(q.id.equals(incomingMessage.id()), "Id does not match. Message id: %s Expected %s", incomingMessage.id(), q.id);
         Preconditions.checkArgument(q.expectedReceipients.contains(from), "Recevied message from unexpected receipient %s. Expected one of %s", from, q.expectedReceipients);
         q.messagesReceivedSoFar.put(from, (MppResponseMessage) incomingMessage);
         if(isQuorum(q)) {

@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
-import java.util.List;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -43,7 +43,7 @@ public class NoMppMessageResponseExpectations implements MppMessageResponseExpec
         }
     }
 
-    public MppMessageResponseDataHolder<Void> createDataHolder(MppMessage message, List<MppNetworkService.MessageReceipient> receipients)
+    public MppMessageResponseDataHolder<Void> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients)
     {
         return new NoMessageResponseDataHolder();
     }

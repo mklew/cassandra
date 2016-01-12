@@ -18,28 +18,17 @@
 
 package org.apache.cassandra.mpp.transaction;
 
-import java.util.Collection;
+import java.util.UUID;
+import java.util.stream.Stream;
 
-import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dht.Token;
 
 /**
- * Stores {@link org.apache.cassandra.mpp.transaction.PrivateMemtable} for that transaction.
- *
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 01/11/15
+ * @since 12/01/16
  */
-public interface TransactionData extends ReadableTransactionData
+public interface ReadableTransactionData
 {
-    TransactionId getTxId();
-
-    /**
-     * @param ttl in ms
-     * @return
-     */
-    boolean isExpired(int ttl);
-
-    void addMutation(Mutation mutation);
-
-    Collection<String> modifiedCfs();
-
+    Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token);
 }

@@ -18,8 +18,11 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 
 /**
@@ -28,11 +31,16 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
  */
 public interface ReadTransactionDataService
 {
+
+    interface TransactionDataPart {
+        Map<TransactionItem, PartitionUpdate> getPartitionUpdates();
+    }
+
     /**
      * This Node is replica for transaction data. Others have to be queried.
      *
      * @param transactionState
      * @return
      */
-    CompletableFuture<TransactionData> readTransactionDataUsingQuorum(TransactionState transactionState);
+    CompletableFuture<TransactionDataPart> readTransactionDataUsingQuorum(TransactionState transactionState);
 }

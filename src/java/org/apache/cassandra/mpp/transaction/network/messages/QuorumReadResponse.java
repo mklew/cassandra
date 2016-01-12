@@ -44,4 +44,9 @@ public class QuorumReadResponse implements MppResponseMessage
         this.items = items;
         this.hasMissingItems = hasMissingItems;
     }
+
+    public Map<TransactionItem, List<PartitionUpdate>> getItems()
+    {
+        return items;
+    }
 }

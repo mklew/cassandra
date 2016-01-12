@@ -60,7 +60,7 @@ public class QuorumReadRequest implements MppRequestMessage
     {
         final Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates = context.getStorage().readTransactionItems(transactionId, transactionItems);
 
-        final int numberOfMissingItems = numberOfMissingItems(transactionItemToPartitionUpdates);
+        final long numberOfMissingItems = numberOfMissingItems(transactionItemToPartitionUpdates);
         if(numberOfMissingItems != 0) {
             final Set<TransactionItem> missingItems = getMissingItems(transactionItemToPartitionUpdates);
             logger.warn("This node has {} missing transaction items {} for transaction id {}", numberOfMissingItems, missingItems, transactionId);
@@ -69,9 +69,9 @@ public class QuorumReadRequest implements MppRequestMessage
         return new QuorumReadResponse(transactionId, transactionItemToPartitionUpdates, numberOfMissingItems != 0);
     }
 
-    private int numberOfMissingItems(Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates)
+    private long numberOfMissingItems(Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates)
     {
-        return transactionItemToPartitionUpdates.keySet().size() - transactionItems.size();
+        return transactionItemToPartitionUpdates.entrySet().stream().filter(x->!x.getValue().isEmpty()).count() - transactionItems.size();
     }
 
     private Set<TransactionItem> getMissingItems(Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates)

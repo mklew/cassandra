@@ -59,6 +59,6 @@ public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
     @Override
     protected boolean waitingFor(InetAddress from)
     {
-        return consistencyLevel.isLocal(from);
+        return ConsistencyLevel.isLocal(from);
     }
 }
