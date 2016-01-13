@@ -44,4 +44,10 @@ public interface MppNetworkService
     void handleIncomingMessage(long id, MppMessage incommingMessage, MessageReceipient from);
 
     MessageReceipient createReceipient(InetAddress addr);
+
+    MessageReceipient createReceipient(InetAddress addr, int port);
+
+    void initialize();
+
+    void shutdown();
 }

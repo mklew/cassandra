@@ -20,10 +20,14 @@ package org.apache.cassandra.mpp.transaction.network;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import io.netty.bootstrap.Bootstrap;
@@ -35,6 +39,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.apache.cassandra.mpp.transaction.MppMessageExecutor;
+import org.apache.cassandra.mpp.transaction.NodeContext;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -78,6 +83,85 @@ public class MppNetworkServiceImplTest
         });
 
         ns1.shutdown();
+    }
+
+    private static class DummyDiscardMessage implements MppRequestMessage
+    {
+        private static final long serialVersionUID = 1L;
+
+        public boolean isRequest()
+        {
+            return false;
+        }
+
+        public MppResponseMessage executeInLocalContext(NodeContext context)
+        {
+            return null;
+        }
+    }
+
+    private static class ExpectingMessageExecutor implements MppMessageExecutor {
+
+        List<MppRequestMessage> receivedMessages = new ArrayList<>();
+
+        Consumer<MppRequestMessage> callback;
+
+        CompletableFuture<Object> awaitMessageFuture = new CompletableFuture<>();
+
+        public ExpectingMessageExecutor(Consumer<MppRequestMessage> callback)
+        {
+            this.callback = callback;
+        }
+
+        public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
+        {
+            receivedMessages.add(requestMessage);
+            callback.accept(requestMessage);
+            awaitMessageFuture.complete(requestMessage);
+            final CompletableFuture<MppResponseMessage> f = new CompletableFuture<>();
+            f.complete(null);
+            return f; // it never completes
+        }
+
+        public CompletableFuture<Object> getAwaitMessageFuture()
+        {
+            return awaitMessageFuture;
+        }
+
+        boolean receivedAnything() {
+            return !receivedMessages.isEmpty();
+        }
+    }
+
+    @Test
+    public void testShouldSendDummyMessageThatGetsHandledWithoutResponse() throws UnknownHostException, InterruptedException
+    {
+        CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+        final MppNetworkServiceImpl ns1 = setupNs1();
+        final ExpectingMessageExecutor ns1Executor = new ExpectingMessageExecutor(x -> {
+        });
+        ns1.setMessageExecutor(ns1Executor);
+        final ExpectingMessageExecutor ns2Executor = new ExpectingMessageExecutor(request -> {
+            Assert.assertEquals("Message should be of type DummyDiscardMessage", DummyDiscardMessage.class, request.getClass());
+            isTestDone.complete(null);
+        });
+        final MppNetworkService ns2 = setupNs2(ns2Executor);
+        ns1.initialize();
+        ns2.initialize();
+
+        final DummyDiscardMessage dummyDiscardMessage = new DummyDiscardMessage();
+        ns1.sendMessage(dummyDiscardMessage, NoMppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE,
+                        Arrays.asList(ns1.createReceipient(InetAddress.getLocalHost(), ns2Port)));
+
+        isTestDone.thenAccept(x -> {
+            Assert.assertTrue("NS2 has received something", ns2Executor.receivedAnything());
+            Assert.assertFalse("NS1 has received nothing", ns2Executor.receivedAnything());
+        });
+    }
+
+    @Test
+    public void testShouldSendDummyRequestMessageAndThenReceiveSingleResponse() throws Exception {
+
     }
 
     private class OpenConnectionClient {
@@ -124,11 +208,15 @@ public class MppNetworkServiceImplTest
 
     private MppNetworkServiceImpl setupNs2()
     {
-        final MppNetworkServiceImpl ns2 = new MppNetworkServiceImpl();
-
-        ns2.setListeningPort(ns2Port);
         MppMessageExecutor ns2Executor = new TestMessageExecutor();
-        ns2.setMessageExecutor(ns2Executor);
+        return setupNs2(ns2Executor);
+    }
+
+    private MppNetworkServiceImpl setupNs2(MppMessageExecutor messageExecutor)
+    {
+        final MppNetworkServiceImpl ns2 = new MppNetworkServiceImpl();
+        ns2.setListeningPort(ns2Port);
+        ns2.setMessageExecutor(messageExecutor);
         return ns2;
     }
 }

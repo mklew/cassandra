@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.network;
 
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
@@ -26,14 +27,25 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.serialization.ClassResolvers;
+import io.netty.handler.codec.serialization.ObjectDecoder;
+import io.netty.handler.codec.serialization.ObjectEncoder;
 import org.apache.cassandra.mpp.transaction.MppMessageExecutor;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
@@ -60,29 +72,145 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     public void shutdown()
     {
-        nettyServer.shutdown();
+        nettyEventLoopGroupsHolder.workerGroup.shutdownGracefully();
+        nettyEventLoopGroupsHolder.bossGroup.shutdownGracefully();
     }
 
+    private NettyEventLoopGroupsHolder nettyEventLoopGroupsHolder;
+
+    private NettyClient nettyClient;
+
     private NettyServer nettyServer;
+
+    private static class NettyEventLoopGroupsHolder
+    {
+        private EventLoopGroup bossGroup;
+        private EventLoopGroup workerGroup;
+
+        public EventLoopGroup getBossGroup()
+        {
+            return bossGroup;
+        }
+
+        public void setBossGroup(EventLoopGroup bossGroup)
+        {
+            this.bossGroup = bossGroup;
+        }
+
+        public EventLoopGroup getWorkerGroup()
+        {
+            return workerGroup;
+        }
+
+        public void setWorkerGroup(EventLoopGroup workerGroup)
+        {
+            this.workerGroup = workerGroup;
+        }
+    }
+
+    private static class NettyClientHandler extends ChannelOutboundHandlerAdapter
+    {
+        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception
+        {
+            super.write(ctx, msg, promise);
+        }
+
+        public void read(ChannelHandlerContext ctx) throws Exception
+        {
+            super.read(ctx);
+        }
+    }
+
+    private static class NettyClient {
+
+        private final EventLoopGroup workerGroup;
+
+        private Bootstrap b;
+
+        private NettyClient(EventLoopGroup workerGroup)
+        {
+            this.workerGroup = workerGroup;
+        }
+
+        void init() {
+            b = new Bootstrap(); // (1)
+            b.group(workerGroup); // (2)
+            b.channel(NioSocketChannel.class); // (3)
+            b.option(ChannelOption.SO_KEEPALIVE, true); // (4)
+            b.handler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                public void initChannel(SocketChannel ch) throws Exception {
+                    ch.pipeline().addLast(new ObjectEncoder());
+                    ch.pipeline().addLast(new ObjectDecoder(ClassResolvers.softCachingConcurrentResolver(getClass().getClassLoader())));
+                    ch.pipeline().addLast(new NettyClientHandler());
+                }
+            });
+
+                // Start the client.
+//                final ChannelFuture connect = b.connect(InetAddress.getLocalHost(), portToConnect);
+//                final boolean await = connect.await(waitMillis, TimeUnit.MILLISECONDS);// (5)
+//                doWithChannel.accept(connect);
+//                System.out.println("isSuccess" + connect.isSuccess());
+//                connect.channel().closeFuture().sync();
+
+//            } finally {
+//                workerGroup.shutdownGracefully();
+//            }
+        }
+
+        ChannelFuture connect(InetAddress host, int port) {
+            return b.connect(host, port);
+        }
+    }
+
+    private interface ChannelMessageCallback {
+        void messageReceived(MppMessageEnvelope message, InetSocketAddress from);
+    }
+
+    private static class NettyServerChannelHandler extends ChannelInboundHandlerAdapter {
+
+        final ChannelMessageCallback mppMessageCallback;
+
+        private NettyServerChannelHandler(ChannelMessageCallback mppMessageCallback)
+        {
+            this.mppMessageCallback = mppMessageCallback;
+        }
+
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception
+        {
+            System.out.println("NettyServerChannelHandler received message: " + msg); // TODO remove that
+            InetSocketAddress socketAddress = (InetSocketAddress) ctx.channel().remoteAddress();
+            mppMessageCallback.messageReceived((MppMessageEnvelope)msg, socketAddress);
+        }
+
+        public void channelActive(ChannelHandlerContext ctx) throws Exception
+        {
+            System.out.println("NettyServerChannelHandler is active");
+        }
+    }
 
     private static class NettyServer {
 
         EventLoopGroup bossGroup;
         EventLoopGroup workerGroup;
 
-        void start(int listenOnPort) throws InterruptedException
+        public NettyServer(EventLoopGroup bossGroup, EventLoopGroup workerGroup)
         {
-            bossGroup = new NioEventLoopGroup(); // (1)
-            workerGroup = new NioEventLoopGroup();
+            this.bossGroup = bossGroup;
+            this.workerGroup = workerGroup;
+        }
+
+        void start(int listenOnPort, ChannelMessageCallback mppMessageCallback) throws InterruptedException
+        {
             ServerBootstrap b = new ServerBootstrap(); // (2)
             b.group(bossGroup, workerGroup)
             .channel(NioServerSocketChannel.class) // (3)
             .childHandler(new ChannelInitializer<SocketChannel>() { // (4)
                 @Override
                 public void initChannel(SocketChannel ch) throws Exception {
-//                        ch.pipeline().addLast(new ObjectEncoder());
-//                        ch.pipeline().addLast(new ObjectDecoder(ClassResolvers.softCachingConcurrentResolver(getClass().getClassLoader())));
-//                        ch.pipeline().addLast(new ObjectLogicHandler());
+                        ch.pipeline().addLast(new ObjectEncoder());
+                        ch.pipeline().addLast(new ObjectDecoder(ClassResolvers.softCachingConcurrentResolver(getClass().getClassLoader())));
+                        ch.pipeline().addLast(new NettyServerChannelHandler(mppMessageCallback));
                 }
             })
             .option(ChannelOption.SO_BACKLOG, 128)          // (5)
@@ -97,24 +225,27 @@ public class MppNetworkServiceImpl implements MppNetworkService
 //                f.channel().closeFuture().sync();
         }
 
-        void shutdown() {
-            workerGroup.shutdownGracefully();
-            bossGroup.shutdownGracefully();
-        }
-
     }
 
     private void initializeInternal()
     {
-        nettyServer = new NettyServer();
+        nettyEventLoopGroupsHolder = new NettyEventLoopGroupsHolder();
+
+        nettyEventLoopGroupsHolder.setBossGroup(new NioEventLoopGroup());
+        nettyEventLoopGroupsHolder.setWorkerGroup(new NioEventLoopGroup());
+
+        nettyServer = new NettyServer(nettyEventLoopGroupsHolder.bossGroup, nettyEventLoopGroupsHolder.workerGroup);
         try
         {
-            nettyServer.start(listeningPort);
+            nettyServer.start(listeningPort, (message, from) -> handleIncomingMessage(message.getId(), message.getMessage(), createReceipient(from.getAddress(), from.getPort())));
         }
         catch (InterruptedException e)
         {
             throw new RuntimeException(e);
         }
+
+        nettyClient = new NettyClient(nettyEventLoopGroupsHolder.getWorkerGroup());
+        nettyClient.init();
     }
 
     private static class ResponseHolder<T>
@@ -150,10 +281,22 @@ public class MppNetworkServiceImpl implements MppNetworkService
         return new MppMessageEnvelope(id, message);
     }
 
-    private <T>  void sendMessageOverNetwork(MppMessageEnvelope message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<MessageReceipient> receipient) {
-        // TODO [MPP] implementation over netty.
-        // TODO [MPP] handle timeout
-        // TODO [MPP] Just open channel; send; close channel ?
+    private <T> void sendMessageOverNetwork(MppMessageEnvelope message, Collection<MessageReceipient> receipient) {
+        receipient.forEach(r -> {
+            final ChannelFuture channelFuture = nettyClient.connect(r.host(), r.port());
+            try
+            {
+                System.out.println("Writing and flushing message" + message);
+                final Channel channel = channelFuture.sync().channel();
+                final ChannelFuture write = channel.writeAndFlush(message);
+                final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
+                channel.closeFuture().sync();
+            }
+            catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     private long nextId()
@@ -175,17 +318,18 @@ public class MppNetworkServiceImpl implements MppNetworkService
         else {
             envelope = new MppMessageEnvelope(0, message);
         }
-        sendMessageOverNetwork(envelope, mppMessageResponseExpectations, receipients);
+        sendMessageOverNetwork(envelope, receipients);
         return dataHolder != null ? dataHolder.getFuture() : null;
     }
 
     public void handleIncomingMessage(long id, MppMessage incommingMessage, MessageReceipient from)
     {
-        if (incommingMessage.isRequest())
+        System.out.println("handleIncomingMessage id " + id +  ", message" + incommingMessage + ", from " + from);
+        if (incommingMessage.isRequest() || true)
         {
             messageExecutor.executeRequest((MppRequestMessage) incommingMessage).thenAcceptAsync(response -> {
                 final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response);
-                sendMessageOverNetwork(envelope, MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, Collections.singleton(from));
+                sendMessageOverNetwork(envelope, Collections.singleton(from));
             });
         }
         else
@@ -214,6 +358,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     public MessageReceipient createReceipient(InetAddress addr)
     {
+        // TODO [MPP] get port from netty service.
+        throw new NotImplementedException();
+//        return createReceipient(addr, 0);
+
+    }
+
+    public MessageReceipient createReceipient(InetAddress addr, int port)
+    {
         return new MessageReceipient()
         {
             public InetAddress host()
@@ -223,8 +375,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
             public int port()
             {
-                // TODO [MPP] get port from netty service.
-                throw new NotImplementedException();
+                return port;
             }
         };
     }

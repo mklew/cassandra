@@ -18,11 +18,13 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
+import java.io.Serializable;
+
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/12/15
  */
-public class MppMessageEnvelope
+public class MppMessageEnvelope implements Serializable
 {
     private final long id;
 
@@ -32,5 +34,15 @@ public class MppMessageEnvelope
     {
         this.id = id;
         this.message = message;
+    }
+
+    public long getId()
+    {
+        return id;
+    }
+
+    public MppMessage getMessage()
+    {
+        return message;
     }
 }
