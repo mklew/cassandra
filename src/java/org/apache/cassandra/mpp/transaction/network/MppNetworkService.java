@@ -41,7 +41,7 @@ public interface MppNetworkService
      */
     <T> CompletableFuture<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> expectations, Collection<MessageReceipient> receipient);
 
-    void handleIncomingMessage(long id, MppMessage incommingMessage, MessageReceipient from);
+    void handleIncomingMessage(MppMessageEnvelope envelope, MessageReceipient from);
 
     MessageReceipient createReceipient(InetAddress addr);
 

@@ -121,6 +121,42 @@ public class MppNetworkServiceImpl implements MppNetworkService
         }
     }
 
+    private static class NettyClientReadHandler extends ChannelInboundHandlerAdapter {
+
+        final ChannelMessageCallback mppMessageCallback;
+
+        private NettyClientReadHandler(ChannelMessageCallback mppMessageCallback)
+        {
+            this.mppMessageCallback = mppMessageCallback;
+        }
+
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception
+        {
+            System.out.println("NettyClientReadHandler received message: " + msg);
+            InetSocketAddress socketAddress = (InetSocketAddress) ctx.channel().remoteAddress();
+            // TODO this allows to use like mppMessageCallback.responseReceived
+            mppMessageCallback.messageReceived((MppMessageEnvelope)msg, socketAddress);
+            ctx.close();
+        }
+
+        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception
+        {
+            // 2
+            super.channelUnregistered(ctx);
+        }
+
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception
+        {
+            // 1
+            super.channelInactive(ctx);
+        }
+
+        public void channelReadComplete(ChannelHandlerContext ctx) throws Exception
+        {
+            super.channelReadComplete(ctx);
+        }
+    }
+
     private static class NettyClient {
 
         private final EventLoopGroup workerGroup;
@@ -237,7 +273,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         nettyServer = new NettyServer(nettyEventLoopGroupsHolder.bossGroup, nettyEventLoopGroupsHolder.workerGroup);
         try
         {
-            nettyServer.start(listeningPort, (message, from) -> handleIncomingMessage(message.getId(), message.getMessage(), createReceipient(from.getAddress(), from.getPort())));
+            nettyServer.start(listeningPort, (message, from) -> handleIncomingMessage(message, createReceipient(from.getAddress(), from.getPort())));
         }
         catch (InterruptedException e)
         {
@@ -247,6 +283,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         nettyClient = new NettyClient(nettyEventLoopGroupsHolder.getWorkerGroup());
         nettyClient.init();
     }
+
 
     private static class ResponseHolder<T>
     {
@@ -278,7 +315,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
     {
         final long id = nextId();
         idToResponseHolder.put(id, new ResponseHolder<T>(mppMessageResponseExpectations, dataHolder));
-        return new MppMessageEnvelope(id, message);
+        return new MppMessageEnvelope(id, message, listeningPort);
     }
 
     private <T> void sendMessageOverNetwork(MppMessageEnvelope message, Collection<MessageReceipient> receipient) {
@@ -288,9 +325,18 @@ public class MppNetworkServiceImpl implements MppNetworkService
             {
                 System.out.println("Writing and flushing message" + message);
                 final Channel channel = channelFuture.sync().channel();
+//                if(message.getMessage().isRequest()) {
+//                    channel.pipeline().addLast(new NettyClientReadHandler((response, from) -> {
+//                        System.out.println("Handler got response " + response);
+//                        handleIncomingMessage(response.getId(), response.getMessage(), createReceipient(from.getAddress(), from.getPort()));
+//                    }));
+//                }
                 final ChannelFuture write = channel.writeAndFlush(message);
-                final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
+//                if(!message.getMessage().isRequest()) {
+                    final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
+//                }
                 channel.closeFuture().sync();
+
             }
             catch (InterruptedException e)
             {
@@ -316,20 +362,23 @@ public class MppNetworkServiceImpl implements MppNetworkService
             envelope = registerOutgoingMessage(message, mppMessageResponseExpectations, dataHolder);
         }
         else {
-            envelope = new MppMessageEnvelope(0, message);
+            envelope = new MppMessageEnvelope(0, message, listeningPort);
         }
         sendMessageOverNetwork(envelope, receipients);
         return dataHolder != null ? dataHolder.getFuture() : null;
     }
 
-    public void handleIncomingMessage(long id, MppMessage incommingMessage, MessageReceipient from)
+    public void handleIncomingMessage(MppMessageEnvelope inEnv, MessageReceipient from)
     {
+        long id = inEnv.getId();
+        MppMessage incommingMessage = inEnv.getMessage();
         System.out.println("handleIncomingMessage id " + id +  ", message" + incommingMessage + ", from " + from);
-        if (incommingMessage.isRequest() || true)
+        if (incommingMessage.isRequest())
         {
             messageExecutor.executeRequest((MppRequestMessage) incommingMessage).thenAcceptAsync(response -> {
-                final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response);
-                sendMessageOverNetwork(envelope, Collections.singleton(from));
+                final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
+                final int portForResponse = inEnv.getPortForResponse();
+                sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
             });
         }
         else
@@ -345,7 +394,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
                 final MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder = responseHolder.dataHolder;
                 boolean futureHasCompleted;
                 synchronized (dataHolder) {
-                    futureHasCompleted = responseHolder.expectations.maybeCompleteResponse(dataHolder, incommingMessage, from);
+                    futureHasCompleted = responseHolder.expectations.maybeCompleteResponse(dataHolder, incommingMessage, createReceipient(from.host(), inEnv.getPortForResponse()));
                 }
 
                 if(futureHasCompleted) {

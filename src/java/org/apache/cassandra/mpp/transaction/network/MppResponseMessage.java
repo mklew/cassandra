@@ -26,6 +26,6 @@ public interface MppResponseMessage extends MppMessage
 {
     @Override
     default boolean isRequest() {
-        return true;
+        return false;
     }
 }

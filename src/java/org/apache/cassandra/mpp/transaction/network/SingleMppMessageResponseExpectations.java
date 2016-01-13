@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.network;
 
 import java.util.Collection;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 import com.google.common.base.Preconditions;
@@ -64,7 +65,8 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
     {
         SingleResponseDataHolder singleResponseDataHolder = (SingleResponseDataHolder) dataHolder;
-        Preconditions.checkArgument(singleResponseDataHolder.receipient.equals(from));
+        Preconditions.checkArgument(singleResponseDataHolder.receipient.host().getHostAddress().equals(from.host().getHostAddress()));
+        Preconditions.checkArgument(Objects.equals(singleResponseDataHolder.receipient.port(), from.port()));
         dataHolder.getFuture().complete(incomingMessage);
         return true;
     }

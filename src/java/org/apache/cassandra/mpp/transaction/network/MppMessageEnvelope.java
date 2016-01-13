@@ -30,10 +30,13 @@ public class MppMessageEnvelope implements Serializable
 
     private final MppMessage message;
 
-    public MppMessageEnvelope(long id, MppMessage message)
+    private final int portForResponse;
+
+    public MppMessageEnvelope(long id, MppMessage message, int portForResponse)
     {
         this.id = id;
         this.message = message;
+        this.portForResponse = portForResponse;
     }
 
     public long getId()
@@ -44,5 +47,10 @@ public class MppMessageEnvelope implements Serializable
     public MppMessage getMessage()
     {
         return message;
+    }
+
+    public int getPortForResponse()
+    {
+        return portForResponse;
     }
 }
