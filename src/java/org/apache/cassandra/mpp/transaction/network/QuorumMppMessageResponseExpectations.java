@@ -70,7 +70,7 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
 
     public boolean expectsResponse()
     {
-        return false;
+        return true;
     }
 
     public MppMessageResponseDataHolder<Collection<MppResponseMessage>> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients)
@@ -82,8 +82,7 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
     {
         QuorumDataHolder q = (QuorumDataHolder) dataHolder;
-//        Preconditions.checkArgument(q.id.equals(incomingMessage.id()), "Id does not match. Message id: %s Expected %s", incomingMessage.id(), q.id);
-        Preconditions.checkArgument(q.expectedReceipients.contains(from), "Recevied message from unexpected receipient %s. Expected one of %s", from, q.expectedReceipients);
+        Preconditions.checkArgument(q.expectedReceipients.stream().anyMatch(r -> SingleMppMessageResponseExpectations.checkReceipient(r, from)), "Recevied message from unexpected receipient %s. Expected one of %s", from, q.expectedReceipients);
         q.messagesReceivedSoFar.put(from, (MppResponseMessage) incomingMessage);
         if(isQuorum(q)) {
             if(!q.future.isDone()) {

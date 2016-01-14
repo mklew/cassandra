@@ -65,9 +65,14 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
     {
         SingleResponseDataHolder singleResponseDataHolder = (SingleResponseDataHolder) dataHolder;
-        Preconditions.checkArgument(singleResponseDataHolder.receipient.host().getHostAddress().equals(from.host().getHostAddress()));
+        Preconditions.checkArgument(checkReceipient(singleResponseDataHolder.receipient, from));
         Preconditions.checkArgument(Objects.equals(singleResponseDataHolder.receipient.port(), from.port()));
         dataHolder.getFuture().complete(incomingMessage);
         return true;
+    }
+
+    public static boolean checkReceipient(MppNetworkService.MessageReceipient exepctedReceipient, MppNetworkService.MessageReceipient actualReceipient)
+    {
+        return exepctedReceipient.host().getHostAddress().equals(actualReceipient.host().getHostAddress());
     }
 }

@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
@@ -450,6 +451,75 @@ public class MppNetworkServiceImplTest
         Assert.assertFalse("NS1 has received nothing", ns1Executor.receivedAnything());
 
     }
+
+    private static class RequestQuorumMessage implements MppRequestMessage {
+
+        public MppResponseMessage executeInLocalContext(NodeContext context)
+        {
+            return null;
+        }
+    }
+
+    private static class TestQuorumMessageResponse implements MppResponseMessage {
+        private final int value;
+
+        private TestQuorumMessageResponse(int value)
+        {
+            this.value = value;
+        }
+    }
+
+    @Test
+    public void testQuorumValue() throws Exception
+    {
+        final int expectedValue = 132;
+        final ExpectingMessageHandlerWithResponse n1Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue));
+        final ExpectingMessageHandlerWithResponse n2Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue));
+        final ExpectingMessageHandlerWithResponse n3Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue - 1));
+        final ExpectingMessageHandlerWithResponse n4Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue));
+
+        CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+        new TestWithNsServices()
+        {
+            protected void setup(NsServiceProducer nsServiceProducer)
+            {
+                nsServiceProducer.createNextNsService("n1").setMessageHandler(n1Handler);
+                nsServiceProducer.createNextNsService("n2").setMessageHandler(n2Handler);
+                nsServiceProducer.createNextNsService("n3").setMessageHandler(n3Handler);
+                nsServiceProducer.createNextNsService("n4").setMessageHandler(n4Handler);
+            }
+
+            protected void runTest(NsServiceLookup nsServiceLookup) throws Exception
+            {
+                final CompletableFuture<Collection<MppResponseMessage>> responses = sendMessage("n1", new RequestQuorumMessage(), new QuorumMppMessageResponseExpectations(4), "n2", "n3", "n4");
+
+                responses.thenAccept(rs -> {
+                    final Map<Integer, Long> valueToCount = rs.stream()
+                                                         .map(x -> (TestQuorumMessageResponse) x)
+                                                         .map(x -> x.value)
+                                                         .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+                    final Integer quorumReadValue = valueToCount.entrySet().stream().reduce((op1, op2) -> {
+                        if (op1.getValue() > op2.getValue()) return op1;
+                        else return op2;
+                    }).get().getKey();
+
+                    Assert.assertEquals(expectedValue, quorumReadValue.intValue());
+                    isTestDone.complete(null);
+                });
+            }
+        }.run();
+
+        isTestDone.get();
+
+    }
+
+
+    // TODO [MPP] Tests that take into account:
+    // TODO - timeout of an request
+    // TODO - node that can be connected to, but it does not answer with response
+    // TODO - node that cannot be connected to (it is down)
+
 
     @Test
     public void testShouldSendDummyMessageThatGetsHandledWithoutResponse() throws UnknownHostException, InterruptedException, ExecutionException
