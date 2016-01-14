@@ -39,7 +39,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import org.apache.cassandra.mpp.transaction.MppMessageExecutor;
+import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.mpp.transaction.NodeContext;
 
 /**
@@ -48,10 +48,10 @@ import org.apache.cassandra.mpp.transaction.NodeContext;
  */
 public class MppNetworkServiceImplTest
 {
-    private static class TestMessageExecutor implements MppMessageExecutor
+    private static class TestMessageHandler implements MppMessageHandler
     {
 
-        public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
+        public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
         {
             return null;
         }
@@ -113,7 +113,7 @@ public class MppNetworkServiceImplTest
         }
     }
 
-    private static class ExpectingMessageExecutor implements MppMessageExecutor
+    private static class ExpectingMessageHandler implements MppMessageHandler
     {
 
         List<MppRequestMessage> receivedMessages = new ArrayList<>();
@@ -122,12 +122,12 @@ public class MppNetworkServiceImplTest
 
         CompletableFuture<Object> awaitMessageFuture = new CompletableFuture<>();
 
-        public ExpectingMessageExecutor(Consumer<MppRequestMessage> callback)
+        public ExpectingMessageHandler(Consumer<MppRequestMessage> callback)
         {
             this.callback = callback;
         }
 
-        public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
+        public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
         {
             receivedMessages.add(requestMessage);
             callback.accept(requestMessage);
@@ -148,7 +148,7 @@ public class MppNetworkServiceImplTest
         }
     }
 
-    private static class ExpectingMessageExecutorWithResponse implements MppMessageExecutor
+    private static class ExpectingMessageHandlerWithResponse implements MppMessageHandler
     {
 
         interface ResponseCallback
@@ -162,12 +162,12 @@ public class MppNetworkServiceImplTest
 
         CompletableFuture<Object> awaitMessageFuture = new CompletableFuture<>();
 
-        public ExpectingMessageExecutorWithResponse(ResponseCallback callback)
+        public ExpectingMessageHandlerWithResponse(ResponseCallback callback)
         {
             this.callback = callback;
         }
 
-        public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
+        public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
         {
             receivedMessages.add(requestMessage);
             final MppResponseMessage response = callback.accept(requestMessage);
@@ -193,10 +193,10 @@ public class MppNetworkServiceImplTest
     {
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
         final MppNetworkServiceImpl ns1 = setupNs1();
-        final ExpectingMessageExecutor ns1Executor = new ExpectingMessageExecutor(x -> {
+        final ExpectingMessageHandler ns1Executor = new ExpectingMessageHandler(x -> {
         });
         ns1.setMessageExecutor(ns1Executor);
-        final ExpectingMessageExecutor ns2Executor = new ExpectingMessageExecutor(request -> {
+        final ExpectingMessageHandler ns2Executor = new ExpectingMessageHandler(request -> {
             Assert.assertEquals("Message should be of type DummyDiscardMessage", DummyDiscardMessage.class, request.getClass());
             isTestDone.complete(null);
         });
@@ -246,7 +246,7 @@ public class MppNetworkServiceImplTest
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
         final MppNetworkServiceImpl ns1 = setupNs1();
         // ns1 produces DummyResponse with its port
-        final ExpectingMessageExecutorWithResponse ns1MessageExecutor = new ExpectingMessageExecutorWithResponse(req -> new DummyResponse(ns1Port));
+        final ExpectingMessageHandlerWithResponse ns1MessageExecutor = new ExpectingMessageHandlerWithResponse(req -> new DummyResponse(ns1Port));
         ns1.setMessageExecutor(ns1MessageExecutor);
 
 //        final ExpectingMessageExecutor ns2Executor = new ExpectingMessageExecutor(request -> {
@@ -315,18 +315,18 @@ public class MppNetworkServiceImplTest
         final MppNetworkServiceImpl ns1 = new MppNetworkServiceImpl();
 
         ns1.setListeningPort(ns1Port);
-        MppMessageExecutor ns1Executor = new TestMessageExecutor();
+        MppMessageHandler ns1Executor = new TestMessageHandler();
         ns1.setMessageExecutor(ns1Executor);
         return ns1;
     }
 
     private MppNetworkServiceImpl setupNs2()
     {
-        MppMessageExecutor ns2Executor = new TestMessageExecutor();
+        MppMessageHandler ns2Executor = new TestMessageHandler();
         return setupNs2(ns2Executor);
     }
 
-    private MppNetworkServiceImpl setupNs2(MppMessageExecutor messageExecutor)
+    private MppNetworkServiceImpl setupNs2(MppMessageHandler messageExecutor)
     {
         final MppNetworkServiceImpl ns2 = new MppNetworkServiceImpl();
         ns2.setListeningPort(ns2Port);

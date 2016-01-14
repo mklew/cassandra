@@ -20,7 +20,7 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.concurrent.CompletableFuture;
 
-import org.apache.cassandra.mpp.transaction.MppMessageExecutor;
+import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.mpp.transaction.NodeContext;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
@@ -31,7 +31,7 @@ import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/12/15
  */
-public class MppMessageExecutorImpl implements MppMessageExecutor
+public class MppMessageHandlerImpl implements MppMessageHandler
 {
 
     private PrivateMemtableStorage privateMemtableStorage;
@@ -39,7 +39,7 @@ public class MppMessageExecutorImpl implements MppMessageExecutor
     private ReadTransactionDataService readTransactionDataService;
 
 
-    public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
+    public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
     {
         final CompletableFuture<MppResponseMessage> f = new CompletableFuture<>();
         final MppResponseMessage mppResponseMessage = requestMessage.executeInLocalContext(createNodeContext());

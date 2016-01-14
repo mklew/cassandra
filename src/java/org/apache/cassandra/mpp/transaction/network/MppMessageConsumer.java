@@ -16,18 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.network;
 
-import java.util.concurrent.CompletableFuture;
-
-import org.apache.cassandra.mpp.transaction.network.MppRequestMessage;
-import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
+import java.net.InetSocketAddress;
 
 /**
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
- */
-public interface MppMessageExecutor
+* @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+* @since 14/01/16
+*/
+interface MppMessageConsumer
 {
-    CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage);
+    void messageReceived(MppMessageEnvelope message, InetSocketAddress from);
 }
