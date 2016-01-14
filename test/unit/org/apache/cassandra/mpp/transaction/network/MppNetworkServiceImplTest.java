@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -47,7 +48,8 @@ import org.apache.cassandra.mpp.transaction.NodeContext;
  */
 public class MppNetworkServiceImplTest
 {
-    private static class TestMessageExecutor implements MppMessageExecutor {
+    private static class TestMessageExecutor implements MppMessageExecutor
+    {
 
         public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
         {
@@ -90,7 +92,7 @@ public class MppNetworkServiceImplTest
     {
         private static final long serialVersionUID = 1L;
 
-        public boolean isRequest()
+        public boolean isResponseRequired()
         {
             return false;
         }
@@ -111,7 +113,8 @@ public class MppNetworkServiceImplTest
         }
     }
 
-    private static class ExpectingMessageExecutor implements MppMessageExecutor {
+    private static class ExpectingMessageExecutor implements MppMessageExecutor
+    {
 
         List<MppRequestMessage> receivedMessages = new ArrayList<>();
 
@@ -139,14 +142,17 @@ public class MppNetworkServiceImplTest
             return awaitMessageFuture;
         }
 
-        boolean receivedAnything() {
+        boolean receivedAnything()
+        {
             return !receivedMessages.isEmpty();
         }
     }
 
-    private static class ExpectingMessageExecutorWithResponse implements MppMessageExecutor {
+    private static class ExpectingMessageExecutorWithResponse implements MppMessageExecutor
+    {
 
-        interface ResponseCallback {
+        interface ResponseCallback
+        {
             MppResponseMessage accept(MppRequestMessage message);
         }
 
@@ -176,13 +182,14 @@ public class MppNetworkServiceImplTest
             return awaitMessageFuture;
         }
 
-        boolean receivedAnything() {
+        boolean receivedAnything()
+        {
             return !receivedMessages.isEmpty();
         }
     }
 
     @Test
-    public void testShouldSendDummyMessageThatGetsHandledWithoutResponse() throws UnknownHostException, InterruptedException
+    public void testShouldSendDummyMessageThatGetsHandledWithoutResponse() throws UnknownHostException, InterruptedException, ExecutionException
     {
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
         final MppNetworkServiceImpl ns1 = setupNs1();
@@ -201,24 +208,24 @@ public class MppNetworkServiceImplTest
         ns1.sendMessage(dummyDiscardMessage, NoMppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE,
                         Arrays.asList(ns1.createReceipient(InetAddress.getLocalHost(), ns2Port)));
 
-        isTestDone.thenAccept(x -> {
-            Assert.assertTrue("NS2 has received something", ns2Executor.receivedAnything());
-            Assert.assertFalse("NS1 has received nothing", ns2Executor.receivedAnything());
 
-            try
-            {
-                ns1.shutdown();
-                ns2.shutdown();
-            }
-            catch (Exception e)
-            {
-                e.printStackTrace();
-            }
+        isTestDone.get();
+        Assert.assertTrue("NS2 has received something", ns2Executor.receivedAnything());
+        Assert.assertFalse("NS1 has received nothing", ns1Executor.receivedAnything());
 
-        });
+        try
+        {
+            ns1.shutdown();
+            ns2.shutdown();
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
     }
 
-    private static class DummyResponse implements MppResponseMessage {
+    private static class DummyResponse implements MppResponseMessage
+    {
         final int payload;
 
         private DummyResponse(int payload)
@@ -228,23 +235,8 @@ public class MppNetworkServiceImplTest
     }
 
     @Test
-    public void testShouldCooperateWithOtherTest() throws Exception
+    public void testShouldSendDummyRequestMessageAndThenReceiveSingleResponse() throws Exception
     {
-        final MppNetworkServiceImpl ns1 = setupNs1();
-        ns1.initialize();
-        ns1.shutdown();
-    }
-
-    @Test
-    public void testThatOtherWorks() throws Exception
-    {
-        final MppNetworkServiceImpl ns1 = setupNs1();
-        ns1.initialize();
-        ns1.shutdown();
-    }
-
-    @Test
-    public void testShouldSendDummyRequestMessageAndThenReceiveSingleResponse() throws Exception {
 
         // ns2 sends REQUEST DummyRequestMessage to ns1 CHECK
         // ns1 sends RESPONSE DummyResponse with its port CHECK
@@ -282,20 +274,24 @@ public class MppNetworkServiceImplTest
         ns2.shutdown();
     }
 
-    private class OpenConnectionClient {
+    private class OpenConnectionClient
+    {
 
         void openConnection(int portToConnect, long waitMillis, Consumer<ChannelFuture> doWithChannel) throws UnknownHostException, InterruptedException
         {
             EventLoopGroup workerGroup = new NioEventLoopGroup(1);
 
-            try {
+            try
+            {
                 Bootstrap b = new Bootstrap(); // (1)
                 b.group(workerGroup); // (2)
                 b.channel(NioSocketChannel.class); // (3)
                 b.option(ChannelOption.SO_KEEPALIVE, true); // (4)
-                b.handler(new ChannelInitializer<SocketChannel>() {
+                b.handler(new ChannelInitializer<SocketChannel>()
+                {
                     @Override
-                    public void initChannel(SocketChannel ch) throws Exception {
+                    public void initChannel(SocketChannel ch) throws Exception
+                    {
 
                     }
                 });
@@ -306,12 +302,12 @@ public class MppNetworkServiceImplTest
                 doWithChannel.accept(connect);
                 System.out.println("isSuccess" + connect.isSuccess());
                 connect.channel().closeFuture().sync();
-
-            } finally {
+            }
+            finally
+            {
                 workerGroup.shutdownGracefully();
             }
         }
-
     }
 
     private MppNetworkServiceImpl setupNs1()

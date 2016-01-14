@@ -26,5 +26,17 @@ import java.io.Serializable;
  */
 public interface MppMessage extends Serializable
 {
+    /**
+     * By default is message is a request then it expects response.
+     * @return {@code true} if this is request message
+     */
     boolean isRequest();
+
+    /**
+     * Whether response to this message is required.
+     * @return {@code true} if resposne to this message is required.
+     */
+    default boolean isResponseRequired() {
+        return isRequest();
+    }
 }

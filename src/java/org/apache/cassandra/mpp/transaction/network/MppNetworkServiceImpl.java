@@ -406,11 +406,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
         System.out.println("handleIncomingMessage id " + id +  ", message" + incommingMessage + ", from " + from);
         if (incommingMessage.isRequest())
         {
-            messageExecutor.executeRequest((MppRequestMessage) incommingMessage).thenAcceptAsync(response -> {
-                final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
-                final int portForResponse = inEnv.getPortForResponse();
-                sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
-            });
+            final CompletableFuture<MppResponseMessage> executed = messageExecutor.executeRequest((MppRequestMessage) incommingMessage);
+            if(incommingMessage.isResponseRequired()) {
+                executed.thenAcceptAsync(response -> {
+                    final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
+                    final int portForResponse = inEnv.getPortForResponse();
+                    sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
+                });
+            }
         }
         else
         {
