@@ -60,7 +60,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
     public void initialize()
     {
         assert listeningPort != 0;
-        assert messageExecutor != null;
+        assert messageHandler != null;
         initializeInternal();
     }
 
@@ -90,6 +90,13 @@ public class MppNetworkServiceImpl implements MppNetworkService
     private MppNettyClient mppNettyClient;
 
     private MppNettyServer mppNettyServer;
+
+    private Integer limitNumberOfEventLoopThreads;
+
+    public void setLimitNumberOfEventLoopThreads(Integer limitNumberOfEventLoopThreads)
+    {
+        this.limitNumberOfEventLoopThreads = limitNumberOfEventLoopThreads;
+    }
 
     private static class NettyEventLoopGroupsHolder
     {
@@ -165,8 +172,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
     private void initializeEventLoopGroups()
     {
         nettyEventLoopGroupsHolder = new NettyEventLoopGroupsHolder();
-        nettyEventLoopGroupsHolder.setBossGroup(new NioEventLoopGroup());
-        nettyEventLoopGroupsHolder.setWorkerGroup(new NioEventLoopGroup());
+        if(limitNumberOfEventLoopThreads != null) {
+            nettyEventLoopGroupsHolder.setBossGroup(new NioEventLoopGroup(limitNumberOfEventLoopThreads));
+            nettyEventLoopGroupsHolder.setWorkerGroup(new NioEventLoopGroup(limitNumberOfEventLoopThreads));
+        }
+        else {
+            nettyEventLoopGroupsHolder.setBossGroup(new NioEventLoopGroup());
+            nettyEventLoopGroupsHolder.setWorkerGroup(new NioEventLoopGroup());
+        }
     }
 
     private void initializeMppNettyClient()
@@ -206,12 +219,12 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private Map<Long, AwaitingResponseMessageHolder> messageIdToResponseHolder = new ConcurrentHashMap<>();
 
-    private MppMessageHandler messageExecutor;
+    private MppMessageHandler messageHandler;
 
 
-    public void setMessageExecutor(MppMessageHandler messageExecutor)
+    public void setMessageHandler(MppMessageHandler messageExecutor)
     {
-        this.messageExecutor = messageExecutor;
+        this.messageHandler = messageExecutor;
     }
 
     private <T> MppMessageEnvelope registerOutgoingMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations,
@@ -277,7 +290,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         MppMessage incommingMessage = inEnv.getMessage();
         if (incommingMessage.isRequest())
         {
-            final CompletableFuture<MppResponseMessage> executed = messageExecutor.handleMessage((MppRequestMessage) incommingMessage);
+            final CompletableFuture<MppResponseMessage> executed = messageHandler.handleMessage((MppRequestMessage) incommingMessage);
             if(incommingMessage.isResponseRequired()) {
                 executed.thenAcceptAsync(response -> {
                     final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
