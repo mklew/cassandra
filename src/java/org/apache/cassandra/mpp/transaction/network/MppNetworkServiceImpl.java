@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.netty.bootstrap.Bootstrap;
@@ -70,10 +71,33 @@ public class MppNetworkServiceImpl implements MppNetworkService
         initializeInternal();
     }
 
-    public void shutdown()
+    public void shutdown() throws Exception
     {
-        nettyEventLoopGroupsHolder.workerGroup.shutdownGracefully();
-        nettyEventLoopGroupsHolder.bossGroup.shutdownGracefully();
+        nettyServer.shutdown();
+        try
+        {
+            nettyEventLoopGroupsHolder.workerGroup.shutdownGracefully().get();
+        }
+        catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
+        catch (ExecutionException e)
+        {
+            e.printStackTrace();
+        }
+        try
+        {
+            nettyEventLoopGroupsHolder.bossGroup.shutdownGracefully().get();
+        }
+        catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
+        catch (ExecutionException e)
+        {
+            e.printStackTrace();
+        }
     }
 
     private NettyEventLoopGroupsHolder nettyEventLoopGroupsHolder;
@@ -229,6 +253,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
         EventLoopGroup bossGroup;
         EventLoopGroup workerGroup;
+        ChannelFuture socketChannel;
 
         public NettyServer(EventLoopGroup bossGroup, EventLoopGroup workerGroup)
         {
@@ -253,12 +278,18 @@ public class MppNetworkServiceImpl implements MppNetworkService
             .childOption(ChannelOption.SO_KEEPALIVE, true); // (6)
 
             // Bind and start to accept incoming connections.
-            ChannelFuture f = b.bind(listenOnPort).sync(); // (7)
+            socketChannel = b.bind(listenOnPort).sync(); // (7)
+
 
             // Wait until the server socket is closed.
             // In this example, this does not happen, but you can do that to gracefully
             // shut down your server.
 //                f.channel().closeFuture().sync();
+        }
+
+        void shutdown() throws Exception {
+            final NioServerSocketChannel channel = (NioServerSocketChannel) socketChannel.sync().channel();
+            channel.close().sync();
         }
 
     }

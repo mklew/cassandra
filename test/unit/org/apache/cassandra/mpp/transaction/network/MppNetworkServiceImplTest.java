@@ -60,7 +60,8 @@ public class MppNetworkServiceImplTest
     int ns2Port = 50002;
 
     @Test
-    public void testCreateMppNetworkService() {
+    public void testCreateMppNetworkService() throws Exception
+    {
         final MppNetworkServiceImpl ns1 = setupNs1();
         final MppNetworkServiceImpl ns2 = setupNs2();
         ns1.initialize();
@@ -71,7 +72,7 @@ public class MppNetworkServiceImplTest
     }
 
     @Test
-    public void testShouldBeAbleToConnectAfterInitilized() throws InterruptedException, UnknownHostException
+    public void testShouldBeAbleToConnectAfterInitilized() throws Exception
     {
         final MppNetworkServiceImpl ns1 = setupNs1();
         ns1.initialize();
@@ -93,6 +94,16 @@ public class MppNetworkServiceImplTest
         {
             return false;
         }
+
+        public MppResponseMessage executeInLocalContext(NodeContext context)
+        {
+            return null;
+        }
+    }
+
+    private static class DummyRequestMessage implements MppRequestMessage
+    {
+        private static final long serialVersionUID = 1L;
 
         public MppResponseMessage executeInLocalContext(NodeContext context)
         {
@@ -133,6 +144,43 @@ public class MppNetworkServiceImplTest
         }
     }
 
+    private static class ExpectingMessageExecutorWithResponse implements MppMessageExecutor {
+
+        interface ResponseCallback {
+            MppResponseMessage accept(MppRequestMessage message);
+        }
+
+        List<MppRequestMessage> receivedMessages = new ArrayList<>();
+
+        ResponseCallback callback;
+
+        CompletableFuture<Object> awaitMessageFuture = new CompletableFuture<>();
+
+        public ExpectingMessageExecutorWithResponse(ResponseCallback callback)
+        {
+            this.callback = callback;
+        }
+
+        public CompletableFuture<MppResponseMessage> executeRequest(MppRequestMessage requestMessage)
+        {
+            receivedMessages.add(requestMessage);
+            final MppResponseMessage response = callback.accept(requestMessage);
+            awaitMessageFuture.complete(requestMessage);
+            final CompletableFuture<MppResponseMessage> f = new CompletableFuture<>();
+            f.complete(response);
+            return f;
+        }
+
+        public CompletableFuture<Object> getAwaitMessageFuture()
+        {
+            return awaitMessageFuture;
+        }
+
+        boolean receivedAnything() {
+            return !receivedMessages.isEmpty();
+        }
+    }
+
     @Test
     public void testShouldSendDummyMessageThatGetsHandledWithoutResponse() throws UnknownHostException, InterruptedException
     {
@@ -156,12 +204,82 @@ public class MppNetworkServiceImplTest
         isTestDone.thenAccept(x -> {
             Assert.assertTrue("NS2 has received something", ns2Executor.receivedAnything());
             Assert.assertFalse("NS1 has received nothing", ns2Executor.receivedAnything());
+
+            try
+            {
+                ns1.shutdown();
+                ns2.shutdown();
+            }
+            catch (Exception e)
+            {
+                e.printStackTrace();
+            }
+
         });
+    }
+
+    private static class DummyResponse implements MppResponseMessage {
+        final int payload;
+
+        private DummyResponse(int payload)
+        {
+            this.payload = payload;
+        }
+    }
+
+    @Test
+    public void testShouldCooperateWithOtherTest() throws Exception
+    {
+        final MppNetworkServiceImpl ns1 = setupNs1();
+        ns1.initialize();
+        ns1.shutdown();
+    }
+
+    @Test
+    public void testThatOtherWorks() throws Exception
+    {
+        final MppNetworkServiceImpl ns1 = setupNs1();
+        ns1.initialize();
+        ns1.shutdown();
     }
 
     @Test
     public void testShouldSendDummyRequestMessageAndThenReceiveSingleResponse() throws Exception {
 
+        // ns2 sends REQUEST DummyRequestMessage to ns1 CHECK
+        // ns1 sends RESPONSE DummyResponse with its port CHECK
+        // ns1 sends RESPONSE back response to ns2
+        // ns2 expects single RESPONSE.
+
+        CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+        final MppNetworkServiceImpl ns1 = setupNs1();
+        // ns1 produces DummyResponse with its port
+        final ExpectingMessageExecutorWithResponse ns1MessageExecutor = new ExpectingMessageExecutorWithResponse(req -> new DummyResponse(ns1Port));
+        ns1.setMessageExecutor(ns1MessageExecutor);
+
+//        final ExpectingMessageExecutor ns2Executor = new ExpectingMessageExecutor(request -> {
+//            Assert.assertEquals("Message should be of type DummyDiscardMessage", DummyResponse.class, request.getClass());
+//            isTestDone.complete(null);
+//        });
+        final MppNetworkService ns2 = setupNs2();
+
+        ns1.initialize();
+        ns2.initialize();
+        final DummyRequestMessage requestMessage = new DummyRequestMessage();
+        // ns2 sends DummyRequestMessage to ns1
+        final CompletableFuture<MppResponseMessage> responseF = ns2.sendMessage(requestMessage, new SingleMppMessageResponseExpectations(), Arrays.asList(ns1.createReceipient(InetAddress.getLocalHost(), ns1Port)));
+
+        responseF.thenAccept(response -> {
+            final DummyResponse dummyResponse = (DummyResponse) response;
+
+            Assert.assertEquals("Is expected response", ns1Port, dummyResponse.payload);
+            System.out.println("running expectations");
+            isTestDone.complete(null);
+        });
+
+        isTestDone.get();
+        ns1.shutdown();
+        ns2.shutdown();
     }
 
     private class OpenConnectionClient {

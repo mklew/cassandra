@@ -49,5 +49,5 @@ public interface MppNetworkService
 
     void initialize();
 
-    void shutdown();
+    void shutdown() throws Exception;
 }
