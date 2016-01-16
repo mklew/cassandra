@@ -27,6 +27,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +53,10 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private int listeningPort;
 
+    private long defaultTimeout = 250;
+    private MppNetworkHooks hooks;
+    private String name;
+
     public void setListeningPort(int listeningPort)
     {
         this.listeningPort = listeningPort;
@@ -66,10 +71,13 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     public void shutdown() throws Exception
     {
+        logger.info("Shutting down netty server {}", name);
         mppNettyServer.shutdown();
         try
         {
+            logger.info("Shutting down workerGroup {}", name);
             nettyEventLoopGroupsHolder.workerGroup.shutdownGracefully().get();
+            logger.info("WorkerGroup has been shutdown {}", name);
         }
         catch (InterruptedException | ExecutionException e)
         {
@@ -77,7 +85,9 @@ public class MppNetworkServiceImpl implements MppNetworkService
         }
         try
         {
+            logger.info("Shutting bossGroup has been shutdown {}", name);
             nettyEventLoopGroupsHolder.bossGroup.shutdownGracefully().get();
+            logger.info("BossGroup has been shutdown {}", name);
         }
         catch (InterruptedException | ExecutionException e)
         {
@@ -96,6 +106,36 @@ public class MppNetworkServiceImpl implements MppNetworkService
     public void setLimitNumberOfEventLoopThreads(Integer limitNumberOfEventLoopThreads)
     {
         this.limitNumberOfEventLoopThreads = limitNumberOfEventLoopThreads;
+    }
+
+    public void setDefaultTimeout(long defaultTimeout)
+    {
+        this.defaultTimeout = defaultTimeout;
+    }
+
+    public long getDefaultTimeout()
+    {
+        return defaultTimeout;
+    }
+
+    public void setHooks(MppNetworkHooks hooks)
+    {
+        this.hooks = hooks;
+    }
+
+    public MppNetworkHooks getHooks()
+    {
+        return hooks;
+    }
+
+    public void setName(String name)
+    {
+        this.name = name;
+    }
+
+    public String getName()
+    {
+        return name;
     }
 
     private static class NettyEventLoopGroupsHolder
@@ -184,12 +224,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private void initializeMppNettyClient()
     {
+        logger.info("Starting netty client {}", name);
         mppNettyClient = new MppNettyClient(nettyEventLoopGroupsHolder.getWorkerGroup());
         mppNettyClient.init();
     }
 
     private void initializeMppNettyServer()
     {
+        logger.info("Starting netty server {}", name);
         mppNettyServer = new MppNettyServer(nettyEventLoopGroupsHolder.bossGroup, nettyEventLoopGroupsHolder.workerGroup);
         try
         {
@@ -204,14 +246,33 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private static class AwaitingResponseMessageHolder<T>
     {
+        Logger logger = LoggerFactory.getLogger(getClass());
+
         MppMessageResponseExpectations<T> expectations;
 
         MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder;
+
+        private final ReentrantLock lock = new ReentrantLock();
 
         private AwaitingResponseMessageHolder(MppMessageResponseExpectations<T> expectations, MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder)
         {
             this.expectations = expectations;
             this.dataHolder = dataHolder;
+        }
+
+        public boolean maybeCompleteResponse(MppMessage incommingMessage, MessageReceipient receipient)
+        {
+            logger.debug("maybeCompleteResponse {} lock", Thread.currentThread());
+            lock.lock();
+            try {
+                logger.debug("maybeCompleteResponse {} lock acquired", Thread.currentThread());
+                return expectations.maybeCompleteResponse(dataHolder, incommingMessage, receipient);
+            }
+            finally
+            {
+                logger.debug("maybeCompleteResponse {} lock unlocked", Thread.currentThread());
+                lock.unlock();
+            }
         }
     }
 
@@ -237,6 +298,9 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private <T> void sendMessageOverNetwork(MppMessageEnvelope message, Collection<MessageReceipient> receipient) {
         receipient.forEach(r -> {
+            if(hooks != null) {
+                hooks.outgoingMessageBeforeSending(message, r);
+            }
             final ChannelFuture channelFuture = mppNettyClient.connect(r.host(), r.port());
             try
             {
@@ -250,8 +314,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
                 final ChannelFuture write = channel.writeAndFlush(message);
 //                if(!message.getMessage().isRequest()) {
                     final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
+//                write.addListener(future -> {
+//                    if(hooks != null) {
+//                        hooks.outgoingMessageHasBeenSent(message, r);
+//                    }
+//                });
 //                }
                 channel.closeFuture().sync();
+
 
             }
             catch (InterruptedException e)
@@ -292,30 +362,46 @@ public class MppNetworkServiceImpl implements MppNetworkService
         {
             final CompletableFuture<MppResponseMessage> executed = messageHandler.handleMessage((MppRequestMessage) incommingMessage);
             if(incommingMessage.isResponseRequired()) {
-                executed.thenAcceptAsync(response -> {
+                try
+                {
+                    final MppResponseMessage response = executed.get();
                     final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
                     final int portForResponse = inEnv.getPortForResponse();
                     sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
-                });
+                }
+                catch (InterruptedException | ExecutionException e)
+                {
+                    e.printStackTrace();
+                }
+//                responseMessage.thenAcceptAsync(
+
+//                response -> {
+
+//                });
             }
         }
         else
         {
             // It is response to one of previous messages.
+            logger.info("Message with id {} tries to be completed. NS {} Thread {}", id, name, Thread.currentThread());
+            logger.info("Message with id {} before get. NS {} Thread {}", id, name, Thread.currentThread());
             final AwaitingResponseMessageHolder awaitingResponseMessageHolder = messageIdToResponseHolder.get(id);
+            logger.info("Message with id {} AFTER get. NS {} Thread {}", id, name, Thread.currentThread());
             if(awaitingResponseMessageHolder == null) {
                 logger.warn("Received message {}, but has no response message holder for it. It could be timed out or bug.", inEnv);
             }
             else {
-                final MppMessageResponseExpectations.MppMessageResponseDataHolder dataHolder = awaitingResponseMessageHolder.dataHolder;
-                boolean futureHasCompleted;
-                synchronized (dataHolder) {
-                    futureHasCompleted = awaitingResponseMessageHolder.expectations.maybeCompleteResponse(dataHolder, incommingMessage, createReceipient(from.host(), inEnv.getPortForResponse()));
-                }
-
+                boolean futureHasCompleted = awaitingResponseMessageHolder.maybeCompleteResponse(incommingMessage, createReceipient(from.host(), inEnv.getPortForResponse()));
+                logger.debug("MessageId {} synchronize data holder. NS {} ", id, name);
                 if(futureHasCompleted) {
                     logger.info("Message with id {} has been handled and completed.", id);
                     unregisterResponseHolder(id);
+                    if(hooks != null) {
+                        hooks.messageHasBeenHandledSuccessfully(inEnv.getId(), Collections.singletonList(from));
+                    }
+                }
+                else {
+                    logger.debug("MessageId {} has not completed yet. NS {} ", id, name);
                 }
             }
         }
@@ -348,5 +434,10 @@ public class MppNetworkServiceImpl implements MppNetworkService
     private void unregisterResponseHolder(long id)
     {
         messageIdToResponseHolder.remove(id);
+    }
+
+    public String toString()
+    {
+        return name + ':' + listeningPort;
     }
 }

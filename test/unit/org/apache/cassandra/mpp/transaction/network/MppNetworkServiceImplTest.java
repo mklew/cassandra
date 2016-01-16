@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -35,8 +37,12 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
+import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
@@ -55,6 +61,9 @@ import org.apache.cassandra.mpp.transaction.NodeContext;
  */
 public class MppNetworkServiceImplTest
 {
+
+    public static final String N_1 = "n1";
+
     private static class NoOpMessageHandler implements MppMessageHandler
     {
 
@@ -77,7 +86,7 @@ public class MppNetworkServiceImplTest
 
         private final int id;
 
-        private MppNetworkServiceImpl mppNetworkService;
+        private MppNetworkServiceImpl mppNetworkService = new MppNetworkServiceImpl();
 
         private MppMessageHandler handler = new NoOpMessageHandler();
 
@@ -104,11 +113,12 @@ public class MppNetworkServiceImplTest
 
         public Void init()
         {
-            Preconditions.checkArgument(mppNetworkService == null);
-            mppNetworkService = new MppNetworkServiceImpl();
+//            Preconditions.checkArgument(mppNetworkService == null);
+//            mppNetworkService = new MppNetworkServiceImpl();
             mppNetworkService.setLimitNumberOfEventLoopThreads(2);
             mppNetworkService.setMessageHandler(handler);
             mppNetworkService.setListeningPort(getPort());
+            mppNetworkService.setName(getNsServiceName());
 
             mppNetworkService.initialize();
 
@@ -152,6 +162,18 @@ public class MppNetworkServiceImplTest
 
             return mppNetworkService.sendMessage(message, mppMessageResponseExpectations, messageReceipients);
         }
+
+
+        public void setDefaultTimeout(long responseTimeout)
+        {
+            mppNetworkService.setDefaultTimeout(responseTimeout);
+        }
+
+
+        public void setHooks(MppNetworkHooks hooks)
+        {
+            mppNetworkService.setHooks(hooks);
+        }
     }
 
     private interface NsServiceLookup
@@ -167,6 +189,7 @@ public class MppNetworkServiceImplTest
         AtomicInteger nsServiceId = new AtomicInteger(1);
 
         Map<String, NsServiceRef> nameToNsServiceRef = new HashMap<>();
+        private String namePrefix = "";
 
         public NsServiceRef createNextNsService()
         {
@@ -176,7 +199,7 @@ public class MppNetworkServiceImplTest
         public NsServiceRef createNextNsService(String givenName)
         {
             final int nsId = nsServiceId.getAndIncrement();
-            String nsName = "NS#" + nsId + "[" + givenName + "]";
+            String nsName = namePrefix + "NS#" + nsId + "[" + givenName + "]";
             final NsServiceRef nsServiceRef = new NsServiceRef(nsName, nsId);
 
             nameToNsServiceRef.put(givenName, nsServiceRef);
@@ -204,25 +227,48 @@ public class MppNetworkServiceImplTest
             Preconditions.checkArgument(nsServiceRef != null);
             return nsServiceRef;
         }
+
+        public void setNamePrefix(String namePrefix)
+        {
+            this.namePrefix = namePrefix;
+        }
     }
 
-    private abstract static class TestWithNsServices
+    private abstract static class TestWithNsServices implements Runnable
     {
+        private final static Logger logger = LoggerFactory.getLogger(TestWithNsServices.class);
 
         final NsServiceProducer nsServiceProducer = getNsServiceProducer();
 
-        void run() throws Exception
+        CompletableFuture<Object> hasShutdown = new CompletableFuture<>();
+
+        @Override
+        public void run()
         {
             setup(nsServiceProducer);
             nsServiceProducer.initServices();
             try
             {
-                runTest(nsServiceProducer);
+                try
+                {
+                    final CompletableFuture<Object> isTestDone = runTest(nsServiceProducer);
+                    isTestDone.get(10_000, TimeUnit.MILLISECONDS);
+                }
+                catch (Exception e)
+                {
+                    logger.error("Error during runTest", e);
+                }
             }
             finally
             {
                 nsServiceProducer.shutdownServices();
+                hasShutdown.complete(null);
             }
+        }
+
+        public CompletableFuture<Object> getHasShutdown()
+        {
+            return hasShutdown;
         }
 
         protected <T> CompletableFuture<T> sendMessage(String from,
@@ -243,7 +289,7 @@ public class MppNetworkServiceImplTest
 
         abstract protected void setup(NsServiceProducer nsServiceProducer);
 
-        abstract protected void runTest(NsServiceLookup nsServiceLookup) throws Exception;
+        abstract protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception;
     }
 
     private static NsServiceProducer getNsServiceProducer()
@@ -254,7 +300,7 @@ public class MppNetworkServiceImplTest
     @Test
     public void testCreateMppNetworkServicesWithTester() throws Exception
     {
-        new TestWithNsServices()
+        final TestWithNsServices testCase = new TestWithNsServices()
         {
             protected void setup(NsServiceProducer nsServiceProducer)
             {
@@ -262,11 +308,16 @@ public class MppNetworkServiceImplTest
                 final NsServiceRef ns2 = nsServiceProducer.createNextNsService("second");
             }
 
-            protected void runTest(NsServiceLookup nsServiceLookup)
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup)
             {
                 // do nothing
+                final CompletableFuture<Object> objectCompletableFuture = new CompletableFuture<>();
+                objectCompletableFuture.complete(null);
+                return objectCompletableFuture;
             }
-        }.run();
+        };
+        backgroundTestExecutor.submit(testCase);
+        testCase.getHasShutdown().get();
     }
 
     @Test
@@ -288,7 +339,7 @@ public class MppNetworkServiceImplTest
         ns1.initialize();
 
         final OpenConnectionClient openConnectionClient = new OpenConnectionClient();
-        openConnectionClient.openConnection(ns1Port, 1000, channelFuture -> {
+        openConnectionClient.openConnectionBlocking(ns1Port, 1000, channelFuture -> {
             org.junit.Assert.assertTrue("Opening channel to port: " + ns1Port + " is a success", channelFuture.isSuccess());
             channelFuture.channel().close();
         });
@@ -299,23 +350,28 @@ public class MppNetworkServiceImplTest
     @Test
     public void testShouldBeAbleToConnectAfterInitilizedWithTester() throws Exception
     {
-        new TestWithNsServices()
+        final TestWithNsServices testCase = new TestWithNsServices()
         {
             protected void setup(NsServiceProducer nsServiceProducer)
             {
                 nsServiceProducer.createNextNsService();
             }
 
-            protected void runTest(NsServiceLookup nsServiceLookup) throws Exception
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
             {
                 final OpenConnectionClient openConnectionClient = new OpenConnectionClient();
                 final int portForNs1 = nsServiceLookup.getById(1).getPort();
-                openConnectionClient.openConnection(portForNs1, 1000, channelFuture -> {
-                    org.junit.Assert.assertTrue("Opening channel to port: " + portForNs1 + " is a success", channelFuture.isSuccess());
+                openConnectionClient.openConnectionBlocking(portForNs1, 1000, channelFuture -> {
+                    Assert.assertTrue("Opening channel to port: " + portForNs1 + " is a success", channelFuture.isSuccess());
                     channelFuture.channel().close();
                 });
+                final CompletableFuture<Object> future = new CompletableFuture<>();
+                future.complete(null);
+                return future;
             }
-        }.run();
+        };
+        backgroundTestExecutor.submit(testCase);
+        testCase.getHasShutdown().get();
     }
 
     private static class DummyDiscardMessage implements MppRequestMessage
@@ -430,26 +486,29 @@ public class MppNetworkServiceImplTest
             isTestDone.complete(null);
         });
 
-        new TestWithNsServices()
+        final TestWithNsServices testCase = new TestWithNsServices()
         {
             protected void setup(NsServiceProducer nsServiceProducer)
             {
+                nsServiceProducer.setNamePrefix("Test 1");
                 final NsServiceRef node1 = nsServiceProducer.createNextNsService("node1");
                 node1.setMessageHandler(ns1Executor);
                 final NsServiceRef node2 = nsServiceProducer.createNextNsService("node2");
                 node2.setMessageHandler(ns2Executor);
             }
 
-            protected void runTest(NsServiceLookup nsServiceLookup) throws Exception
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
             {
                 final DummyDiscardMessage dummyDiscardMessage = new DummyDiscardMessage();
                 sendMessage("node1", dummyDiscardMessage, NoMppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, "node2");
+                return isTestDone;
             }
-        }.run();
+        };
+        backgroundTestExecutor.submit(testCase);
         isTestDone.get();
         Assert.assertTrue("NS2 has received something", ns2Executor.receivedAnything());
         Assert.assertFalse("NS1 has received nothing", ns1Executor.receivedAnything());
-
+        testCase.getHasShutdown().get();
     }
 
     private static class RequestQuorumMessage implements MppRequestMessage {
@@ -469,9 +528,22 @@ public class MppNetworkServiceImplTest
         }
     }
 
+    private static ExecutorService backgroundTestExecutor;
+
+    @BeforeClass
+    public static void setupTestBefore() {
+        backgroundTestExecutor = Executors.newFixedThreadPool(3);
+    }
+
+    @AfterClass
+    public static void cleanUpAfterTestClass() {
+        backgroundTestExecutor.shutdown();
+    }
+
     @Test
     public void testQuorumValue() throws Exception
     {
+        System.out.println("TEST testQuorumValue");
         final int expectedValue = 132;
         final ExpectingMessageHandlerWithResponse n1Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue));
         final ExpectingMessageHandlerWithResponse n2Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue));
@@ -479,25 +551,26 @@ public class MppNetworkServiceImplTest
         final ExpectingMessageHandlerWithResponse n4Handler = new ExpectingMessageHandlerWithResponse(req -> new TestQuorumMessageResponse(expectedValue));
 
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
-        new TestWithNsServices()
+        final TestWithNsServices testCase = new TestWithNsServices()
         {
             protected void setup(NsServiceProducer nsServiceProducer)
             {
+                nsServiceProducer.setNamePrefix("Test-Quorum");
                 nsServiceProducer.createNextNsService("n1").setMessageHandler(n1Handler);
                 nsServiceProducer.createNextNsService("n2").setMessageHandler(n2Handler);
                 nsServiceProducer.createNextNsService("n3").setMessageHandler(n3Handler);
                 nsServiceProducer.createNextNsService("n4").setMessageHandler(n4Handler);
             }
 
-            protected void runTest(NsServiceLookup nsServiceLookup) throws Exception
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
             {
                 final CompletableFuture<Collection<MppResponseMessage>> responses = sendMessage("n1", new RequestQuorumMessage(), new QuorumMppMessageResponseExpectations(4), "n2", "n3", "n4");
 
                 responses.thenAccept(rs -> {
                     final Map<Integer, Long> valueToCount = rs.stream()
-                                                         .map(x -> (TestQuorumMessageResponse) x)
-                                                         .map(x -> x.value)
-                                                         .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+                                                              .map(x -> (TestQuorumMessageResponse) x)
+                                                              .map(x -> x.value)
+                                                              .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 
                     final Integer quorumReadValue = valueToCount.entrySet().stream().reduce((op1, op2) -> {
                         if (op1.getValue() > op2.getValue()) return op1;
@@ -505,13 +578,113 @@ public class MppNetworkServiceImplTest
                     }).get().getKey();
 
                     Assert.assertEquals(expectedValue, quorumReadValue.intValue());
+                    System.out.println("asserted value");
                     isTestDone.complete(null);
                 });
+                return isTestDone;
             }
-        }.run();
+        };
+        backgroundTestExecutor.submit(testCase);
 
+        testCase.getHasShutdown().get();
         isTestDone.get();
 
+    }
+
+    private static class SleepingMessageHandler implements MppMessageHandler {
+
+        private final long timeToSleep;
+
+        private SleepingMessageHandler(long timeToSleep)
+        {
+            this.timeToSleep = timeToSleep;
+        }
+
+        public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
+        {
+            try
+            {
+                Thread.sleep(timeToSleep);
+            }
+            catch (InterruptedException e)
+            {
+                e.printStackTrace();
+            }
+
+            final CompletableFuture<MppResponseMessage> neverCompleted = new CompletableFuture<>();
+            return neverCompleted;
+        }
+    }
+
+    private abstract class SingleOutgoingMessageHooks implements MppNetworkHooks {
+
+        MppMessageEnvelope message;
+
+        MppNetworkService.MessageReceipient receipient;
+
+        public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+        {
+            Preconditions.checkArgument(this.message == null);
+            Preconditions.checkArgument(this.receipient == null);
+            this.message = message;
+            this.receipient = receipient;
+        }
+    }
+
+    @Test
+    public void testTimeoutHandling() throws Exception {
+        CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+        final String n2TimingOut = "n2TimingOut";
+
+        long defaultTimeout = 100;
+        final MppNetworkHooks hooks = new SingleOutgoingMessageHooks() {
+
+            public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+            {
+
+            }
+
+            public void messageHasTimedOut(MppMessage message, MppNetworkService.MessageReceipient receipient)
+            {
+                isTestDone.complete(true);
+            }
+
+            public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients)
+            {
+                Assert.assertEquals(message.getId(), messageId);
+                isTestDone.complete(false);
+            }
+        };
+
+
+        MppMessageHandler sleepingMessageHandler = new SleepingMessageHandler(defaultTimeout + 20);
+        // For test to fail
+        final ExpectingMessageHandlerWithResponse n2Handler = new ExpectingMessageHandlerWithResponse(r -> {
+            return new TestQuorumMessageResponse(1);
+        });
+
+        backgroundTestExecutor.submit(new TestWithNsServices()
+        {
+            protected void setup(NsServiceProducer nsServiceProducer)
+            {
+                final NsServiceRef n1 = nsServiceProducer.createNextNsService(N_1);
+                n1.setDefaultTimeout(defaultTimeout);
+                n1.setHooks(hooks);
+
+                final NsServiceRef n2 = nsServiceProducer.createNextNsService(n2TimingOut);
+
+//                n2.setMessageHandler(sleepingMessageHandler);
+                n2.setMessageHandler(n2Handler);
+            }
+
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
+            {
+                sendMessage(N_1, new RequestQuorumMessage(), new SingleMppMessageResponseExpectations(), n2TimingOut);
+                return isTestDone;
+            }
+        });
+
+        Assert.assertTrue("Timeout has occurred", (Boolean)isTestDone.get());
     }
 
 
@@ -519,6 +692,19 @@ public class MppNetworkServiceImplTest
     // TODO - timeout of an request
     // TODO - node that can be connected to, but it does not answer with response
     // TODO - node that cannot be connected to (it is down)
+
+    // TODO [MPP] After timeout, and nodes down -> Go back to implementing main functionality of reading, writing private memtables
+
+    // TODO [MPP] Are message executions idempotent? I will need to verify that later on.
+
+    // TODO [MPP] Additional feature: ACKing of messages
+
+    // TODO [MPP] Later on: reusing same connection to respond to.
+
+    // TODO [MPP] Later on: instead of using ObjectEncoder/Decoder I need something else, or do I?
+    // TODO It is limited by the buffer so I could increase buffer size for prototype purposes.
+
+
 
 
     @Test
@@ -610,7 +796,7 @@ public class MppNetworkServiceImplTest
     private class OpenConnectionClient
     {
 
-        void openConnection(int portToConnect, long waitMillis, Consumer<ChannelFuture> doWithChannel) throws UnknownHostException, InterruptedException
+        void openConnectionBlocking(int portToConnect, long waitMillis, Consumer<ChannelFuture> doWithChannel) throws UnknownHostException, InterruptedException
         {
             EventLoopGroup workerGroup = new NioEventLoopGroup(1);
 
