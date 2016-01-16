@@ -33,6 +33,8 @@ public interface MppMessageResponseExpectations<T>
 
     MppMessageResponseDataHolder<T> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients);
 
+    void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient);
+
     /**
      * Keeps state of incoming responses until response can be evaluted.
      */

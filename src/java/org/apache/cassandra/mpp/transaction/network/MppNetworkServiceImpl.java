@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -274,6 +275,18 @@ public class MppNetworkServiceImpl implements MppNetworkService
                 lock.unlock();
             }
         }
+
+        public void timeout(long messageId, MessageReceipient r)
+        {
+            lock.lock();
+            try {
+                expectations.timeoutHasOccurred(dataHolder, messageId, r);
+            }
+            finally
+            {
+                lock.unlock();
+            }
+        }
     }
 
     private AtomicLong messageIdGenerator = new AtomicLong(1);
@@ -301,6 +314,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
             if(hooks != null) {
                 hooks.outgoingMessageBeforeSending(message, r);
             }
+            final long messageId = message.getId();
             final ChannelFuture channelFuture = mppNettyClient.connect(r.host(), r.port());
             try
             {
@@ -320,6 +334,11 @@ public class MppNetworkServiceImpl implements MppNetworkService
 //                    }
 //                });
 //                }
+                write.addListener(f -> {
+                    nettyEventLoopGroupsHolder.getWorkerGroup().schedule((Runnable) () -> {
+                        messageHasTimedOut(messageId, r);
+                    }, getDefaultTimeout(), TimeUnit.MILLISECONDS);
+                });
                 channel.closeFuture().sync();
 
 
@@ -354,10 +373,21 @@ public class MppNetworkServiceImpl implements MppNetworkService
         return dataHolder != null ? dataHolder.getFuture() : null;
     }
 
+    private void messageHasTimedOut(long messageId, MessageReceipient r)
+    {
+        final AwaitingResponseMessageHolder awaitingResponseMessageHolder = messageIdToResponseHolder.get(messageId);
+        awaitingResponseMessageHolder.timeout(messageId, r);
+        unregisterResponseHolder(messageId);
+        hooks.messageHasTimedOut(messageId, r);
+    }
+
     public void handleIncomingMessage(MppMessageEnvelope inEnv, MessageReceipient from)
     {
         long id = inEnv.getId();
         MppMessage incommingMessage = inEnv.getMessage();
+        if(hooks != null) {
+            hooks.incomingMessage(inEnv, from);
+        }
         if (incommingMessage.isRequest())
         {
             final CompletableFuture<MppResponseMessage> executed = messageHandler.handleMessage((MppRequestMessage) incommingMessage);

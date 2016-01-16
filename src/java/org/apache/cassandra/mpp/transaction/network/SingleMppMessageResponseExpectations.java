@@ -21,6 +21,7 @@ package org.apache.cassandra.mpp.transaction.network;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 
 import com.google.common.base.Preconditions;
 
@@ -59,6 +60,12 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
     {
         Preconditions.checkArgument(receipients.size() == 1, "Expected single receipient, but had %s", receipients);
         return new SingleResponseDataHolder(new CompletableFuture<>(), receipients.iterator().next());
+    }
+
+    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient)
+    {
+        SingleResponseDataHolder singleResponseDataHolder = (SingleResponseDataHolder) dataHolder;
+        singleResponseDataHolder.future.completeExceptionally(new TimeoutException("Timeout occurred for receipient" + receipient));
     }
 
     @Override

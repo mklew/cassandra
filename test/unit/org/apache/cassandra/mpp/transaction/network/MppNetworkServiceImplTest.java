@@ -629,6 +629,42 @@ public class MppNetworkServiceImplTest
             this.message = message;
             this.receipient = receipient;
         }
+
+        public MppMessageEnvelope getMessage()
+        {
+            return message;
+        }
+
+        public MppNetworkService.MessageReceipient getReceipient()
+        {
+            return receipient;
+        }
+    }
+
+    private abstract class RecordIncomingMessageHook implements MppNetworkHooks {
+
+        MppMessageEnvelope message;
+
+        MppNetworkService.MessageReceipient from;
+
+        public void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from)
+        {
+            Preconditions.checkArgument(this.message == null);
+            Preconditions.checkArgument(this.from == null);
+            this.message = message;
+            this.from = from;
+        }
+
+
+        public MppMessageEnvelope getMessage()
+        {
+            return message;
+        }
+
+        public MppNetworkService.MessageReceipient getFrom()
+        {
+            return from;
+        }
     }
 
     @Test
@@ -636,7 +672,7 @@ public class MppNetworkServiceImplTest
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
         final String n2TimingOut = "n2TimingOut";
 
-        long defaultTimeout = 100;
+        long defaultTimeout = 10;
         final MppNetworkHooks hooks = new SingleOutgoingMessageHooks() {
 
             public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
@@ -644,8 +680,9 @@ public class MppNetworkServiceImplTest
 
             }
 
-            public void messageHasTimedOut(MppMessage message, MppNetworkService.MessageReceipient receipient)
+            public void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient)
             {
+                System.out.println("Timeout has occurred");
                 isTestDone.complete(true);
             }
 
@@ -654,14 +691,38 @@ public class MppNetworkServiceImplTest
                 Assert.assertEquals(message.getId(), messageId);
                 isTestDone.complete(false);
             }
+
+            public void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from)
+            {
+
+            }
+        };
+
+        RecordIncomingMessageHook n2hooks = new RecordIncomingMessageHook()
+        {
+            public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+            {
+
+            }
+
+            public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+            {
+
+            }
+
+            public void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient)
+            {
+
+            }
+
+            public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients)
+            {
+
+            }
         };
 
 
         MppMessageHandler sleepingMessageHandler = new SleepingMessageHandler(defaultTimeout + 20);
-        // For test to fail
-        final ExpectingMessageHandlerWithResponse n2Handler = new ExpectingMessageHandlerWithResponse(r -> {
-            return new TestQuorumMessageResponse(1);
-        });
 
         backgroundTestExecutor.submit(new TestWithNsServices()
         {
@@ -673,8 +734,8 @@ public class MppNetworkServiceImplTest
 
                 final NsServiceRef n2 = nsServiceProducer.createNextNsService(n2TimingOut);
 
-//                n2.setMessageHandler(sleepingMessageHandler);
-                n2.setMessageHandler(n2Handler);
+                n2.setMessageHandler(sleepingMessageHandler);
+                n2.setHooks(n2hooks);
             }
 
             protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
@@ -684,7 +745,8 @@ public class MppNetworkServiceImplTest
             }
         });
 
-        Assert.assertTrue("Timeout has occurred", (Boolean)isTestDone.get());
+        Assert.assertTrue("Timeout has occurred", (Boolean)isTestDone.get(10_000, TimeUnit.MILLISECONDS));
+        Assert.assertNotNull(n2hooks.getMessage());
     }
 
 

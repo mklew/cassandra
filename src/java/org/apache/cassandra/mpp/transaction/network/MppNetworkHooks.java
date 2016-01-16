@@ -41,15 +41,16 @@ public interface MppNetworkHooks
     void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient);
 
     /**
-     *
-     * @param message message for which timeout has occurred
+     *  @param messageId message for which timeout has occurred
      * @param receipient receipient which was supposed to handle message and send response within timeout limits
      */
-    void messageHasTimedOut(MppMessage message, MppNetworkService.MessageReceipient receipient);
+    void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient);
 
     /**
      *  @param messageId that was handled successfully
      * @param receipients that handled message
      */
     void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients);
+
+    void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from);
 }

@@ -48,6 +48,11 @@ public class NoMppMessageResponseExpectations implements MppMessageResponseExpec
         return new NoMessageResponseDataHolder();
     }
 
+    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient)
+    {
+        throw new IllegalStateException("No response expectations cannot timeout, because there should be no waiting for response");
+    }
+
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
     {
         throw new IllegalStateException("[initializeDataHolder] No response expected, but dataHolder" + dataHolder

@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 
 import com.google.common.base.Preconditions;
 
@@ -77,6 +78,13 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
     {
         CompletableFuture<Collection<MppResponseMessage>> f = new CompletableFuture<>();
         return new QuorumDataHolder(f, new HashMap<>((receipients.size() * 3 / 4 ) + 1), new HashSet<>(receipients));
+    }
+
+    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient)
+    {
+         // TODO [MPP] count how many timeouts occurred
+        QuorumDataHolder q = (QuorumDataHolder) dataHolder;
+        q.future.completeExceptionally(new TimeoutException("Timeout occurred"));
     }
 
     public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
