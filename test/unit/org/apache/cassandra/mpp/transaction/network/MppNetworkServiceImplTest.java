@@ -23,10 +23,12 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -55,6 +57,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.mpp.transaction.NodeContext;
+import org.apache.cassandra.mpp.transaction.network.messages.QuorumReadRequest;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -123,7 +126,7 @@ public class MppNetworkServiceImplTest
             mppNetworkService.setListeningPort(getPort());
             mppNetworkService.setName(getNsServiceName());
 
-            mppNetworkService.initialize();
+            mppNetworkService.start();
 
             return null;
         }
@@ -328,8 +331,8 @@ public class MppNetworkServiceImplTest
     {
         final MppNetworkServiceImpl ns1 = setupNs1();
         final MppNetworkServiceImpl ns2 = setupNs2();
-        ns1.initialize();
-        ns2.initialize();
+        ns1.start();
+        ns2.start();
 
         ns1.shutdown();
         ns2.shutdown();
@@ -339,7 +342,7 @@ public class MppNetworkServiceImplTest
     public void testShouldBeAbleToConnectAfterInitilized() throws Exception
     {
         final MppNetworkServiceImpl ns1 = setupNs1();
-        ns1.initialize();
+        ns1.start();
 
         final OpenConnectionClient openConnectionClient = new OpenConnectionClient();
         openConnectionClient.openConnectionBlocking(ns1Port, 1000, channelFuture -> {
@@ -818,8 +821,8 @@ public class MppNetworkServiceImplTest
             isTestDone.complete(null);
         });
         final MppNetworkService ns2 = setupNs2(ns2Executor);
-        ns1.initialize();
-        ns2.initialize();
+        ns1.start();
+        ns2.start();
 
         final DummyDiscardMessage dummyDiscardMessage = new DummyDiscardMessage();
         ns1.sendMessage(dummyDiscardMessage, NoMppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE,
@@ -852,6 +855,37 @@ public class MppNetworkServiceImplTest
     }
 
     @Test
+    public void testCommunicateWithRealNode() throws Exception
+    {
+        final CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+
+        final TestWithNsServices testCase = new TestWithNsServices()
+        {
+            protected void setup(NsServiceProducer nsServiceProducer)
+            {
+                nsServiceProducer.createNextNsService(N_1);
+            }
+
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
+            {
+                final NsServiceRef n1 = nsServiceLookup.getByName(N_1);
+
+                final MppMessageReceipient receipient = n1.mppNetworkService.createReceipient(InetAddress.getLocalHost(), 9043);
+                final MessageResult messageResult = n1.mppNetworkService.sendMessage(new QuorumReadRequest(UUID.randomUUID(), Collections.emptyList()), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE,
+                                                                                     Collections.singletonList(receipient));
+
+                final CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> completableFuture = messageResult.singleMessageSentIntoNetwork();
+                Assert.assertTrue("Message should be successfully delivered", !completableFuture.get().right.isPresent());
+                isTestDone.complete(null);
+                return isTestDone;
+            }
+        };
+        backgroundTestExecutor.submit(testCase);
+
+        testCase.getHasShutdown().get();
+    }
+
+    @Test
     public void testShouldSendDummyRequestMessageAndThenReceiveSingleResponse() throws Exception
     {
 
@@ -872,8 +906,8 @@ public class MppNetworkServiceImplTest
 //        });
         final MppNetworkService ns2 = setupNs2();
 
-        ns1.initialize();
-        ns2.initialize();
+        ns1.start();
+        ns2.start();
         final DummyRequestMessage requestMessage = new DummyRequestMessage();
         // ns2 sends DummyRequestMessage to ns1
         final CompletableFuture<MppResponseMessage> responseF = ns2.sendMessage(requestMessage, new SingleMppMessageResponseExpectations(), Arrays.asList(ns1.createReceipient(InetAddress.getLocalHost(), ns1Port))).getResponseFuture();

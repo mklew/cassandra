@@ -16,35 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction.network;
+package org.apache.cassandra.mpp.transaction.network.messages;
 
-import java.net.InetAddress;
-import java.util.Collection;
+import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
+ * @since 17/01/16
  */
-public interface MppNetworkService
+public class EmptyMppMessageResponse implements MppResponseMessage
 {
-
-    /**
-     *
-     * @param message to be sent
-     * @param mppMessageResponseExpectations
-     *@param receipients @return future or {@code null}
-     */
-    <T> MessageResult<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<MppMessageReceipient> receipients);
-
-    void handleIncomingMessage(MppMessageEnvelope envelope, MppMessageReceipient from);
-
-    MppMessageReceipient createReceipient(InetAddress addr);
-
-    MppMessageReceipient createReceipient(InetAddress addr, int port);
-
-    void start();
-
-    void shutdown() throws Exception;
-
-    boolean isRunning();
 }

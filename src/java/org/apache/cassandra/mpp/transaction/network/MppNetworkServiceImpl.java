@@ -81,7 +81,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         this.listeningPort = listeningPort;
     }
 
-    public void initialize()
+    public void start()
     {
         assert state == State.NOT_STARTED;
         assert listeningPort != 0;
@@ -120,6 +120,11 @@ public class MppNetworkServiceImpl implements MppNetworkService
             e.printStackTrace();
         }
         state = State.SHUTDOWN;
+    }
+
+    public boolean isRunning()
+    {
+        return state == State.RUNNING;
     }
 
     private NettyEventLoopGroupsHolder nettyEventLoopGroupsHolder;
@@ -351,7 +356,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
                 {
                     if (!f.isSuccess())
                     {
-                        hooks.cannotConnectToReceipient(messageId, r, f.cause());
+                        if(hooks != null) hooks.cannotConnectToReceipient(messageId, r, f.cause());
                         completeWithThrowable(r, futureSuccessOrFailure, f.cause());
                     }
                 }

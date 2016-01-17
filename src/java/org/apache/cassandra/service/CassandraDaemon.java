@@ -29,7 +29,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -37,24 +36,28 @@ import javax.management.remote.JMXConnectorServer;
 import javax.management.remote.JMXServiceURL;
 import javax.management.remote.rmi.RMIConnectorServer;
 
-import com.addthis.metrics3.reporter.config.ReporterConfig;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistryListener;
-import com.codahale.metrics.SharedMetricRegistries;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.*;
+import com.addthis.metrics3.reporter.config.ReporterConfig;
+import com.codahale.metrics.Meter;
+import com.codahale.metrics.MetricRegistryListener;
+import com.codahale.metrics.SharedMetricRegistries;
+import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
+import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SizeEstimatesRecorder;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.WindowsFailedSnapshotTracker;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
@@ -66,11 +69,16 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.mpp.MppExtensionServices;
 import org.apache.cassandra.schema.LegacySchemaMigrator;
-import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.thrift.ThriftServer;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.CLibrary;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.Mx4jTool;
+import org.apache.cassandra.utils.RMIServerSocketFactoryImpl;
+import org.apache.cassandra.utils.WindowsTimer;
 
 /**
  * The <code>CassandraDaemon</code> is an abstraction for a Cassandra daemon
@@ -132,6 +140,8 @@ public class CassandraDaemon
 
     public Server thriftServer;
     private NativeTransportService nativeTransportService;
+
+    private MppExtensionServices mppExtensionServices;
 
     private final boolean runManaged;
     protected final StartupChecks startupChecks;
@@ -390,6 +400,9 @@ public class CassandraDaemon
         // Native transport
         nativeTransportService = new NativeTransportService();
 
+        // Multi partition paxos extension
+        mppExtensionServices = new MppExtensionServices();
+
         completeSetup();
     }
 
@@ -479,6 +492,8 @@ public class CassandraDaemon
             thriftServer.start();
         else
             logger.info("Not starting RPC server as requested. Use JMX (StorageService->startRPCServer()) or nodetool (enablethrift) to start it");
+
+        startMppExtensionServices();
     }
 
     /**
@@ -609,15 +624,35 @@ public class CassandraDaemon
             nativeTransportService.start();
     }
 
+
+    public void startMppExtensionServices()
+    {
+        if(mppExtensionServices == null)
+            throw new IllegalStateException("setup() must be called first for CassandraDaemon");
+        else
+            mppExtensionServices.start();
+    }
+
     public void stopNativeTransport()
     {
         if (nativeTransportService != null)
             nativeTransportService.stop();
     }
 
+    public void stopMppExtensionServices()
+    {
+        if (mppExtensionServices != null)
+            mppExtensionServices.stop();
+    }
+
     public boolean isNativeTransportRunning()
     {
         return nativeTransportService != null ? nativeTransportService.isRunning() : false;
+    }
+
+    public boolean isMppExtensionServicesRunning()
+    {
+        return mppExtensionServices != null ? mppExtensionServices.isRunning() : false;
     }
 
 
