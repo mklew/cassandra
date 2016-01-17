@@ -129,7 +129,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
 
                 final Collection<InetAddress> receipientsAddresses = e.getKey();
 
-                final CompletableFuture<Collection<MppResponseMessage>> collectionCompletableFuture = mppNetworkService.sendMessage(quorumReadRequest, q, getReceipients(receipientsAddresses));
+                final CompletableFuture<Collection<MppResponseMessage>> collectionCompletableFuture = mppNetworkService.sendMessage(quorumReadRequest, q, getReceipients(receipientsAddresses)).getResponseFuture();
                 return collectionCompletableFuture;
             });
         }).collect(Collectors.toList());

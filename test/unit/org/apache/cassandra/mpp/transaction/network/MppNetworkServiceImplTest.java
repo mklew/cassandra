@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -54,6 +55,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.mpp.transaction.NodeContext;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -148,7 +150,7 @@ public class MppNetworkServiceImplTest
             return null;
         }
 
-        public <T> CompletableFuture<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<NsServiceRef> receipientRefs)
+        public <T> MessageResult<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<NsServiceRef> receipientRefs)
         {
             final List<MppNetworkService.MessageReceipient> messageReceipients = receipientRefs.stream().map(r -> {
                 try
@@ -272,7 +274,7 @@ public class MppNetworkServiceImplTest
             return hasShutdown;
         }
 
-        protected <T> CompletableFuture<T> sendMessage(String from,
+        protected <T> MessageResult<T> sendMessage(String from,
                                                       MppMessage message,
                                                       MppMessageResponseExpectations<T> mppMessageResponseExpectations,
                                                       String ... receipients) {
@@ -565,7 +567,7 @@ public class MppNetworkServiceImplTest
 
             protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
             {
-                final CompletableFuture<Collection<MppResponseMessage>> responses = sendMessage("n1", new RequestQuorumMessage(), new QuorumMppMessageResponseExpectations(4), "n2", "n3", "n4");
+                final CompletableFuture<Collection<MppResponseMessage>> responses = sendMessage("n1", new RequestQuorumMessage(), new QuorumMppMessageResponseExpectations(4), "n2", "n3", "n4").getResponseFuture();
 
                 responses.thenAccept(rs -> {
                     final Map<Integer, Long> valueToCount = rs.stream()
@@ -721,9 +723,24 @@ public class MppNetworkServiceImplTest
         Assert.assertNotNull(n2hooks.getMessage());
     }
 
+    private static class RefHolder<T> {
+        T ref;
+
+        public T getRef()
+        {
+            return ref;
+        }
+
+        public void setRef(T ref)
+        {
+            this.ref = ref;
+        }
+    }
+
     @Test
     public void testRequestFailureWhenNodeGoesDown() throws Exception {
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+        RefHolder<CompletableFuture> sentMessageFutureHolder = new RefHolder<>();
 
         final TestWithNsServices testCase = new TestWithNsServices()
         {
@@ -753,9 +770,11 @@ public class MppNetworkServiceImplTest
             protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
             {
                 nsServiceLookup.getByName(N_2).shutdown();
-
-                sendMessage(N_1, new DummyDiscardMessage(), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, N_2);
-
+                final MessageResult messageResult = sendMessage(N_1, new DummyDiscardMessage(), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, N_2);
+                CompletableFuture<Pair<MppNetworkService.MessageReceipient, Optional<Throwable>>> singleMessageSent = messageResult.singleMessageSentIntoNetwork();
+                final Optional<Throwable> right = singleMessageSent.get().right;
+                Assert.assertTrue("Expection exists", right.isPresent());
+                sentMessageFutureHolder.setRef(singleMessageSent);
                 return isTestDone;
             }
         };
@@ -766,17 +785,9 @@ public class MppNetworkServiceImplTest
 
 
     // TODO [MPP] Tests that take into account:
-    // TODO - node that can be connected to, but it does not answer with response
-    // TODO - node that cannot be connected to (it is down)
-
-    // TODO [MPP] After timeout, and nodes down -> Go back to implementing main functionality of reading, writing private memtables
-
     // TODO [MPP] Are message executions idempotent? I will need to verify that later on.
-
     // TODO [MPP] Additional feature: ACKing of messages
-
     // TODO [MPP] Later on: reusing same connection to respond to.
-
     // TODO [MPP] Later on: instead of using ObjectEncoder/Decoder I need something else, or do I?
     // TODO It is limited by the buffer so I could increase buffer size for prototype purposes.
 
@@ -854,7 +865,7 @@ public class MppNetworkServiceImplTest
         ns2.initialize();
         final DummyRequestMessage requestMessage = new DummyRequestMessage();
         // ns2 sends DummyRequestMessage to ns1
-        final CompletableFuture<MppResponseMessage> responseF = ns2.sendMessage(requestMessage, new SingleMppMessageResponseExpectations(), Arrays.asList(ns1.createReceipient(InetAddress.getLocalHost(), ns1Port)));
+        final CompletableFuture<MppResponseMessage> responseF = ns2.sendMessage(requestMessage, new SingleMppMessageResponseExpectations(), Arrays.asList(ns1.createReceipient(InetAddress.getLocalHost(), ns1Port))).getResponseFuture();
 
         responseF.thenAccept(response -> {
             final DummyResponse dummyResponse = (DummyResponse) response;
