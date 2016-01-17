@@ -567,7 +567,18 @@ public class MppNetworkServiceImplTest
 
             protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
             {
-                final CompletableFuture<Collection<MppResponseMessage>> responses = sendMessage("n1", new RequestQuorumMessage(), new QuorumMppMessageResponseExpectations(4), "n2", "n3", "n4").getResponseFuture();
+                final MessageResult<Collection<MppResponseMessage>> messageResult = sendMessage("n1", new RequestQuorumMessage(), new QuorumMppMessageResponseExpectations(4), "n2", "n3", "n4");
+                messageResult.getMessageSentIntoNetwork().forEach(f -> {
+                    try
+                    {
+                        Assert.assertTrue("Has been successfully sent", !f.get().right.isPresent());
+                    }
+                    catch (Exception e)
+                    {
+                        Assert.fail();
+                    }
+                });
+                final CompletableFuture<Collection<MppResponseMessage>> responses = messageResult.getResponseFuture();
 
                 responses.thenAccept(rs -> {
                     final Map<Integer, Long> valueToCount = rs.stream()
