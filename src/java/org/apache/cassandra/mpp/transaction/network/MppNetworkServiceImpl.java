@@ -27,6 +27,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -52,11 +53,23 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     Logger logger = LoggerFactory.getLogger(MppNetworkServiceImpl.class);
 
+    private enum State
+    {
+        NOT_STARTED, RUNNING, SHUTDOWN
+    }
+
     private int listeningPort;
+
+    private static final long SHUTDOWN_TIMEOUT_MS = 100;
+    private static final long SHUTDOWN_GRACE_PERIOD_TIMEOUT_MS = 50;
+
+    private static final long TIMEOUT_TO_HANDLE_MESSAGE_MS = 5_000;
 
     private long defaultTimeout = 250;
     private MppNetworkHooks hooks;
     private String name;
+
+    private State state = State.NOT_STARTED;
 
     public void setListeningPort(int listeningPort)
     {
@@ -65,6 +78,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     public void initialize()
     {
+        assert state == State.NOT_STARTED;
         assert listeningPort != 0;
         assert messageHandler != null;
         initializeInternal();
@@ -72,12 +86,18 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     public void shutdown() throws Exception
     {
+        if (state == State.SHUTDOWN)
+        {
+            return;
+        }
+        assert state == State.RUNNING;
         logger.info("Shutting down netty server {}", name);
         mppNettyServer.shutdown();
         try
         {
             logger.info("Shutting down workerGroup {}", name);
-            nettyEventLoopGroupsHolder.workerGroup.shutdownGracefully().get();
+            // TODO [MPP] timeout on GET and then do just shutdown if it hasn't been shut already.
+            nettyEventLoopGroupsHolder.workerGroup.shutdownGracefully(SHUTDOWN_GRACE_PERIOD_TIMEOUT_MS, SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS).get();
             logger.info("WorkerGroup has been shutdown {}", name);
         }
         catch (InterruptedException | ExecutionException e)
@@ -87,13 +107,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
         try
         {
             logger.info("Shutting bossGroup has been shutdown {}", name);
-            nettyEventLoopGroupsHolder.bossGroup.shutdownGracefully().get();
+            nettyEventLoopGroupsHolder.bossGroup.shutdownGracefully(SHUTDOWN_GRACE_PERIOD_TIMEOUT_MS, SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS).get();
             logger.info("BossGroup has been shutdown {}", name);
         }
         catch (InterruptedException | ExecutionException e)
         {
             e.printStackTrace();
         }
+        state = State.SHUTDOWN;
     }
 
     private NettyEventLoopGroupsHolder nettyEventLoopGroupsHolder;
@@ -237,6 +258,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         try
         {
             mppNettyServer.start(listeningPort, (message, from) -> handleIncomingMessage(message, createReceipient(from.getAddress(), from.getPort())));
+            state = State.RUNNING;
         }
         catch (InterruptedException e)
         {
@@ -316,10 +338,21 @@ public class MppNetworkServiceImpl implements MppNetworkService
             }
             final long messageId = message.getId();
             final ChannelFuture channelFuture = mppNettyClient.connect(r.host(), r.port());
+            channelFuture.addListener(new ChannelFutureListener()
+            {
+                public void operationComplete(ChannelFuture f) throws Exception
+                {
+                    if (!f.isSuccess())
+                    {
+                        hooks.cannotConnectToReceipient(messageId, r, f.cause());
+                    }
+                }
+                });
+            final Channel channel;
             try
             {
-                final Channel channel = channelFuture.sync().channel();
-//                if(message.getMessage().isRequest()) {
+                channel = channelFuture.sync().channel();
+                //                if(message.getMessage().isRequest()) {
 //                    channel.pipeline().addLast(new NettyClientReadHandler((response, from) -> {
 //                        System.out.println("Handler got response " + response);
 //                        handleIncomingMessage(response.getId(), response.getMessage(), createReceipient(from.getAddress(), from.getPort()));
@@ -327,7 +360,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
 //                }
                 final ChannelFuture write = channel.writeAndFlush(message);
 //                if(!message.getMessage().isRequest()) {
-                    final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
+                final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
 //                write.addListener(future -> {
 //                    if(hooks != null) {
 //                        hooks.outgoingMessageHasBeenSent(message, r);
@@ -340,12 +373,13 @@ public class MppNetworkServiceImpl implements MppNetworkService
                     }, getDefaultTimeout(), TimeUnit.MILLISECONDS);
                 });
                 channel.closeFuture().sync();
-
-
             }
-            catch (InterruptedException e)
+            catch (Exception e)
             {
-                throw new RuntimeException(e);
+                if (hooks != null)
+                {
+                    hooks.cannotConnectToReceipient(messageId, r, e);
+                }
             }
         });
     }
@@ -394,14 +428,24 @@ public class MppNetworkServiceImpl implements MppNetworkService
             if(incommingMessage.isResponseRequired()) {
                 try
                 {
-                    final MppResponseMessage response = executed.get();
-                    final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
-                    final int portForResponse = inEnv.getPortForResponse();
-                    sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
+                    final MppResponseMessage response;
+                    try
+                    {
+                        response = executed.get(TIMEOUT_TO_HANDLE_MESSAGE_MS, TimeUnit.MILLISECONDS);
+                        final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
+                        final int portForResponse = inEnv.getPortForResponse();
+                        sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
+                    }
+                    catch (TimeoutException e)
+                    {
+                        if(hooks != null) {
+                            hooks.failedToExecuteIncomingMessageInTime(inEnv.getId(), from);
+                        }
+                    }
                 }
                 catch (InterruptedException | ExecutionException e)
                 {
-                    e.printStackTrace();
+                    throw new RuntimeException(e);
                 }
 //                responseMessage.thenAcceptAsync(
 

@@ -63,6 +63,7 @@ public class MppNetworkServiceImplTest
 {
 
     public static final String N_1 = "n1";
+    public static final String N_2 = "n2";
 
     private static class NoOpMessageHandler implements MppMessageHandler
     {
@@ -616,7 +617,7 @@ public class MppNetworkServiceImplTest
         }
     }
 
-    private abstract class SingleOutgoingMessageHooks implements MppNetworkHooks {
+    private abstract class SingleOutgoingMessageHooks extends NoOpMppNetworkHooks {
 
         MppMessageEnvelope message;
 
@@ -641,7 +642,7 @@ public class MppNetworkServiceImplTest
         }
     }
 
-    private abstract class RecordIncomingMessageHook implements MppNetworkHooks {
+    private abstract class RecordIncomingMessageHook extends NoOpMppNetworkHooks {
 
         MppMessageEnvelope message;
 
@@ -675,11 +676,6 @@ public class MppNetworkServiceImplTest
         long defaultTimeout = 10;
         final MppNetworkHooks hooks = new SingleOutgoingMessageHooks() {
 
-            public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
-            {
-
-            }
-
             public void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient)
             {
                 System.out.println("Timeout has occurred");
@@ -691,40 +687,14 @@ public class MppNetworkServiceImplTest
                 Assert.assertEquals(message.getId(), messageId);
                 isTestDone.complete(false);
             }
-
-            public void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from)
-            {
-
-            }
         };
 
-        RecordIncomingMessageHook n2hooks = new RecordIncomingMessageHook()
-        {
-            public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
-            {
-
-            }
-
-            public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
-            {
-
-            }
-
-            public void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient)
-            {
-
-            }
-
-            public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients)
-            {
-
-            }
-        };
+        RecordIncomingMessageHook n2hooks = new RecordIncomingMessageHook() {};
 
 
         MppMessageHandler sleepingMessageHandler = new SleepingMessageHandler(defaultTimeout + 20);
 
-        backgroundTestExecutor.submit(new TestWithNsServices()
+        final TestWithNsServices testCase = new TestWithNsServices()
         {
             protected void setup(NsServiceProducer nsServiceProducer)
             {
@@ -743,15 +713,59 @@ public class MppNetworkServiceImplTest
                 sendMessage(N_1, new RequestQuorumMessage(), new SingleMppMessageResponseExpectations(), n2TimingOut);
                 return isTestDone;
             }
-        });
+        };
+        backgroundTestExecutor.submit(testCase);
 
+        testCase.getHasShutdown().get(10_000, TimeUnit.MILLISECONDS);
         Assert.assertTrue("Timeout has occurred", (Boolean)isTestDone.get(10_000, TimeUnit.MILLISECONDS));
         Assert.assertNotNull(n2hooks.getMessage());
     }
 
+    @Test
+    public void testRequestFailureWhenNodeGoesDown() throws Exception {
+        CompletableFuture<Object> isTestDone = new CompletableFuture<>();
+
+        final TestWithNsServices testCase = new TestWithNsServices()
+        {
+            protected void setup(NsServiceProducer nsServiceProducer)
+            {
+                final NsServiceRef n1 = nsServiceProducer.createNextNsService(N_1);
+                final NsServiceRef n2 = nsServiceProducer.createNextNsService(N_2);
+
+                MppNetworkHooks n1Hooks = new NoOpMppNetworkHooks()
+                {
+                    public void cannotConnectToReceipient(long messageId, MppNetworkService.MessageReceipient receipient, Throwable cause)
+                    {
+                        Assert.assertTrue("Connection has been refused", cause.getMessage().contains("Connection refused"));
+                        Assert.assertTrue("Connection has been refused to N2", cause.getMessage().contains(":" + n2.getPort()));
+                        isTestDone.complete(true);
+                    }
+
+                    public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+                    {
+                        isTestDone.complete(false);
+                    }
+                };
+
+                n1.setHooks(n1Hooks);
+            }
+
+            protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception
+            {
+                nsServiceLookup.getByName(N_2).shutdown();
+
+                sendMessage(N_1, new DummyDiscardMessage(), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, N_2);
+
+                return isTestDone;
+            }
+        };
+        backgroundTestExecutor.submit(testCase);
+        testCase.getHasShutdown().get();
+        Assert.assertTrue("Cannot connect to receipient hook has been called", (Boolean)isTestDone.getNow(false));
+    }
+
 
     // TODO [MPP] Tests that take into account:
-    // TODO - timeout of an request
     // TODO - node that can be connected to, but it does not answer with response
     // TODO - node that cannot be connected to (it is down)
 

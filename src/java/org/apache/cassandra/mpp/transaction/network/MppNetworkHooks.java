@@ -35,6 +35,14 @@ public interface MppNetworkHooks
     void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient);
 
     /**
+     * called when connection cannot be setup between this server and receipient's server.
+     *
+     * @param message
+     * @param receipient
+     */
+    void cannotConnectToReceipient(long messageId, MppNetworkService.MessageReceipient receipient, Throwable cause);
+
+    /**
      *  @param message that was just sent
      * @param receipient which receives message
      */
@@ -53,4 +61,12 @@ public interface MppNetworkHooks
     void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients);
 
     void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from);
+
+    /**
+     * Failed to execute incoming request in time.
+     *
+     * @param messageId
+     * @param from
+     */
+    void failedToExecuteIncomingMessageInTime(long messageId, MppNetworkService.MessageReceipient from);
 }
