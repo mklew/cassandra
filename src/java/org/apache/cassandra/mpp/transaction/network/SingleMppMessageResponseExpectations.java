@@ -41,9 +41,9 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
 
         final CompletableFuture<MppResponseMessage> future;
 
-        final MppNetworkService.MessageReceipient receipient;
+        final MppMessageReceipient receipient;
 
-        private SingleResponseDataHolder(CompletableFuture<MppResponseMessage> future, MppNetworkService.MessageReceipient receipient)
+        private SingleResponseDataHolder(CompletableFuture<MppResponseMessage> future, MppMessageReceipient receipient)
         {
             this.future = future;
             this.receipient = receipient;
@@ -56,20 +56,20 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
     }
 
     @Override
-    public MppMessageResponseDataHolder<MppResponseMessage> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients)
+    public MppMessageResponseDataHolder<MppResponseMessage> createDataHolder(MppMessage message, Collection<MppMessageReceipient> receipients)
     {
         Preconditions.checkArgument(receipients.size() == 1, "Expected single receipient, but had %s", receipients);
         return new SingleResponseDataHolder(new CompletableFuture<>(), receipients.iterator().next());
     }
 
-    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient)
+    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppMessageReceipient receipient)
     {
         SingleResponseDataHolder singleResponseDataHolder = (SingleResponseDataHolder) dataHolder;
         singleResponseDataHolder.future.completeExceptionally(new TimeoutException("Timeout occurred for receipient" + receipient));
     }
 
     @Override
-    public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
+    public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppMessageReceipient from)
     {
         SingleResponseDataHolder singleResponseDataHolder = (SingleResponseDataHolder) dataHolder;
         Preconditions.checkArgument(checkReceipient(singleResponseDataHolder.receipient, from));
@@ -78,7 +78,7 @@ public class SingleMppMessageResponseExpectations implements MppMessageResponseE
         return true;
     }
 
-    public static boolean checkReceipient(MppNetworkService.MessageReceipient exepctedReceipient, MppNetworkService.MessageReceipient actualReceipient)
+    public static boolean checkReceipient(MppMessageReceipient exepctedReceipient, MppMessageReceipient actualReceipient)
     {
         return exepctedReceipient.host().getHostAddress().equals(actualReceipient.host().getHostAddress());
     }

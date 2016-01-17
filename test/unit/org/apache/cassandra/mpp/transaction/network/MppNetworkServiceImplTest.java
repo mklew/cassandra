@@ -152,7 +152,7 @@ public class MppNetworkServiceImplTest
 
         public <T> MessageResult<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<NsServiceRef> receipientRefs)
         {
-            final List<MppNetworkService.MessageReceipient> messageReceipients = receipientRefs.stream().map(r -> {
+            final List<MppMessageReceipient> messageReceipients = receipientRefs.stream().map(r -> {
                 try
                 {
                     return mppNetworkService.createReceipient(InetAddress.getLocalHost(), r.getPort());
@@ -634,9 +634,9 @@ public class MppNetworkServiceImplTest
 
         MppMessageEnvelope message;
 
-        MppNetworkService.MessageReceipient receipient;
+        MppMessageReceipient receipient;
 
-        public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+        public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppMessageReceipient receipient)
         {
             Preconditions.checkArgument(this.message == null);
             Preconditions.checkArgument(this.receipient == null);
@@ -649,7 +649,7 @@ public class MppNetworkServiceImplTest
             return message;
         }
 
-        public MppNetworkService.MessageReceipient getReceipient()
+        public MppMessageReceipient getReceipient()
         {
             return receipient;
         }
@@ -659,9 +659,9 @@ public class MppNetworkServiceImplTest
 
         MppMessageEnvelope message;
 
-        MppNetworkService.MessageReceipient from;
+        MppMessageReceipient from;
 
-        public void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from)
+        public void incomingMessage(MppMessageEnvelope message, MppMessageReceipient from)
         {
             Preconditions.checkArgument(this.message == null);
             Preconditions.checkArgument(this.from == null);
@@ -675,7 +675,7 @@ public class MppNetworkServiceImplTest
             return message;
         }
 
-        public MppNetworkService.MessageReceipient getFrom()
+        public MppMessageReceipient getFrom()
         {
             return from;
         }
@@ -689,13 +689,13 @@ public class MppNetworkServiceImplTest
         long defaultTimeout = 10;
         final MppNetworkHooks hooks = new SingleOutgoingMessageHooks() {
 
-            public void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient)
+            public void messageHasTimedOut(long messageId, MppMessageReceipient receipient)
             {
                 System.out.println("Timeout has occurred");
                 isTestDone.complete(true);
             }
 
-            public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients)
+            public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppMessageReceipient> receipients)
             {
                 Assert.assertEquals(message.getId(), messageId);
                 isTestDone.complete(false);
@@ -762,14 +762,14 @@ public class MppNetworkServiceImplTest
 
                 MppNetworkHooks n1Hooks = new NoOpMppNetworkHooks()
                 {
-                    public void cannotConnectToReceipient(long messageId, MppNetworkService.MessageReceipient receipient, Throwable cause)
+                    public void cannotConnectToReceipient(long messageId, MppMessageReceipient receipient, Throwable cause)
                     {
                         Assert.assertTrue("Connection has been refused", cause.getMessage().contains("Connection refused"));
                         Assert.assertTrue("Connection has been refused to N2", cause.getMessage().contains(":" + n2.getPort()));
                         isTestDone.complete(true);
                     }
 
-                    public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+                    public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppMessageReceipient receipient)
                     {
                         isTestDone.complete(false);
                     }
@@ -782,7 +782,7 @@ public class MppNetworkServiceImplTest
             {
                 nsServiceLookup.getByName(N_2).shutdown();
                 final MessageResult messageResult = sendMessage(N_1, new DummyDiscardMessage(), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE, N_2);
-                CompletableFuture<Pair<MppNetworkService.MessageReceipient, Optional<Throwable>>> singleMessageSent = messageResult.singleMessageSentIntoNetwork();
+                CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> singleMessageSent = messageResult.singleMessageSentIntoNetwork();
                 final Optional<Throwable> right = singleMessageSent.get().right;
                 Assert.assertTrue("Expection exists", right.isPresent());
                 sentMessageFutureHolder.setRef(singleMessageSent);

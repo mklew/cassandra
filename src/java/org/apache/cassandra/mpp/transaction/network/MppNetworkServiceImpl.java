@@ -46,7 +46,6 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.utils.Pair;
-import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -68,6 +67,8 @@ public class MppNetworkServiceImpl implements MppNetworkService
     private static final long SHUTDOWN_GRACE_PERIOD_TIMEOUT_MS = 50;
 
     private static final long TIMEOUT_TO_HANDLE_MESSAGE_MS = 5_000;
+
+    private static final int DEFAULT_MPP_SERVER_PORT = 50001;
 
     private long defaultTimeout = 250;
     private MppNetworkHooks hooks;
@@ -287,7 +288,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
             this.dataHolder = dataHolder;
         }
 
-        public boolean maybeCompleteResponse(MppMessage incommingMessage, MessageReceipient receipient)
+        public boolean maybeCompleteResponse(MppMessage incommingMessage, MppMessageReceipient receipient)
         {
             logger.debug("maybeCompleteResponse {} lock", Thread.currentThread());
             lock.lock();
@@ -302,7 +303,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
             }
         }
 
-        public void timeout(long messageId, MessageReceipient r)
+        public void timeout(long messageId, MppMessageReceipient r)
         {
             lock.lock();
             try {
@@ -335,9 +336,9 @@ public class MppNetworkServiceImpl implements MppNetworkService
         return new MppMessageEnvelope(id, message, listeningPort);
     }
 
-    private List<CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>>> sendMessageOverNetwork(MppMessageEnvelope message, Collection<MessageReceipient> receipient) {
-        final List<CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>>> listOfFutures = receipient.stream().map(r -> {
-            CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>> futureSuccessOrFailure = new CompletableFuture<>();
+    private List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> sendMessageOverNetwork(MppMessageEnvelope message, Collection<MppMessageReceipient> receipient) {
+        final List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> listOfFutures = receipient.stream().map(r -> {
+            CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> futureSuccessOrFailure = new CompletableFuture<>();
             if (hooks != null)
             {
                 hooks.outgoingMessageBeforeSending(message, r);
@@ -392,7 +393,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         return listOfFutures;
     }
 
-    private void addTimeoutListener(MessageReceipient r, long messageId, ChannelFuture write)
+    private void addTimeoutListener(MppMessageReceipient r, long messageId, ChannelFuture write)
     {
         write.addListener(f -> {
             nettyEventLoopGroupsHolder.getWorkerGroup().schedule((Runnable) () -> {
@@ -401,14 +402,14 @@ public class MppNetworkServiceImpl implements MppNetworkService
         });
     }
 
-    private static void completeFutureWithSuccessfulSend(MessageReceipient r, CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>> futureSuccessOrFailure, ChannelFuture write)
+    private static void completeFutureWithSuccessfulSend(MppMessageReceipient r, CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> futureSuccessOrFailure, ChannelFuture write)
     {
         write.addListener(future -> {
             futureSuccessOrFailure.complete(Pair.create(r, Optional.empty()));
         });
     }
 
-    private static void completeWithThrowable(MessageReceipient r, CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>> futureSuccessOrFailure, Throwable e)
+    private static void completeWithThrowable(MppMessageReceipient r, CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> futureSuccessOrFailure, Throwable e)
     {
         futureSuccessOrFailure.complete(Pair.create(r, Optional.of(e)));
     }
@@ -422,7 +423,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
     @Override
     public <T> MessageResult<T> sendMessage(MppMessage message,
                                             MppMessageResponseExpectations<T> mppMessageResponseExpectations,
-                                            Collection<MessageReceipient> receipients)
+                                            Collection<MppMessageReceipient> receipients)
     {
         MppMessageResponseExpectations.MppMessageResponseDataHolder<T> dataHolder = null;
         final MppMessageEnvelope envelope;
@@ -434,7 +435,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         else {
             envelope = new MppMessageEnvelope(0, message, listeningPort);
         }
-        final List<CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>>> futureOfMessageSentIntoNetwork = sendMessageOverNetwork(envelope, receipients);
+        final List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> futureOfMessageSentIntoNetwork = sendMessageOverNetwork(envelope, receipients);
 
         if(dataHolder != null) {
             return new MessageResult<T>(dataHolder.getFuture(), futureOfMessageSentIntoNetwork);
@@ -444,7 +445,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         }
     }
 
-    private void messageHasTimedOut(long messageId, MessageReceipient r)
+    private void messageHasTimedOut(long messageId, MppMessageReceipient r)
     {
         final AwaitingResponseMessageHolder awaitingResponseMessageHolder = messageIdToResponseHolder.get(messageId);
         awaitingResponseMessageHolder.timeout(messageId, r);
@@ -452,7 +453,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         hooks.messageHasTimedOut(messageId, r);
     }
 
-    public void handleIncomingMessage(MppMessageEnvelope inEnv, MessageReceipient from)
+    public void handleIncomingMessage(MppMessageEnvelope inEnv, MppMessageReceipient from)
     {
         long id = inEnv.getId();
         MppMessage incommingMessage = inEnv.getMessage();
@@ -471,7 +472,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
                         response = executed.get(TIMEOUT_TO_HANDLE_MESSAGE_MS, TimeUnit.MILLISECONDS);
                         final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
                         final int portForResponse = inEnv.getPortForResponse();
-                        final List<CompletableFuture<Pair<MessageReceipient, Optional<Throwable>>>> completableFutures = sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
+                        final List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> completableFutures = sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
                         // TODO [MPP] It might assert that response message has been sent correctly.
                     }
                     catch (TimeoutException e)
@@ -519,28 +520,15 @@ public class MppNetworkServiceImpl implements MppNetworkService
         }
     }
 
-    public MessageReceipient createReceipient(InetAddress addr)
+    public MppMessageReceipient createReceipient(InetAddress addr)
     {
-        // TODO [MPP] get port from netty service.
-        throw new NotImplementedException();
-//        return createReceipient(addr, 0);
-
+        assert listeningPort > 0;
+        return createReceipient(addr, listeningPort);
     }
 
-    public MessageReceipient createReceipient(InetAddress addr, int port)
+    public MppMessageReceipient createReceipient(InetAddress addr, int port)
     {
-        return new MessageReceipient()
-        {
-            public InetAddress host()
-            {
-                return addr;
-            }
-
-            public int port()
-            {
-                return port;
-            }
-        };
+        return new MppMessageReceipient(addr, port);
     }
 
     private void unregisterResponseHolder(long id)

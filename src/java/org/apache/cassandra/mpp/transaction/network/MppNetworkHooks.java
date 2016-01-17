@@ -32,7 +32,7 @@ public interface MppNetworkHooks
      * @param message to be sent
      * @param receipient which receives message
      */
-    void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient);
+    void outgoingMessageBeforeSending(MppMessageEnvelope message, MppMessageReceipient receipient);
 
     /**
      * called when connection cannot be setup between this server and receipient's server.
@@ -40,27 +40,27 @@ public interface MppNetworkHooks
      * @param message
      * @param receipient
      */
-    void cannotConnectToReceipient(long messageId, MppNetworkService.MessageReceipient receipient, Throwable cause);
+    void cannotConnectToReceipient(long messageId, MppMessageReceipient receipient, Throwable cause);
 
     /**
      *  @param message that was just sent
      * @param receipient which receives message
      */
-    void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient);
+    void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppMessageReceipient receipient);
 
     /**
      *  @param messageId message for which timeout has occurred
      * @param receipient receipient which was supposed to handle message and send response within timeout limits
      */
-    void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient);
+    void messageHasTimedOut(long messageId, MppMessageReceipient receipient);
 
     /**
      *  @param messageId that was handled successfully
      * @param receipients that handled message
      */
-    void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients);
+    void messageHasBeenHandledSuccessfully(long messageId, Collection<MppMessageReceipient> receipients);
 
-    void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from);
+    void incomingMessage(MppMessageEnvelope message, MppMessageReceipient from);
 
     /**
      * Failed to execute incoming request in time.
@@ -68,5 +68,5 @@ public interface MppNetworkHooks
      * @param messageId
      * @param from
      */
-    void failedToExecuteIncomingMessageInTime(long messageId, MppNetworkService.MessageReceipient from);
+    void failedToExecuteIncomingMessageInTime(long messageId, MppMessageReceipient from);
 }

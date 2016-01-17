@@ -45,11 +45,11 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
 
         private final CompletableFuture<Collection<MppResponseMessage>> future;
 
-        private final Map<MppNetworkService.MessageReceipient, MppResponseMessage> messagesReceivedSoFar;
+        private final Map<MppMessageReceipient, MppResponseMessage> messagesReceivedSoFar;
 
-        private final Set<MppNetworkService.MessageReceipient> expectedReceipients;
+        private final Set<MppMessageReceipient> expectedReceipients;
 
-        private QuorumDataHolder(CompletableFuture<Collection<MppResponseMessage>> future, Map<MppNetworkService.MessageReceipient, MppResponseMessage> messagesReceivedSoFar, Set<MppNetworkService.MessageReceipient> expectedReceipients)
+        private QuorumDataHolder(CompletableFuture<Collection<MppResponseMessage>> future, Map<MppMessageReceipient, MppResponseMessage> messagesReceivedSoFar, Set<MppMessageReceipient> expectedReceipients)
         {
             this.future = future;
             this.messagesReceivedSoFar = messagesReceivedSoFar;
@@ -74,20 +74,20 @@ public class QuorumMppMessageResponseExpectations implements MppMessageResponseE
         return true;
     }
 
-    public MppMessageResponseDataHolder<Collection<MppResponseMessage>> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients)
+    public MppMessageResponseDataHolder<Collection<MppResponseMessage>> createDataHolder(MppMessage message, Collection<MppMessageReceipient> receipients)
     {
         CompletableFuture<Collection<MppResponseMessage>> f = new CompletableFuture<>();
         return new QuorumDataHolder(f, new HashMap<>((receipients.size() * 3 / 4 ) + 1), new HashSet<>(receipients));
     }
 
-    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient)
+    public void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppMessageReceipient receipient)
     {
          // TODO [MPP] count how many timeouts occurred
         QuorumDataHolder q = (QuorumDataHolder) dataHolder;
         q.future.completeExceptionally(new TimeoutException("Timeout occurred"));
     }
 
-    public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from)
+    public boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppMessageReceipient from)
     {
         QuorumDataHolder q = (QuorumDataHolder) dataHolder;
         Preconditions.checkArgument(q.expectedReceipients.stream().anyMatch(r -> SingleMppMessageResponseExpectations.checkReceipient(r, from)), "Recevied message from unexpected receipient %s. Expected one of %s", from, q.expectedReceipients);

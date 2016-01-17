@@ -26,37 +26,37 @@ import java.util.Collection;
  */
 public class NoOpMppNetworkHooks implements MppNetworkHooks
 {
-    public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+    public void outgoingMessageBeforeSending(MppMessageEnvelope message, MppMessageReceipient receipient)
     {
 
     }
 
-    public void cannotConnectToReceipient(long messageId, MppNetworkService.MessageReceipient receipient, Throwable cause)
+    public void cannotConnectToReceipient(long messageId, MppMessageReceipient receipient, Throwable cause)
     {
 
     }
 
-    public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppNetworkService.MessageReceipient receipient)
+    public void outgoingMessageHasBeenSent(MppMessageEnvelope message, MppMessageReceipient receipient)
     {
 
     }
 
-    public void messageHasTimedOut(long messageId, MppNetworkService.MessageReceipient receipient)
+    public void messageHasTimedOut(long messageId, MppMessageReceipient receipient)
     {
 
     }
 
-    public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppNetworkService.MessageReceipient> receipients)
+    public void messageHasBeenHandledSuccessfully(long messageId, Collection<MppMessageReceipient> receipients)
     {
 
     }
 
-    public void incomingMessage(MppMessageEnvelope message, MppNetworkService.MessageReceipient from)
+    public void incomingMessage(MppMessageEnvelope message, MppMessageReceipient from)
     {
 
     }
 
-    public void failedToExecuteIncomingMessageInTime(long messageId, MppNetworkService.MessageReceipient from)
+    public void failedToExecuteIncomingMessageInTime(long messageId, MppMessageReceipient from)
     {
 
     }

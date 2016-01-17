@@ -31,9 +31,9 @@ public interface MppMessageResponseExpectations<T>
 
     boolean expectsResponse();
 
-    MppMessageResponseDataHolder<T> createDataHolder(MppMessage message, Collection<MppNetworkService.MessageReceipient> receipients);
+    MppMessageResponseDataHolder<T> createDataHolder(MppMessage message, Collection<MppMessageReceipient> receipients);
 
-    void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppNetworkService.MessageReceipient receipient);
+    void timeoutHasOccurred(MppMessageResponseDataHolder dataHolder, long messageId, MppMessageReceipient receipient);
 
     /**
      * Keeps state of incoming responses until response can be evaluted.
@@ -47,5 +47,5 @@ public interface MppMessageResponseExpectations<T>
      * @param incomingMessage incoming response message
      * @return true if future was completed
      */
-    boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppNetworkService.MessageReceipient from);
+    boolean maybeCompleteResponse(MppMessageResponseDataHolder dataHolder, MppMessage incomingMessage, MppMessageReceipient from);
 }

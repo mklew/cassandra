@@ -32,9 +32,9 @@ public class MessageResult<T>
 {
     Optional<CompletableFuture<T>> expectedResponseFuture;
 
-    List<CompletableFuture<Pair<MppNetworkService.MessageReceipient, Optional<Throwable>>>> messageSentIntoNetwork;
+    List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> messageSentIntoNetwork;
 
-    public MessageResult(CompletableFuture<T> future, List<CompletableFuture<Pair<MppNetworkService.MessageReceipient, Optional<Throwable>>>> messageSentIntoNetwork)
+    public MessageResult(CompletableFuture<T> future, List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> messageSentIntoNetwork)
     {
         this.expectedResponseFuture = Optional.ofNullable(future);
         this.messageSentIntoNetwork = messageSentIntoNetwork;
@@ -45,12 +45,12 @@ public class MessageResult<T>
         return expectedResponseFuture.get();
     }
 
-    public List<CompletableFuture<Pair<MppNetworkService.MessageReceipient, Optional<Throwable>>>> getMessageSentIntoNetwork()
+    public List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> getMessageSentIntoNetwork()
     {
         return messageSentIntoNetwork;
     }
 
-    public CompletableFuture<Pair<MppNetworkService.MessageReceipient, Optional<Throwable>>> singleMessageSentIntoNetwork()
+    public CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> singleMessageSentIntoNetwork()
     {
         return messageSentIntoNetwork.iterator().next();
     }

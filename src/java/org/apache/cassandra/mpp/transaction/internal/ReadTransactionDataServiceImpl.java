@@ -41,6 +41,7 @@ import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.network.MppMessageReceipient;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.mpp.transaction.network.QuorumMppMessageResponseExpectations;
@@ -177,7 +178,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         }));
     }
 
-    private List<MppNetworkService.MessageReceipient> getReceipients(Collection<InetAddress> receipientsAddresses)
+    private List<MppMessageReceipient> getReceipients(Collection<InetAddress> receipientsAddresses)
     {
         return receipientsAddresses.stream().map(mppNetworkService::createReceipient).collect(Collectors.toList());
     }

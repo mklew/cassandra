@@ -27,11 +27,6 @@ import java.util.Collection;
  */
 public interface MppNetworkService
 {
-    interface MessageReceipient {
-        InetAddress host();
-
-        int port();
-    }
 
     /**
      *
@@ -39,13 +34,13 @@ public interface MppNetworkService
      * @param mppMessageResponseExpectations
      *@param receipients @return future or {@code null}
      */
-    <T> MessageResult<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<MessageReceipient> receipients);
+    <T> MessageResult<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<MppMessageReceipient> receipients);
 
-    void handleIncomingMessage(MppMessageEnvelope envelope, MessageReceipient from);
+    void handleIncomingMessage(MppMessageEnvelope envelope, MppMessageReceipient from);
 
-    MessageReceipient createReceipient(InetAddress addr);
+    MppMessageReceipient createReceipient(InetAddress addr);
 
-    MessageReceipient createReceipient(InetAddress addr, int port);
+    MppMessageReceipient createReceipient(InetAddress addr, int port);
 
     void initialize();
 
