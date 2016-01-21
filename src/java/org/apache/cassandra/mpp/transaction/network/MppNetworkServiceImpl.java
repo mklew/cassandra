@@ -56,6 +56,8 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     Logger logger = LoggerFactory.getLogger(MppNetworkServiceImpl.class);
 
+    private volatile boolean isTimeoutHandlingEnabled = true;
+
     private enum State
     {
         NOT_STARTED, RUNNING, SHUTDOWN
@@ -70,7 +72,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private static final int DEFAULT_MPP_SERVER_PORT = 50001;
 
-    private long defaultTimeout = 250;
+    private long defaultTimeout = 2500;
     private MppNetworkHooks hooks;
     private String name;
 
@@ -388,6 +390,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
             {
                 if (hooks != null)
                 {
+                    logger.warn("Cannot open channel message id {}", messageId);
                     hooks.cannotConnectToReceipient(messageId, r, e);
                     completeWithThrowable(r, futureSuccessOrFailure, e);
                 }
@@ -400,11 +403,13 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private void addTimeoutListener(MppMessageReceipient r, long messageId, ChannelFuture write)
     {
-        write.addListener(f -> {
-            nettyEventLoopGroupsHolder.getWorkerGroup().schedule((Runnable) () -> {
-                messageHasTimedOut(messageId, r);
-            }, getDefaultTimeout(), TimeUnit.MILLISECONDS);
-        });
+        if(isTimeoutHandlingEnabled) {
+            write.addListener(f -> {
+                nettyEventLoopGroupsHolder.getWorkerGroup().schedule((Runnable) () -> {
+                    messageHasTimedOut(messageId, r);
+                }, getDefaultTimeout(), TimeUnit.MILLISECONDS);
+            });
+        }
     }
 
     private static void completeFutureWithSuccessfulSend(MppMessageReceipient r, CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> futureSuccessOrFailure, ChannelFuture write)
@@ -462,12 +467,15 @@ public class MppNetworkServiceImpl implements MppNetworkService
     {
         long id = inEnv.getId();
         MppMessage incommingMessage = inEnv.getMessage();
+        logger.info("Incomming message {}. NS {} Thread {}", id, name, Thread.currentThread());
         if(hooks != null) {
             hooks.incomingMessage(inEnv, from);
         }
         if (incommingMessage.isRequest())
         {
+            logger.info("Incomming message {} is a request. NS {} Thread {}", id, name, Thread.currentThread());
             final CompletableFuture<MppResponseMessage> executed = messageHandler.handleMessage((MppRequestMessage) incommingMessage);
+            logger.info("Request id {} has been handled. NS {} Thread {}", id, name, Thread.currentThread());
             if(incommingMessage.isResponseRequired()) {
                 try
                 {
@@ -475,6 +483,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
                     try
                     {
                         response = executed.get(TIMEOUT_TO_HANDLE_MESSAGE_MS, TimeUnit.MILLISECONDS);
+                        logger.info("Sending response {} for incomming message id {}. NS {} Thread {}", response, id, name, Thread.currentThread());
                         final MppMessageEnvelope envelope = new MppMessageEnvelope(id, response, listeningPort);
                         final int portForResponse = inEnv.getPortForResponse();
                         final List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> completableFutures = sendMessageOverNetwork(envelope, Collections.singleton(createReceipient(from.host(), portForResponse)));
@@ -529,6 +538,17 @@ public class MppNetworkServiceImpl implements MppNetworkService
     {
         assert listeningPort > 0;
         return createReceipient(addr, listeningPort);
+    }
+
+    @Override
+    public int getListeningPort()
+    {
+        return listeningPort;
+    }
+
+    public void setTimeoutHandlingEnabled(boolean enabled)
+    {
+        this.isTimeoutHandlingEnabled = enabled;
     }
 
     public MppMessageReceipient createReceipient(InetAddress addr, int port)

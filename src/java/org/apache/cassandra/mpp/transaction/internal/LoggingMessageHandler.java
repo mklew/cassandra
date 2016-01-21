@@ -27,7 +27,6 @@ import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.mpp.transaction.network.MppRequestMessage;
 import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.mpp.transaction.network.messages.EmptyMppMessageResponse;
-import org.apache.cassandra.service.NativeTransportService;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -35,7 +34,7 @@ import org.apache.cassandra.service.NativeTransportService;
  */
 public class LoggingMessageHandler implements MppMessageHandler
 {
-    private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
+    private static final Logger logger = LoggerFactory.getLogger(LoggingMessageHandler.class);
 
     public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
     {

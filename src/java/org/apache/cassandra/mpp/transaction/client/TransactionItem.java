@@ -18,13 +18,15 @@
 
 package org.apache.cassandra.mpp.transaction.client;
 
+import java.io.Serializable;
+
 import org.apache.cassandra.dht.Token;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 26/11/15
  */
-public class TransactionItem
+public class TransactionItem implements Serializable
 {
     /**
      * Probably {@link org.apache.cassandra.dht.Murmur3Partitioner.LongToken}

@@ -98,7 +98,6 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
             }));
             return new TransactionItemToUpdates(mergedMap);
         }
-
     }
 
 
@@ -214,5 +213,15 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
     {
         final InetAddress broadcastAddress = FBUtilities.getBroadcastAddress();
         return itemsWithAddresses.filter(item -> item.endPoints.contains(broadcastAddress));
+    }
+
+    public MppNetworkService getMppNetworkService()
+    {
+        return mppNetworkService;
+    }
+
+    public void setMppNetworkService(MppNetworkService mppNetworkService)
+    {
+        this.mppNetworkService = mppNetworkService;
     }
 }

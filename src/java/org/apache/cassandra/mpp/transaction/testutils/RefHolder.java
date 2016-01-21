@@ -16,17 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.testutils;
 
 /**
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
- */
-public interface NodeContext
-{
-    PrivateMemtableStorage getStorage();
+* @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+* @since 20/01/16
+*/
+public class RefHolder<T> {
+    T ref;
 
-    ReadTransactionDataService readService();
+    public T getRef()
+    {
+        return ref;
+    }
 
-    MppService getService();
+    public void setRef(T ref)
+    {
+        this.ref = ref;
+    }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction.client;
 
+import java.io.Serializable;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -29,7 +30,8 @@ import java.util.UUID;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 26/11/15
  */
-public class TransactionState
+// TODO [MPP] Remove Serializable, run "shouldBeginNewTransaction test" and change it so that reason why it fails is visible in console.
+public class TransactionState implements Serializable
 {
     /**
      * TimeUUID

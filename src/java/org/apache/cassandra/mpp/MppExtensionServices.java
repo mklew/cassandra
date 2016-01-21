@@ -22,10 +22,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.mpp.transaction.MppMessageHandler;
-import org.apache.cassandra.mpp.transaction.internal.LoggingMessageHandler;
+import org.apache.cassandra.mpp.transaction.MppService;
+import org.apache.cassandra.mpp.transaction.internal.MppMessageHandlerImpl;
+import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
+import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
+import org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkServiceImpl;
+import org.apache.cassandra.mpp.transaction.testutils.NsServicePortRef;
+import org.apache.cassandra.mpp.transaction.testutils.NsServicePortRefImpl;
 import org.apache.cassandra.service.NativeTransportService;
 
 /**
@@ -37,6 +42,8 @@ public class MppExtensionServices
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
 
     private MppNetworkService networkService;
+
+    private MppService mppService;
 
     public void start()
     {
@@ -55,10 +62,19 @@ public class MppExtensionServices
     {
         // TODO [MPP] Change it to real message handler after.
         // TODO [MPP] It also allows for dynamic runtime changes which might be useful for testing
-        MppMessageHandler messageHandler = new LoggingMessageHandler();
 
         final MppNetworkServiceImpl mppNetworkService = new MppNetworkServiceImpl();
         networkService = mppNetworkService;
+        mppService = new MppServiceImpl();
+        MppMessageHandlerImpl messageHandler = new MppMessageHandlerImpl();
+        final PrivateMemtableStorageImpl privateMemtableStorage = new PrivateMemtableStorageImpl();
+        ReadTransactionDataServiceImpl readTransactionDataService = new ReadTransactionDataServiceImpl();
+
+        messageHandler.setMppService(mppService);
+        messageHandler.setPrivateMemtableStorage(privateMemtableStorage);
+        messageHandler.setReadTransactionDataService(readTransactionDataService);
+
+        readTransactionDataService.setMppNetworkService(mppNetworkService);
 
         int nativePort = DatabaseDescriptor.getNativeTransportPort();
         // TODO [MPP] Maybe move it to yaml config.
@@ -84,8 +100,18 @@ public class MppExtensionServices
         }
     }
 
+    public NsServicePortRef getNsServicePortRef()
+    {
+        return new NsServicePortRefImpl(networkService.getListeningPort());
+    }
+
     public boolean isRunning()
     {
         return networkService.isRunning();
+    }
+
+    public MppNetworkService getNetworkService()
+    {
+        return networkService;
     }
 }

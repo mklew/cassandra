@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,7 +33,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -44,8 +42,6 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
@@ -57,7 +53,13 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.mpp.transaction.NodeContext;
+import org.apache.cassandra.mpp.transaction.internal.NoOpMessageHandler;
 import org.apache.cassandra.mpp.transaction.network.messages.QuorumReadRequest;
+import org.apache.cassandra.mpp.transaction.testutils.NsServiceLookup;
+import org.apache.cassandra.mpp.transaction.testutils.NsServiceProducer;
+import org.apache.cassandra.mpp.transaction.testutils.NsServiceRef;
+import org.apache.cassandra.mpp.transaction.testutils.RefHolder;
+import org.apache.cassandra.mpp.transaction.testutils.TestWithNsServices;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -70,233 +72,9 @@ public class MppNetworkServiceImplTest
     public static final String N_1 = "n1";
     public static final String N_2 = "n2";
 
-    private static class NoOpMessageHandler implements MppMessageHandler
-    {
-
-        public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
-        {
-            return null;
-        }
-    }
-
     int ns1Port = 50001;
 
     int ns2Port = 50002;
-
-    private static class NsServiceRef
-    {
-
-        private static final int PORT_BASE = 50_000;
-
-        private final String name;
-
-        private final int id;
-
-        private MppNetworkServiceImpl mppNetworkService = new MppNetworkServiceImpl();
-
-        private MppMessageHandler handler = new NoOpMessageHandler();
-
-        private NsServiceRef(String name, int id)
-        {
-            this.name = name;
-            this.id = id;
-        }
-
-        String getNsServiceName()
-        {
-            return name;
-        }
-
-        Integer getId()
-        {
-            return id;
-        }
-
-        int getPort()
-        {
-            return PORT_BASE + (id * 100);
-        }
-
-        public Void init()
-        {
-//            Preconditions.checkArgument(mppNetworkService == null);
-//            mppNetworkService = new MppNetworkServiceImpl();
-            mppNetworkService.setLimitNumberOfEventLoopThreads(2);
-            mppNetworkService.setMessageHandler(handler);
-            mppNetworkService.setListeningPort(getPort());
-            mppNetworkService.setName(getNsServiceName());
-
-            mppNetworkService.start();
-
-            return null;
-        }
-
-        public void setMessageHandler(MppMessageHandler handler)
-        {
-            this.handler = handler;
-            if (mppNetworkService != null)
-            {
-                mppNetworkService.setMessageHandler(handler);
-            }
-        }
-
-        public Void shutdown()
-        {
-            try
-            {
-                mppNetworkService.shutdown();
-            }
-            catch (Exception e)
-            {
-                e.printStackTrace();
-            }
-            return null;
-        }
-
-        public <T> MessageResult<T> sendMessage(MppMessage message, MppMessageResponseExpectations<T> mppMessageResponseExpectations, Collection<NsServiceRef> receipientRefs)
-        {
-            final List<MppMessageReceipient> messageReceipients = receipientRefs.stream().map(r -> {
-                try
-                {
-                    return mppNetworkService.createReceipient(InetAddress.getLocalHost(), r.getPort());
-                }
-                catch (UnknownHostException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            }).collect(Collectors.toList());
-
-            return mppNetworkService.sendMessage(message, mppMessageResponseExpectations, messageReceipients);
-        }
-
-
-        public void setDefaultTimeout(long responseTimeout)
-        {
-            mppNetworkService.setDefaultTimeout(responseTimeout);
-        }
-
-
-        public void setHooks(MppNetworkHooks hooks)
-        {
-            mppNetworkService.setHooks(hooks);
-        }
-    }
-
-    private interface NsServiceLookup
-    {
-        NsServiceRef getById(int id);
-
-        NsServiceRef getByName(String name);
-    }
-
-    private static class NsServiceProducer implements NsServiceLookup
-    {
-
-        AtomicInteger nsServiceId = new AtomicInteger(1);
-
-        Map<String, NsServiceRef> nameToNsServiceRef = new HashMap<>();
-        private String namePrefix = "";
-
-        public NsServiceRef createNextNsService()
-        {
-            return createNextNsService("");
-        }
-
-        public NsServiceRef createNextNsService(String givenName)
-        {
-            final int nsId = nsServiceId.getAndIncrement();
-            String nsName = namePrefix + "NS#" + nsId + "[" + givenName + "]";
-            final NsServiceRef nsServiceRef = new NsServiceRef(nsName, nsId);
-
-            nameToNsServiceRef.put(givenName, nsServiceRef);
-            return nsServiceRef;
-        }
-
-        public void initServices()
-        {
-            nameToNsServiceRef.entrySet().stream().forEach(e -> e.getValue().init());
-        }
-
-        public void shutdownServices()
-        {
-            nameToNsServiceRef.entrySet().stream().forEach(e -> e.getValue().shutdown());
-        }
-
-        public NsServiceRef getById(int id)
-        {
-            return nameToNsServiceRef.entrySet().stream().filter(r -> r.getValue().getId().equals(id)).findFirst().get().getValue();
-        }
-
-        public NsServiceRef getByName(String name)
-        {
-            final NsServiceRef nsServiceRef = nameToNsServiceRef.get(name);
-            Preconditions.checkArgument(nsServiceRef != null);
-            return nsServiceRef;
-        }
-
-        public void setNamePrefix(String namePrefix)
-        {
-            this.namePrefix = namePrefix;
-        }
-    }
-
-    private abstract static class TestWithNsServices implements Runnable
-    {
-        private final static Logger logger = LoggerFactory.getLogger(TestWithNsServices.class);
-
-        final NsServiceProducer nsServiceProducer = getNsServiceProducer();
-
-        CompletableFuture<Object> hasShutdown = new CompletableFuture<>();
-
-        @Override
-        public void run()
-        {
-            setup(nsServiceProducer);
-            nsServiceProducer.initServices();
-            try
-            {
-                try
-                {
-                    final CompletableFuture<Object> isTestDone = runTest(nsServiceProducer);
-                    isTestDone.get(10_000, TimeUnit.MILLISECONDS);
-                }
-                catch (Exception e)
-                {
-                    logger.error("Error during runTest", e);
-                }
-            }
-            finally
-            {
-                nsServiceProducer.shutdownServices();
-                hasShutdown.complete(null);
-            }
-        }
-
-        public CompletableFuture<Object> getHasShutdown()
-        {
-            return hasShutdown;
-        }
-
-        protected <T> MessageResult<T> sendMessage(String from,
-                                                      MppMessage message,
-                                                      MppMessageResponseExpectations<T> mppMessageResponseExpectations,
-                                                      String ... receipients) {
-            final NsServiceRef ref = nsServiceProducer.getByName(from);
-
-            Collection<NsServiceRef> receipientRefs = new ArrayList<>();
-            for (String receipient : receipients)
-            {
-                receipientRefs.add(nsServiceProducer.getByName(receipient));
-            }
-
-            return ref.sendMessage(message, mppMessageResponseExpectations, receipientRefs);
-        }
-
-
-        abstract protected void setup(NsServiceProducer nsServiceProducer);
-
-        abstract protected CompletableFuture<Object> runTest(NsServiceLookup nsServiceLookup) throws Exception;
-    }
 
     private static NsServiceProducer getNsServiceProducer()
     {
@@ -427,46 +205,6 @@ public class MppNetworkServiceImplTest
             final CompletableFuture<MppResponseMessage> f = new CompletableFuture<>();
             f.complete(null);
             return f; // it never completes
-        }
-
-        public CompletableFuture<Object> getAwaitMessageFuture()
-        {
-            return awaitMessageFuture;
-        }
-
-        boolean receivedAnything()
-        {
-            return !receivedMessages.isEmpty();
-        }
-    }
-
-    private static class ExpectingMessageHandlerWithResponse implements MppMessageHandler
-    {
-
-        interface ResponseCallback
-        {
-            MppResponseMessage accept(MppRequestMessage message);
-        }
-
-        List<MppRequestMessage> receivedMessages = new ArrayList<>();
-
-        ResponseCallback callback;
-
-        CompletableFuture<Object> awaitMessageFuture = new CompletableFuture<>();
-
-        public ExpectingMessageHandlerWithResponse(ResponseCallback callback)
-        {
-            this.callback = callback;
-        }
-
-        public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
-        {
-            receivedMessages.add(requestMessage);
-            final MppResponseMessage response = callback.accept(requestMessage);
-            awaitMessageFuture.complete(requestMessage);
-            final CompletableFuture<MppResponseMessage> f = new CompletableFuture<>();
-            f.complete(response);
-            return f;
         }
 
         public CompletableFuture<Object> getAwaitMessageFuture()
@@ -737,20 +475,6 @@ public class MppNetworkServiceImplTest
         Assert.assertNotNull(n2hooks.getMessage());
     }
 
-    private static class RefHolder<T> {
-        T ref;
-
-        public T getRef()
-        {
-            return ref;
-        }
-
-        public void setRef(T ref)
-        {
-            this.ref = ref;
-        }
-    }
-
     @Test
     public void testRequestFailureWhenNodeGoesDown() throws Exception {
         CompletableFuture<Object> isTestDone = new CompletableFuture<>();
@@ -870,9 +594,9 @@ public class MppNetworkServiceImplTest
             {
                 final NsServiceRef n1 = nsServiceLookup.getByName(N_1);
 
-                final MppMessageReceipient receipient = n1.mppNetworkService.createReceipient(InetAddress.getLocalHost(), 9043);
-                final MessageResult messageResult = n1.mppNetworkService.sendMessage(new QuorumReadRequest(UUID.randomUUID(), Collections.emptyList()), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE,
-                                                                                     Collections.singletonList(receipient));
+                final MppMessageReceipient receipient = n1.getMppNetworkService().createReceipient(InetAddress.getLocalHost(), 9043);
+                final MessageResult messageResult = n1.getMppNetworkService().sendMessage(new QuorumReadRequest(UUID.randomUUID(), Collections.emptyList()), MppMessageResponseExpectations.NO_MPP_MESSAGE_RESPONSE,
+                                                                                          Collections.singletonList(receipient));
 
                 final CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> completableFuture = messageResult.singleMessageSentIntoNetwork();
                 Assert.assertTrue("Message should be successfully delivered", !completableFuture.get().right.isPresent());

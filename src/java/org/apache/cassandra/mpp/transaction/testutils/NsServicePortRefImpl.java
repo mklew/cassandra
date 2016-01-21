@@ -16,17 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.testutils;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
+ * @since 20/01/16
  */
-public interface NodeContext
+public class NsServicePortRefImpl implements NsServicePortRef
 {
-    PrivateMemtableStorage getStorage();
 
-    ReadTransactionDataService readService();
+    private final int port;
 
-    MppService getService();
+    public NsServicePortRefImpl(int port)
+    {
+        this.port = port;
+    }
+
+    public int getPort()
+    {
+        return port;
+    }
+
+    public String toString()
+    {
+        return "NsServicePortRefImpl{" +
+               "port=" + port +
+               '}';
+    }
 }

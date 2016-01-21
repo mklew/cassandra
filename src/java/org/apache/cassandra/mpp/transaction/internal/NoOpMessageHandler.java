@@ -16,17 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.internal;
+
+import java.util.concurrent.CompletableFuture;
+
+import org.apache.cassandra.mpp.transaction.MppMessageHandler;
+import org.apache.cassandra.mpp.transaction.network.MppRequestMessage;
+import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 
 /**
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
- */
-public interface NodeContext
+* @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+* @since 20/01/16
+*/
+public class NoOpMessageHandler implements MppMessageHandler
 {
-    PrivateMemtableStorage getStorage();
-
-    ReadTransactionDataService readService();
-
-    MppService getService();
+    public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
+    {
+        return null;
+    }
 }

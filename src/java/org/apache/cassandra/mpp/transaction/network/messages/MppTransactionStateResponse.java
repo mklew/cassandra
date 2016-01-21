@@ -16,17 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.network.messages;
+
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
+ * @since 20/01/16
  */
-public interface NodeContext
+public class MppTransactionStateResponse implements MppResponseMessage
 {
-    PrivateMemtableStorage getStorage();
+    private final TransactionState transactionState;
 
-    ReadTransactionDataService readService();
+    public MppTransactionStateResponse(TransactionState transactionState)
+    {
+        this.transactionState = transactionState;
+    }
 
-    MppService getService();
+    public TransactionState getTransactionState()
+    {
+        return transactionState;
+    }
 }

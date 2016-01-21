@@ -20,7 +20,11 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.concurrent.CompletableFuture;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.mpp.transaction.MppMessageHandler;
+import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.NodeContext;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
@@ -34,9 +38,13 @@ import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 public class MppMessageHandlerImpl implements MppMessageHandler
 {
 
+    private static final Logger logger = LoggerFactory.getLogger(MppMessageHandlerImpl.class);
+
     private PrivateMemtableStorage privateMemtableStorage;
 
     private ReadTransactionDataService readTransactionDataService;
+
+    private MppService mppService;
 
 
     public CompletableFuture<MppResponseMessage> handleMessage(MppRequestMessage requestMessage)
@@ -51,7 +59,6 @@ public class MppMessageHandlerImpl implements MppMessageHandler
     {
         return new NodeContext()
         {
-
             public PrivateMemtableStorage getStorage()
             {
                 return getPrivateMemtableStorage();
@@ -61,7 +68,19 @@ public class MppMessageHandlerImpl implements MppMessageHandler
             {
                 return getReadTransactionDataService();
             }
+
+            public MppService getService() { return getMppService(); }
         };
+    }
+
+    public MppService getMppService()
+    {
+        return mppService;
+    }
+
+    public void setMppService(MppService mppService)
+    {
+        this.mppService = mppService;
     }
 
     public PrivateMemtableStorage getPrivateMemtableStorage()

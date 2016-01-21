@@ -47,4 +47,8 @@ public interface MppNetworkService
     void shutdown() throws Exception;
 
     boolean isRunning();
+
+    int getListeningPort();
+
+    void setTimeoutHandlingEnabled(boolean enabled);
 }

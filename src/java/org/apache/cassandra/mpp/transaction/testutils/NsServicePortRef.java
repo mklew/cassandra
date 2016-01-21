@@ -16,17 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.mpp.transaction.testutils;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 06/12/15
+ * @since 20/01/16
  */
-public interface NodeContext
+public interface NsServicePortRef
 {
-    PrivateMemtableStorage getStorage();
-
-    ReadTransactionDataService readService();
-
-    MppService getService();
+    int getPort();
 }
