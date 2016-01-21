@@ -18,6 +18,15 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+
+import com.google.common.base.Preconditions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
@@ -28,14 +37,49 @@ import io.netty.channel.ChannelPromise;
 */
 class MppNettyClientHandler extends ChannelOutboundHandlerAdapter
 {
-    // TODO [MPP] This is useless. Client could work without this handler, but this might be the place to add timeout handling etc.
+    private static Logger logger = LoggerFactory.getLogger(MppNettyClientHandler.class);
+
+    private CompletableFuture<Optional<Throwable>> successOrFailure;
+
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception
     {
-        super.write(ctx, msg, promise);
+        Preconditions.checkNotNull(successOrFailure);
+        try
+        {
+            super.write(ctx, msg, promise);
+            promise.addListener(new ChannelFutureListener()
+            {
+                public void operationComplete(ChannelFuture future) throws Exception
+                {
+                    if(!future.isSuccess())
+                    {
+                        successOrFailure.completeExceptionally(future.cause());
+                        logger.error("MppNettyClientHandler write listener exception", future.cause());
+                    }
+                }
+            });
+        }
+        catch (Exception e)
+        {
+            successOrFailure.completeExceptionally(e);
+            logger.error("MppNettyClientHandler write exception", e);
+        }
     }
 
     public void read(ChannelHandlerContext ctx) throws Exception
     {
         super.read(ctx);
+    }
+
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception
+    {
+        logger.error("MppNettyClientHandler exceptionCaught", cause);
+        successOrFailure.completeExceptionally(cause);
+        super.exceptionCaught(ctx, cause);
+    }
+
+    public void setTryFuture(CompletableFuture<Optional<Throwable>> successOrFailure)
+    {
+        this.successOrFailure = successOrFailure;
     }
 }

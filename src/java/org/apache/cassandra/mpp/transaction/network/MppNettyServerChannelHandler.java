@@ -20,6 +20,9 @@ package org.apache.cassandra.mpp.transaction.network;
 
 import java.net.InetSocketAddress;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
@@ -29,6 +32,8 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 */
 class MppNettyServerChannelHandler extends ChannelInboundHandlerAdapter
 {
+    private static Logger logger = LoggerFactory.getLogger(MppNettyServerChannelHandler.class);
+
     final MppMessageConsumer mppMessageConsumer;
 
     MppNettyServerChannelHandler(MppMessageConsumer mppMessageConsumer)
@@ -45,5 +50,11 @@ class MppNettyServerChannelHandler extends ChannelInboundHandlerAdapter
     public void channelActive(ChannelHandlerContext ctx) throws Exception
     {
         System.out.println("NettyServerChannelHandler is active");
+    }
+
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception
+    {
+        logger.error("MppNettyServerChannelHandler exceptionCaught", cause);
+        super.exceptionCaught(ctx, cause);
     }
 }

@@ -345,7 +345,8 @@ public class MppNetworkServiceImpl implements MppNetworkService
 
     private List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> sendMessageOverNetwork(MppMessageEnvelope message, Collection<MppMessageReceipient> receipient) {
         final List<CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>>> listOfFutures = receipient.stream().map(r -> {
-            CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> futureSuccessOrFailure = new CompletableFuture<>();
+            CompletableFuture<Optional<Throwable>> futureSuccessOrFailure = new CompletableFuture<>();
+            CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> futureSuccessOrFailureWithReceipient = mapWithReceipient(r, futureSuccessOrFailure);
             if (hooks != null)
             {
                 hooks.outgoingMessageBeforeSending(message, r);
@@ -359,14 +360,17 @@ public class MppNetworkServiceImpl implements MppNetworkService
                     if (!f.isSuccess())
                     {
                         if(hooks != null) hooks.cannotConnectToReceipient(messageId, r, f.cause());
-                        completeWithThrowable(r, futureSuccessOrFailure, f.cause());
+                        completeWithThrowable(r, mapWithReceipient(r, futureSuccessOrFailure), f.cause());
                     }
                 }
             });
+
             final Channel channel;
             try
             {
                 channel = channelFuture.sync().channel();
+                final MppNettyClientHandler mppNettyClientHandler = channel.pipeline().get(MppNettyClientHandler.class);
+                mppNettyClientHandler.setTryFuture(futureSuccessOrFailure);
                 //                if(message.getMessage().isRequest()) {
 //                    channel.pipeline().addLast(new NettyClientReadHandler((response, from) -> {
 //                        System.out.println("Handler got response " + response);
@@ -375,7 +379,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
 //                }
                 final ChannelFuture write = channel.writeAndFlush(message);
 //                if(!message.getMessage().isRequest()) {
-                completeFutureWithSuccessfulSend(r, futureSuccessOrFailure, write);
+                completeFutureWithSuccessfulSend(r, mapWithReceipient(r, futureSuccessOrFailure), write);
                 final ChannelFuture channelFuture1 = write.addListener(ChannelFutureListener.CLOSE);
 //                write.addListener(future -> {
 //                    if(hooks != null) {
@@ -392,13 +396,20 @@ public class MppNetworkServiceImpl implements MppNetworkService
                 {
                     logger.warn("Cannot open channel message id {}", messageId);
                     hooks.cannotConnectToReceipient(messageId, r, e);
-                    completeWithThrowable(r, futureSuccessOrFailure, e);
+                    completeWithThrowable(r, mapWithReceipient(r, futureSuccessOrFailure), e);
                 }
             }
-            return futureSuccessOrFailure;
+            return futureSuccessOrFailureWithReceipient;
         }).collect(Collectors.toList());
 
         return listOfFutures;
+    }
+
+    private CompletableFuture<Pair<MppMessageReceipient, Optional<Throwable>>> mapWithReceipient(MppMessageReceipient r, CompletableFuture<Optional<Throwable>> futureSuccessOrFailure)
+    {
+        return futureSuccessOrFailure.thenApplyAsync((opt) -> {
+            return Pair.create(r, opt);
+        });
     }
 
     private void addTimeoutListener(MppMessageReceipient r, long messageId, ChannelFuture write)

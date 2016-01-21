@@ -30,7 +30,6 @@ import java.util.UUID;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 26/11/15
  */
-// TODO [MPP] Remove Serializable, run "shouldBeginNewTransaction test" and change it so that reason why it fails is visible in console.
 public class TransactionState implements Serializable
 {
     /**
