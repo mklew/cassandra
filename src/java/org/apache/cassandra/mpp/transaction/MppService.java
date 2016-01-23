@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -38,7 +39,6 @@ public interface MppService
      * Returns TransactionState with transaction_id and empty list of transaction items.
      * Doesn't have to initiate nothing in private memtable storage because that happens with first operation.
      *
-     * TODO [MPP] Test it via my networking
      */
     TransactionState beginTransaction();
 
@@ -81,5 +81,8 @@ public interface MppService
      */
     Collection<TransactionId> getInProgressTransactions();
 
-
+    /**
+     * TODO [MPP] Test it via my networking
+     */
+    TransactionItem executeTransactionalMutation(TransactionalMutation transactionalMutation);
 }

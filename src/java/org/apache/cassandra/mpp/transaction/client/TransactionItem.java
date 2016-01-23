@@ -20,6 +20,7 @@ package org.apache.cassandra.mpp.transaction.client;
 
 import java.io.Serializable;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 
 /**
@@ -48,6 +49,11 @@ public class TransactionItem implements Serializable
         this.token = token;
         this.ksName = ksName;
         this.cfName = cfName;
+    }
+
+    public TransactionItem(long token, String ksName, String cfName)
+    {
+        this(new Murmur3Partitioner.LongToken(token), ksName, cfName);
     }
 
     public Token getToken()

@@ -26,9 +26,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
-import org.apache.cassandra.mpp.transaction.PrivateMemtableStorageLocator;
-import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.apache.cassandra.mpp.MppServicesLocator;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
  * TODO [MPP] Serializer, deserializer, logic to apply that mutation.
@@ -100,9 +99,19 @@ public class TransactionalMutation implements IMutation
         return mutation.getPartitionUpdates();
     }
 
-    public void apply()
+    public TransactionItem apply()
     {
-        final PrivateMemtableStorage storage = PrivateMemtableStorageLocator.instance.getStorage();
-        storage.storeMutation(new TransactionTimeUUID(transactionId), mutation);
+        return MppServicesLocator.getInstance().executeTransactionalMutation(this);
+//        return MppServiceUtils.transformToResultMessage(txItem);
+    }
+
+    public Mutation getMutation()
+    {
+        return mutation;
+    }
+
+    public UUID getTransactionId()
+    {
+        return transactionId;
     }
 }

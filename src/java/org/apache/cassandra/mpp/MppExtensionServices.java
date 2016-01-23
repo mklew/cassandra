@@ -22,16 +22,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.internal.MppMessageHandlerImpl;
-import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
-import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
-import org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkServiceImpl;
 import org.apache.cassandra.mpp.transaction.testutils.NsServicePortRef;
 import org.apache.cassandra.mpp.transaction.testutils.NsServicePortRefImpl;
-import org.apache.cassandra.service.NativeTransportService;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -39,17 +34,24 @@ import org.apache.cassandra.service.NativeTransportService;
  */
 public class MppExtensionServices
 {
-    private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
+    private static final Logger logger = LoggerFactory.getLogger(MppExtensionServices.class);
 
     private MppNetworkService networkService;
 
-    private MppService mppService;
+    private MppModule mppModule;
 
     public void start()
     {
         logger.info("[MPP] MppExtensionServices are starting...");
         initialize();
         startInternal();
+        logger.info("[MPP] MppExtensionServices have started!");
+    }
+
+    public void startWithoutNetwork()
+    {
+        logger.info("[MPP] MppExtensionServices are starting without network...");
+        initializeMppModule();
         logger.info("[MPP] MppExtensionServices have started!");
     }
 
@@ -60,26 +62,27 @@ public class MppExtensionServices
 
     private void initialize()
     {
-        // TODO [MPP] Change it to real message handler after.
-        // TODO [MPP] It also allows for dynamic runtime changes which might be useful for testing
+        initializeMppModule();
+
+        MppMessageHandlerImpl messageHandler = new MppMessageHandlerImpl();
 
         final MppNetworkServiceImpl mppNetworkService = new MppNetworkServiceImpl();
         networkService = mppNetworkService;
-        mppService = new MppServiceImpl();
-        MppMessageHandlerImpl messageHandler = new MppMessageHandlerImpl();
-        final PrivateMemtableStorageImpl privateMemtableStorage = new PrivateMemtableStorageImpl();
-        ReadTransactionDataServiceImpl readTransactionDataService = new ReadTransactionDataServiceImpl();
 
-        messageHandler.setMppService(mppService);
-        messageHandler.setPrivateMemtableStorage(privateMemtableStorage);
-        messageHandler.setReadTransactionDataService(readTransactionDataService);
-
-        readTransactionDataService.setMppNetworkService(mppNetworkService);
+        messageHandler.setMppService(mppModule.getMppService());
+//        messageHandler.setPrivateMemtableStorage(privateMemtableStorage);
+//        messageHandler.setReadTransactionDataService(readTransactionDataService);
 
         int nativePort = DatabaseDescriptor.getNativeTransportPort();
         // TODO [MPP] Maybe move it to yaml config.
         mppNetworkService.setListeningPort(nativePort + 1);
         mppNetworkService.setMessageHandler(messageHandler);
+    }
+
+    private void initializeMppModule()
+    {
+        mppModule = MppModule.createModule();
+        MppServicesLocator.setInstance(mppModule.getMppService());
     }
 
     public void stop()
@@ -92,7 +95,9 @@ public class MppExtensionServices
     {
         try
         {
-            networkService.shutdown();
+            if(networkService != null) {
+                networkService.shutdown();
+            }
         }
         catch (Exception e)
         {

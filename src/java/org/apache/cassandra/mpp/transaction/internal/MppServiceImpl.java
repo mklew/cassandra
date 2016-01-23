@@ -24,14 +24,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.google.common.base.Preconditions;
 import org.apache.commons.lang.NotImplementedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.utils.UUIDs;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.MppService;
+import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 
@@ -42,6 +49,18 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 public class MppServiceImpl implements MppService
 {
     private static final Logger logger = LoggerFactory.getLogger(MppServiceImpl.class);
+
+    private PrivateMemtableStorage privateMemtableStorage;
+
+    public PrivateMemtableStorage getPrivateMemtableStorage()
+    {
+        return privateMemtableStorage;
+    }
+
+    public void setPrivateMemtableStorage(PrivateMemtableStorage privateMemtableStorage)
+    {
+        this.privateMemtableStorage = privateMemtableStorage;
+    }
 
     public TransactionState beginTransaction()
     {
@@ -77,5 +96,28 @@ public class MppServiceImpl implements MppService
     public Collection<TransactionId> getInProgressTransactions()
     {
         return null;
+    }
+
+    @Override
+    public TransactionItem executeTransactionalMutation(TransactionalMutation transactionalMutation)
+    {
+        final DecoratedKey key = transactionalMutation.getMutation().key();
+        final Token token = key.getToken();
+        final UUID transactionId = transactionalMutation.getTransactionId();
+
+        logger.info("Execute transaction {} mutation's key is {} token is {} ", transactionId, key, token);
+        privateMemtableStorage.storeMutation(new TransactionTimeUUID(transactionId), transactionalMutation.getMutation());
+
+        final String cfName = getColumnFamilyName(transactionalMutation);
+
+        return new TransactionItem(token, transactionalMutation.getKeyspaceName(), cfName);
+    }
+
+    private String getColumnFamilyName(TransactionalMutation transactionalMutation)
+    {
+        final Collection<UUID> columnFamilyIds = transactionalMutation.getColumnFamilyIds();
+        Preconditions.checkArgument(columnFamilyIds.size() == 1, "TransactionalMutation should modify only single table");
+        final UUID cfId = columnFamilyIds.iterator().next();
+        return Keyspace.open(transactionalMutation.getKeyspaceName()).getColumnFamilyStore(cfId).getTableName();
     }
 }
