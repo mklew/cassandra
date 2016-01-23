@@ -21,16 +21,38 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.cache.CacheLoader;
-import com.google.common.collect.*;
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.PeekingIterator;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -44,30 +66,80 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.HintedHandOffManager;
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadOrderGroup;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.TransactionalMutation;
+import org.apache.cassandra.db.Truncation;
+import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.ViewUtils;
-import org.apache.cassandra.dht.*;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.RingPosition;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.IsBootstrappingException;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteFailureException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.*;
-import org.apache.cassandra.metrics.*;
-import org.apache.cassandra.net.*;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.metrics.CASClientRequestMetrics;
+import org.apache.cassandra.metrics.ClientRequestMetrics;
+import org.apache.cassandra.metrics.ReadRepairMetrics;
+import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.metrics.ViewWriteMetrics;
+import org.apache.cassandra.mpp.transaction.MppServiceUtils;
+import org.apache.cassandra.net.CompactEndpointSerializationHelper;
+import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
-import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.UUIDSerializer;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -79,6 +151,7 @@ public class StorageProxy implements StorageProxyMBean
     private static final WritePerformer standardWritePerformer;
     private static final WritePerformer counterWritePerformer;
     private static final WritePerformer counterWriteOnCoordinatorPerformer;
+    private static final WritePerformer transactionalWritePerformer;
 
     public static final StorageProxy instance = new StorageProxy();
 
@@ -129,6 +202,16 @@ public class StorageProxy implements StorageProxyMBean
             {
                 assert mutation instanceof Mutation;
                 sendToHintedEndpoints((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION);
+            }
+        };
+
+        transactionalWritePerformer = new WritePerformer() {
+
+            public void apply(IMutation mutation, Iterable<InetAddress> targets, AbstractWriteResponseHandler<IMutation> responseHandler, String localDataCenter, ConsistencyLevel consistencyLevel) throws OverloadedException
+            {
+                assert mutation instanceof TransactionalMutation;
+                // TODO [MPP] Add assert that consistencyLevel is TRANSACTIONAL or LOCAL_TRANSACTIONAL
+                sendToEndpointsForPrivateMemtableWrite((TransactionalMutation) mutation, targets, responseHandler, localDataCenter, Stage.PRIVATE_MEMTABLES_WRITE);
             }
         };
 
@@ -536,9 +619,10 @@ public class StorageProxy implements StorageProxyMBean
      * @param mutations the mutations to be applied across the replicas
      * @param consistency_level the consistency level for the operation
      */
-    public static void mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level)
+    public static ResultMessage mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
+        // TODO [MPP] Look at this logic and sd
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
@@ -551,7 +635,13 @@ public class StorageProxy implements StorageProxyMBean
             {
                 if (mutation instanceof CounterMutation)
                 {
-                    responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter));
+                    responseHandlers.add(mutateCounter((CounterMutation) mutation, localDataCenter));
+                }
+                else if(mutation instanceof TransactionalMutation)
+                {
+                    // TODO [MPP] Implement it for simplest case.
+                    // TODO [MPP] This method mutate has to return some results.
+                    responseHandlers.add(performTransactionalWrite((TransactionalMutation)mutation, consistency_level, localDataCenter));
                 }
                 else
                 {
@@ -565,6 +655,8 @@ public class StorageProxy implements StorageProxyMBean
             {
                 responseHandler.get();
             }
+            // [MPP] Create TransactionItem result for each TransactionalMutation
+            return MppServiceUtils.successfulMutationsToResultMessage(mutations);
         }
         catch (WriteTimeoutException|WriteFailureException ex)
         {
@@ -606,6 +698,36 @@ public class StorageProxy implements StorageProxyMBean
         {
             writeMetrics.addNano(System.nanoTime() - startTime);
         }
+        return null; // [MPP] null for case of counters, standard writes and so on
+    }
+
+    private static AbstractWriteResponseHandler<IMutation> performTransactionalWrite(TransactionalMutation mutation, ConsistencyLevel originalConsistenyLevel, String localDataCenter)
+    {
+        Tracing.trace("Transactional mutation");
+        WritePerformer performer = transactionalWritePerformer;
+
+        String keyspaceName = mutation.getKeyspaceName();
+
+        AbstractReplicationStrategy rs = Keyspace.open(keyspaceName).getReplicationStrategy();
+
+        Token tk = mutation.key().getToken();
+        Preconditions.checkArgument(tk instanceof Murmur3Partitioner.LongToken, "Expected token to be Murmur3Partitioner.LongToken");
+
+        // Here, replication strategy is used to get replicas.
+        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
+        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
+
+        // TODO [MPP] consistency level is overriden, it should be however set to LOCAL TRANSACTIONAL or TRANSACTIONAL
+        ConsistencyLevel consistency_level = ConsistencyLevel.LOCAL_TRANSACTIONAL;
+//        new TransactionalPrivateMemtableWriteResponseHandler<IMutation>(naturalEndpoints, pendingEndpoints, consistency_level, )
+
+        AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, null, WriteType.TRANSACTIONAL_PRIVATE_MEMTABLES);
+
+        // exit early if we can't fulfill the CL at this time
+        responseHandler.assureSufficientLiveNodes();
+
+        performer.apply(mutation, Iterables.concat(naturalEndpoints, pendingEndpoints), responseHandler, localDataCenter, consistency_level);
+        return responseHandler;
     }
 
     /**
@@ -732,7 +854,7 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("unchecked")
-    public static void mutateWithTriggers(Collection<? extends IMutation> mutations,
+    public static ResultMessage mutateWithTriggers(Collection<? extends IMutation> mutations,
                                           ConsistencyLevel consistencyLevel,
                                           boolean mutateAtomically)
     throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
@@ -744,14 +866,19 @@ public class StorageProxy implements StorageProxyMBean
                               .viewManager
                               .updatesAffectView(mutations, true);
 
-        if (augmented != null)
+        if (augmented != null) {
             mutateAtomically(augmented, consistencyLevel, updatesView);
+            return null;
+        }
         else
         {
-            if (mutateAtomically || updatesView)
+            if (mutateAtomically || updatesView) {
                 mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView);
-            else
-                mutate(mutations, consistencyLevel);
+                return null;
+            }
+            else {
+                return mutate(mutations, consistencyLevel);
+            }
         }
     }
 
@@ -1080,6 +1207,96 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return new BatchlogEndpoints(chosenEndpoints);
+    }
+
+    public static void sendToEndpointsForPrivateMemtableWrite(final TransactionalMutation transactionalMutation,
+                                             Iterable<InetAddress> targets,
+                                             AbstractWriteResponseHandler<IMutation> responseHandler,
+                                             String localDataCenter,
+                                             Stage stage)
+    throws OverloadedException
+    {
+        // extra-datacenter replicas, grouped by dc
+        Map<String, Collection<InetAddress>> dcGroups = null;
+        // only need to create a Message for non-local writes
+        MessageOut<TransactionalMutation> message = null;
+
+        boolean insertLocal = false;
+//        ArrayList<InetAddress> endpointsToHint = null;
+
+        for (InetAddress destination : targets)
+        {
+            // avoid OOMing due to excess hints.  we need to do this check even for "live" nodes, since we can
+            // still generate hints for those if it's overloaded or simply dead but not yet known-to-be-dead.
+            // The idea is that if we have over maxHintsInProgress hints in flight, this is probably due to
+            // a small number of nodes causing problems, so we should avoid shutting down writes completely to
+            // healthy nodes.  Any node with no hintsInProgress is considered healthy.
+
+            // [MPP] No hints for private memtable writes.
+//            if (StorageMetrics.totalHintsInProgress.getCount() > maxHintsInProgress
+//                && (getHintsInProgressFor(destination).get() > 0 && shouldHint(destination)))
+//            {
+//                throw new OverloadedException("Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount());
+//            }
+
+            if (FailureDetector.instance.isAlive(destination))
+            {
+                if (canDoLocalRequest(destination))
+                {
+                    insertLocal = true;
+                }
+                else
+                {
+                    // belongs on a different server
+                    if (message == null)
+                        message = transactionalMutation.createMessage();
+                    String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(destination);
+                    // direct writes to local DC or old Cassandra versions
+                    // (1.1 knows how to forward old-style String message IDs; updated to int in 2.0)
+                    if (localDataCenter.equals(dc))
+                    {
+                        MessagingService.instance().sendRR(message, destination, responseHandler, true);
+                    }
+                    else
+                    {
+                        Collection<InetAddress> messages = (dcGroups != null) ? dcGroups.get(dc) : null;
+                        if (messages == null)
+                        {
+                            messages = new ArrayList<>(3); // most DCs will have <= 3 replicas
+                            if (dcGroups == null)
+                                dcGroups = new HashMap<>();
+                            dcGroups.put(dc, messages);
+                        }
+                        messages.add(destination);
+                    }
+                }
+            }
+//            else
+//            {
+//                if (shouldHint(destination))
+//                {
+//                    if (endpointsToHint == null)
+//                        endpointsToHint = new ArrayList<>(Iterables.size(targets));
+//                    endpointsToHint.add(destination);
+//                }
+//            }
+        }
+
+//        if (endpointsToHint != null)
+//            submitHint(mutation, endpointsToHint, responseHandler);
+
+        if (insertLocal)
+            performLocally(stage, transactionalMutation::apply, responseHandler);
+
+        if (dcGroups != null)
+        {
+            // for each datacenter, send the message to one node to relay the write to other replicas
+            if (message == null)
+                message = transactionalMutation.createMessage();
+
+            for (Collection<InetAddress> dcTargets : dcGroups.values())
+                sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
+        }
     }
 
     /**

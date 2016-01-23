@@ -25,6 +25,7 @@ import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
 import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
 import org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl;
+import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -41,17 +42,15 @@ public class MppModule
         this.mppService = service;
     }
 
-    public static MppModule createModule() {
+    public static MppModule createModule(MppNetworkService mppNetworkService)
+    {
         logger.info("MppModule is being created");
         final MppServiceImpl service = new MppServiceImpl();
         final PrivateMemtableStorageImpl privateMemtableStorage = new PrivateMemtableStorageImpl();
 
-
         ReadTransactionDataServiceImpl readTransactionDataService = new ReadTransactionDataServiceImpl();
         service.setPrivateMemtableStorage(privateMemtableStorage);
-
-        // TODO [MPP] Fix direct dependency on mppNetworkService
-//        readTransactionDataService.setMppNetworkService(mppNetworkService);
+        readTransactionDataService.setMppNetworkService(mppNetworkService);
 
         return new MppModule(service);
     }

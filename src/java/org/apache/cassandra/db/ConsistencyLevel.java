@@ -127,6 +127,7 @@ public enum ConsistencyLevel
             case LOCAL_SERIAL:
             case LOCAL_TRANSACTIONAL: // TODO [MPP] Need to look exactly how is it used.
                 return localQuorumFor(keyspace, DatabaseDescriptor.getLocalDataCenter());
+            case TRANSACTIONAL:
             case EACH_QUORUM:
                 if (keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
                 {

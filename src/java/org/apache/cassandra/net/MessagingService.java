@@ -140,17 +140,18 @@ public final class MessagingService implements MessagingServiceMBean
         PAXOS_COMMIT,
         @Deprecated PAGED_RANGE,
         // remember to add new verbs at the end, since we serialize by ordinal
+        PRIVATE_MEMTABLE_WRITE,
         UNUSED_1,
         UNUSED_2,
         UNUSED_3,
         UNUSED_4,
-        UNUSED_5,
         ;
     }
 
     public static final EnumMap<MessagingService.Verb, Stage> verbStages = new EnumMap<MessagingService.Verb, Stage>(MessagingService.Verb.class)
     {{
         put(Verb.MUTATION, Stage.MUTATION);
+        put(Verb.PRIVATE_MEMTABLE_WRITE, Stage.PRIVATE_MEMTABLES_WRITE);
         put(Verb.COUNTER_MUTATION, Stage.COUNTER_MUTATION);
         put(Verb.READ_REPAIR, Stage.MUTATION);
         put(Verb.HINT, Stage.MUTATION);
@@ -213,6 +214,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.INTERNAL_RESPONSE, CallbackDeterminedSerializer.instance);
 
         put(Verb.MUTATION, Mutation.serializer);
+        put(Verb.PRIVATE_MEMTABLE_WRITE, TransactionalMutation.serializer);
         put(Verb.READ_REPAIR, Mutation.serializer);
         put(Verb.READ, ReadCommand.serializer);
         put(Verb.RANGE_SLICE, ReadCommand.rangeSliceSerializer);
@@ -242,6 +244,7 @@ public final class MessagingService implements MessagingServiceMBean
     public static final EnumMap<Verb, IVersionedSerializer<?>> callbackDeserializers = new EnumMap<Verb, IVersionedSerializer<?>>(Verb.class)
     {{
         put(Verb.MUTATION, WriteResponse.serializer);
+        put(Verb.PRIVATE_MEMTABLE_WRITE, WriteResponse.serializer);
         put(Verb.HINT, HintResponse.serializer);
         put(Verb.READ_REPAIR, WriteResponse.serializer);
         put(Verb.COUNTER_MUTATION, WriteResponse.serializer);
@@ -308,6 +311,7 @@ public final class MessagingService implements MessagingServiceMBean
      */
     public static final EnumSet<Verb> DROPPABLE_VERBS = EnumSet.of(Verb._TRACE,
                                                                    Verb.MUTATION,
+                                                                   Verb.PRIVATE_MEMTABLE_WRITE,
                                                                    Verb.COUNTER_MUTATION,
                                                                    Verb.HINT,
                                                                    Verb.READ_REPAIR,
@@ -638,6 +642,7 @@ public final class MessagingService implements MessagingServiceMBean
                            boolean allowHints)
     {
         assert message.verb == Verb.MUTATION
+            || message.verb == Verb.PRIVATE_MEMTABLE_WRITE
             || message.verb == Verb.COUNTER_MUTATION
             || message.verb == Verb.PAXOS_COMMIT;
         int messageId = nextId();

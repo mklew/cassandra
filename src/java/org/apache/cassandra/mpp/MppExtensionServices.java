@@ -25,6 +25,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.internal.MppMessageHandlerImpl;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkServiceImpl;
+import org.apache.cassandra.mpp.transaction.network.NoOpMppNetworkService;
 import org.apache.cassandra.mpp.transaction.testutils.NsServicePortRef;
 import org.apache.cassandra.mpp.transaction.testutils.NsServicePortRefImpl;
 
@@ -51,7 +52,7 @@ public class MppExtensionServices
     public void startWithoutNetwork()
     {
         logger.info("[MPP] MppExtensionServices are starting without network...");
-        initializeMppModule();
+        initializeMppModule(new NoOpMppNetworkService());
         logger.info("[MPP] MppExtensionServices have started!");
     }
 
@@ -62,12 +63,14 @@ public class MppExtensionServices
 
     private void initialize()
     {
-        initializeMppModule();
+
 
         MppMessageHandlerImpl messageHandler = new MppMessageHandlerImpl();
 
         final MppNetworkServiceImpl mppNetworkService = new MppNetworkServiceImpl();
         networkService = mppNetworkService;
+
+        initializeMppModule(mppNetworkService);
 
         messageHandler.setMppService(mppModule.getMppService());
 //        messageHandler.setPrivateMemtableStorage(privateMemtableStorage);
@@ -79,9 +82,9 @@ public class MppExtensionServices
         mppNetworkService.setMessageHandler(messageHandler);
     }
 
-    private void initializeMppModule()
+    private void initializeMppModule(MppNetworkService mppNetworkService)
     {
-        mppModule = MppModule.createModule();
+        mppModule = MppModule.createModule(mppNetworkService);
         MppServicesLocator.setInstance(mppModule.getMppService());
     }
 

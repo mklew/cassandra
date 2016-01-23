@@ -50,7 +50,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
     {
         // Response is been managed by the map so make it 1 for the superclass.
         super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
-        assert consistencyLevel == ConsistencyLevel.EACH_QUORUM;
+        assert consistencyLevel == ConsistencyLevel.EACH_QUORUM || consistencyLevel == ConsistencyLevel.TRANSACTIONAL;
 
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
 

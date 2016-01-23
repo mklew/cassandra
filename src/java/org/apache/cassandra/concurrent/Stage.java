@@ -35,7 +35,8 @@ public enum Stage
     MISC,
     TRACING,
     INTERNAL_RESPONSE,
-    READ_REPAIR;
+    READ_REPAIR,
+    PRIVATE_MEMTABLES_WRITE;
 
     public static Iterable<Stage> jmxEnabledStages()
     {
@@ -65,6 +66,7 @@ public enum Stage
             case READ:
             case REQUEST_RESPONSE:
             case READ_REPAIR:
+            case PRIVATE_MEMTABLES_WRITE:
                 return "request";
             default:
                 throw new AssertionError("Unknown stage " + this);

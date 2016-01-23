@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.google.common.base.Preconditions;
-import org.apache.commons.lang.NotImplementedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +40,7 @@ import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -99,9 +99,9 @@ public class MppServiceImpl implements MppService
     }
 
     @Override
-    public TransactionItem executeTransactionalMutation(TransactionalMutation transactionalMutation)
+    public TransactionItem executeTransactionalMutationLocally(TransactionalMutation transactionalMutation)
     {
-        final DecoratedKey key = transactionalMutation.getMutation().key();
+        final DecoratedKey key = getTransactionalMutationsKey(transactionalMutation);
         final Token token = key.getToken();
         final UUID transactionId = transactionalMutation.getTransactionId();
 
@@ -110,7 +110,23 @@ public class MppServiceImpl implements MppService
 
         final String cfName = getColumnFamilyName(transactionalMutation);
 
+        return getTransactionItem(transactionalMutation, token, cfName);
+    }
+
+    private static DecoratedKey getTransactionalMutationsKey(TransactionalMutation transactionalMutation)
+    {
+        return transactionalMutation.getMutation().key();
+    }
+
+    private static TransactionItem getTransactionItem(TransactionalMutation transactionalMutation, Token token, String cfName)
+    {
         return new TransactionItem(token, transactionalMutation.getKeyspaceName(), cfName);
+    }
+
+    public TransactionItem getTransactionItemForMutationNoExecution(TransactionalMutation transactionalMutation)
+    {
+        return getTransactionItem(transactionalMutation, getTransactionalMutationsKey(transactionalMutation).getToken(),
+                                  getColumnFamilyName(transactionalMutation));
     }
 
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)

@@ -19,12 +19,10 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 import org.junit.Test;
 
@@ -74,7 +72,7 @@ public class WriteToPrivateMemtablesTest extends MppCQLTester
 
     private static Collection<TransactionItem> mapResultSetToTransactionItems(UntypedResultSet resultSet)
     {
-        final Stream<UntypedResultSet.Row> stream = streamResultSet(resultSet);
+        final Stream<UntypedResultSet.Row> stream = MppServiceUtils.streamResultSet(resultSet);
         return stream.map(ROW_TO_TX_ITEM).collect(Collectors.toList());
     }
 
@@ -84,11 +82,4 @@ public class WriteToPrivateMemtablesTest extends MppCQLTester
         final long token = row.getLong(MppServiceUtils.TOKEN_NAME_COL);
         return new TransactionItem(token, ksName, cfName);
     };
-
-    private static Stream<UntypedResultSet.Row> streamResultSet(UntypedResultSet resultSet)
-    {
-        final Iterator<UntypedResultSet.Row> iterator = resultSet.iterator();
-        Iterable<UntypedResultSet.Row> iterable = () -> iterator;
-        return StreamSupport.stream(iterable.spliterator(), false);
-    }
 }

@@ -84,5 +84,10 @@ public interface MppService
     /**
      * TODO [MPP] Test it via my networking
      */
-    TransactionItem executeTransactionalMutation(TransactionalMutation transactionalMutation);
+    TransactionItem executeTransactionalMutationLocally(TransactionalMutation transactionalMutation);
+
+    /**
+     * Returns just transaction item without executing that mutation
+     */
+    TransactionItem getTransactionItemForMutationNoExecution(TransactionalMutation transactionalMutation);
 }

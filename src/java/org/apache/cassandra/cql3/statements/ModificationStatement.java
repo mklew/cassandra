@@ -478,9 +478,8 @@ public abstract class ModificationStatement implements CQLStatement
 
         Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState));
         if (!mutations.isEmpty())
-            StorageProxy.mutateWithTriggers(mutations, cl, false);
-
-        return null;
+            return StorageProxy.mutateWithTriggers(mutations, cl, false);
+        else return null;
     }
 
     public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options)

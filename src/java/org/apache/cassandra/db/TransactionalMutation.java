@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.UUID;
 
@@ -26,19 +27,26 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.mpp.MppServicesLocator;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.serializers.UUIDSerializer;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 
 /**
- * TODO [MPP] Serializer, deserializer, logic to apply that mutation.
- * Also TODO TransactionalVerbHandler, message and others.
- *
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 29/11/15
  */
 public class TransactionalMutation implements IMutation
 {
     private static final Logger logger = LoggerFactory.getLogger(TransactionalMutation.class);
+
+    public static final TransactionalMutationSerializer serializer = new TransactionalMutationSerializer();
 
     private final Mutation mutation;
     private final ConsistencyLevel consistencyLevel;
@@ -101,8 +109,12 @@ public class TransactionalMutation implements IMutation
 
     public TransactionItem apply()
     {
-        return MppServicesLocator.getInstance().executeTransactionalMutation(this);
-//        return MppServiceUtils.transformToResultMessage(txItem);
+        return MppServicesLocator.getInstance().executeTransactionalMutationLocally(this);
+    }
+
+    public TransactionItem toTransactionItem()
+    {
+        return MppServicesLocator.getInstance().getTransactionItemForMutationNoExecution(this);
     }
 
     public Mutation getMutation()
@@ -113,5 +125,41 @@ public class TransactionalMutation implements IMutation
     public UUID getTransactionId()
     {
         return transactionId;
+    }
+
+    public MessageOut<TransactionalMutation> createMessage()
+    {
+        return createMessage(MessagingService.Verb.PRIVATE_MEMTABLE_WRITE);
+    }
+
+    public MessageOut<TransactionalMutation> createMessage(MessagingService.Verb verb)
+    {
+        return new MessageOut<>(verb, this, serializer);
+    }
+
+    public static class TransactionalMutationSerializer implements IVersionedSerializer<TransactionalMutation> {
+
+        private static final int SIZE_OF_UUID = TypeSizes.sizeof(UUIDGen.getTimeUUID());
+
+        public void serialize(TransactionalMutation transactionalMutation, DataOutputPlus out, int version) throws IOException
+        {
+            out.write(UUIDSerializer.instance.serialize(transactionalMutation.transactionId));
+            out.writeUTF(transactionalMutation.consistencyLevel.name());
+            Mutation.serializer.serialize(transactionalMutation.mutation, out, version);
+        }
+
+        public TransactionalMutation deserialize(DataInputPlus in, int version) throws IOException
+        {
+            final UUID id = UUIDSerializer.instance.deserialize(ByteBufferUtil.read(in, SIZE_OF_UUID));
+            ConsistencyLevel consistency = Enum.valueOf(ConsistencyLevel.class, in.readUTF());
+            final Mutation m = Mutation.serializer.deserialize(in, version);
+            return new TransactionalMutation(m, consistency, id);
+        }
+
+        public long serializedSize(TransactionalMutation transactionalMutation, int version)
+        {
+            return 16 + Mutation.serializer.serializedSize(transactionalMutation.mutation, version)
+            + TypeSizes.sizeof(transactionalMutation.consistencyLevel.name());
+        }
     }
 }

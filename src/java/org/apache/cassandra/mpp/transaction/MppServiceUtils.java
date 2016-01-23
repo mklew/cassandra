@@ -21,14 +21,18 @@ package org.apache.cassandra.mpp.transaction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.marshal.LongType;
@@ -99,13 +103,13 @@ public class MppServiceUtils
         else return new ResultMessage.Rows(resultSet);
     }
 
-    public static ResultSet executeTransactionalMutationsAndGetResults(Collection<? extends IMutation> mutations)
+    public static ResultSet executeFnOverTransactionalMutations(Collection<? extends IMutation> mutations, Function<TransactionalMutation, TransactionItem> getTransactionItemFn)
     {
         final ResultSet resultSet = newTransactionItemsResultSet();
         mutations.stream()
                  .filter(m -> m instanceof TransactionalMutation)
                  .map(m -> (TransactionalMutation) m)
-                 .map(TransactionalMutation::apply)
+                 .map(getTransactionItemFn)
                  .map(addTxItemToResultSet::apply)
                  .forEach(f -> f.apply(resultSet));
 
@@ -118,8 +122,37 @@ public class MppServiceUtils
      */
     public static Pair<ResultMessage, Integer> executeTransactionalMutations(Collection<? extends IMutation> mutations)
     {
-        final ResultSet resultSet = executeTransactionalMutationsAndGetResults(mutations);
+        final ResultSet resultSet = executeFnOverTransactionalMutations(mutations, TransactionalMutation::apply);
         final ResultMessage resultMessage = transformResultSetToResultMessage(resultSet);
         return Pair.create(resultMessage, resultSet.size());
+    }
+
+    /**
+     * Passed in mutations have already been successfully executed.
+     *
+     * If there are no transactional mutations then return null, else result set
+     *
+     * @param mutations
+     * @return
+     */
+    public static ResultMessage successfulMutationsToResultMessage(Collection<? extends IMutation> mutations)
+    {
+        if (mutations.stream().anyMatch(m -> m instanceof TransactionalMutation))
+        {
+            final ResultSet resultSet = executeFnOverTransactionalMutations(mutations, TransactionalMutation::toTransactionItem);
+            final ResultMessage resultMessage = transformResultSetToResultMessage(resultSet);
+            return resultMessage;
+        }
+        else
+        {
+            return null;
+        }
+    }
+
+    public static Stream<UntypedResultSet.Row> streamResultSet(UntypedResultSet resultSet)
+    {
+        final Iterator<UntypedResultSet.Row> iterator = resultSet.iterator();
+        Iterable<UntypedResultSet.Row> iterable = () -> iterator;
+        return StreamSupport.stream(iterable.spliterator(), false);
     }
 }

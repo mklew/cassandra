@@ -43,10 +43,10 @@ public class StageManager
 
     public static final long KEEPALIVE = 60; // seconds to keep "extra" threads alive for when idle
 
-    // TODO [MPP] NEED TO ADD ANOTHER STAGE
     static
     {
         stages.put(Stage.MUTATION, multiThreadedLowSignalStage(Stage.MUTATION, getConcurrentWriters()));
+        stages.put(Stage.PRIVATE_MEMTABLES_WRITE, multiThreadedLowSignalStage(Stage.PRIVATE_MEMTABLES_WRITE, getConcurrentPrivateMemtableWriters()));
         stages.put(Stage.COUNTER_MUTATION, multiThreadedLowSignalStage(Stage.COUNTER_MUTATION, getConcurrentCounterWriters()));
         stages.put(Stage.VIEW_MUTATION, multiThreadedLowSignalStage(Stage.VIEW_MUTATION, getConcurrentViewWriters()));
         stages.put(Stage.READ, multiThreadedLowSignalStage(Stage.READ, getConcurrentReaders()));
