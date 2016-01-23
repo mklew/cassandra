@@ -54,4 +54,9 @@ public class TransactionTimeUUID implements TransactionId, Comparable<Transactio
     {
         return id.hashCode();
     }
+
+    public String toString()
+    {
+        return "TxID[" + id + ']';
+    }
 }

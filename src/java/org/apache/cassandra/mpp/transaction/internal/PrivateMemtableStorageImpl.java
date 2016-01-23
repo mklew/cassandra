@@ -34,6 +34,7 @@ import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -52,6 +53,7 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
     // TODO [MPP] I need TTL for private memtables. Something already exists in cassadra, prepared statements maybe?
     public void storeMutation(TransactionId txId, Mutation mutation)
     {
+        Tracing.trace("PrivateMemtableStorage stores mutation for transaction id " + txId);
         final TransactionData transactionData = txIdToData.computeIfAbsent(txId, PrivateMemtableStorageImpl::createNewTransactionData);
         transactionData.addMutation(mutation);
     }
