@@ -30,11 +30,13 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -94,6 +96,22 @@ public class TransactionDataImpl implements TransactionData
         }
     }
 
+    public Stream<TransactionItem> asTransactionItemsStream() {
+        final Stream<TransactionItem> transactionItemStream1 = getMutationStream().flatMap(m -> {
+            final Stream<TransactionItem> transactionItemStream = m.getColumnFamilyIds().stream().map(cfIf -> Keyspace.open(m.getKeyspaceName()).getColumnFamilyStore(cfIf).getTableName()).map(cfName ->
+                                                                                                                                                                                                new TransactionItem(m.key().getToken(), m.getKeyspaceName(), cfName)
+            );
+            return transactionItemStream;
+        });
+
+       return transactionItemStream1;
+    }
+
+    @Override
+    public Collection<TransactionItem> asTransactionItems() {
+        return asTransactionItemsStream().collect(Collectors.toSet());
+    }
+
     public Collection<String> modifiedCfs()
     {
         return getMutations().stream().flatMap(m -> m.getPartitionUpdates().stream().map(x -> x.metadata().cfName)).collect(Collectors.toSet());
@@ -125,9 +143,16 @@ public class TransactionDataImpl implements TransactionData
      */
     public Collection<Mutation> getMutations()
     {
-        final List<Mutation> allMutations = ksToKeyToMutation.entrySet()
-                                                             .stream()
-                                                             .flatMap(e -> e.getValue().entrySet().stream().map(Map.Entry::getValue)).collect(Collectors.toList());
+        final Stream<Mutation> mutationStream = getMutationStream();
+        final List<Mutation> allMutations = mutationStream
+                                            .collect(Collectors.toList());
         return Collections.unmodifiableCollection(allMutations);
+    }
+
+    private Stream<Mutation> getMutationStream()
+    {
+        return (Stream<Mutation>) ksToKeyToMutation.entrySet()
+                                                   .stream()
+                                                   .flatMap(e -> e.getValue().entrySet().stream().map(Map.Entry::getValue));
     }
 }

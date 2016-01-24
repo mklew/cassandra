@@ -21,6 +21,7 @@ package org.apache.cassandra.mpp.transaction;
 import java.util.Collection;
 
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
  * Stores {@link org.apache.cassandra.mpp.transaction.PrivateMemtable} for that transaction.
@@ -41,5 +42,7 @@ public interface TransactionData extends ReadableTransactionData
     void addMutation(Mutation mutation);
 
     Collection<String> modifiedCfs();
+
+    Collection<TransactionItem> asTransactionItems();
 
 }

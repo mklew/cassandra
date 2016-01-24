@@ -23,6 +23,8 @@ import java.util.Collections;
 import java.util.UUID;
 
 import org.apache.cassandra.SystemClock;
+import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.utils.UUIDGen;
 
 /**
@@ -45,6 +47,12 @@ public class TransactionStateUtils
     public static TransactionState recreateTransactionState(UUID id, Collection<TransactionItem> transactionItems)
     {
         return new TransactionState(id, transactionItems);
+    }
+
+    public static TransactionState recreateTransactionState(TransactionId id, Collection<TransactionItem> transactionItems)
+    {
+        // TODO [MPP] Get rid of casting
+        return recreateTransactionState(((TransactionTimeUUID) id).getId(), transactionItems);
     }
 
     public static TransactionState fromId(UUID id) {

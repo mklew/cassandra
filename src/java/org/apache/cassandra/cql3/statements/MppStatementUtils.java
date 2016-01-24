@@ -16,52 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction;
+package org.apache.cassandra.cql3.statements;
 
+import java.nio.ByteBuffer;
 import java.util.UUID;
+
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.db.marshal.UUIDType;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 01/11/15
+ * @since 24/01/16
  */
-public class TransactionTimeUUID implements TransactionId, Comparable<TransactionId>
+public class MppStatementUtils
 {
-    private final UUID id;
-
-    public UUID getId()
+    public static UUID getTransactionId(QueryOptions options, Term transactionIdTerm)
     {
-        return id;
-    }
-
-    public TransactionTimeUUID(UUID id)
-    {
-        this.id = id;
-    }
-
-    public int compareTo(TransactionId o)
-    {
-        return id.compareTo(((TransactionTimeUUID)o).id);
-    }
-
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-
-        TransactionTimeUUID that = (TransactionTimeUUID) o;
-
-        if (!id.equals(that.id)) return false;
-
-        return true;
-    }
-
-    public int hashCode()
-    {
-        return id.hashCode();
-    }
-
-    public String toString()
-    {
-        return "TxID[" + id + ']';
+        ByteBuffer b = checkNotNull(transactionIdTerm.bindAndGet(options), "Invalid null value of transaction id");
+        UUIDType.instance.validate(b);
+        final UUID transactionId = UUIDType.instance.compose(b);
+        return transactionId;
     }
 }

@@ -36,10 +36,12 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
+import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 /**
@@ -138,6 +140,19 @@ public class MppServiceImpl implements MppService
     public boolean transactionExistsOnThisNode(TransactionId transactionId)
     {
         return privateMemtableStorage.transactionExistsInStorage(transactionId);
+    }
+
+    public TransactionState readLocalTransactionState(TransactionId transactionId)
+    {
+        logger.info("Execute readLocalTransactionState transactionId {} ", transactionId);
+        final TransactionData transactionData = privateMemtableStorage.readTransactionData(transactionId);
+        final Collection<TransactionItem> transactionItems = transactionData.asTransactionItems();
+
+        final TransactionState transactionState = TransactionStateUtils.recreateTransactionState(transactionId, transactionItems);
+
+        logger.info("Execute readLocalTransactionState transactionId {} returns transaction state ", transactionId, transactionState);
+
+        return transactionState;
     }
 
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)

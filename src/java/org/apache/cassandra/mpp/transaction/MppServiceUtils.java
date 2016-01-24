@@ -18,7 +18,9 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -63,18 +65,19 @@ public class MppServiceUtils
     static
     {
         transactionItemsMetaData = getColumnSpecificationsForTransactionItems();
-        transactionStateMetaData = getColumnSpecificationsForTransactionState();
+        transactionStateMetaData = getColumnSpecificationsForTransactionState(transactionItemsMetaData);
     }
 
-    private static List<ColumnSpecification> getColumnSpecificationsForTransactionState()
+    private static List<ColumnSpecification> getColumnSpecificationsForTransactionState(List<ColumnSpecification> transactionItemsMetaData)
     {
-        List<ColumnSpecification> columns = new ArrayList<>(1);
+        List<ColumnSpecification> columns = new ArrayList<>(4);
         columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(TRANSACTION_ID_NAME_COL, true), UUIDType.instance));
+        columns.addAll(transactionItemsMetaData);
         return Collections.unmodifiableList(columns);
     }
 
     public static final String KS_NAME = "mpp_extension";
-    public static final String TRANSACTION_ITEMS_CF_NAME = "transaction_items";
+    public static final String TRANSACTION_ITEMS_CF_NAME = "transaction_state"; // TODO [MPP] Join these two CFs into one.
     public static final String TRANSACTION_STATE_CF_NAME = "transaction_state";
 
     private MppServiceUtils()
@@ -94,12 +97,27 @@ public class MppServiceUtils
     private static void addTransactionItemToResultSet(TransactionItem txItem, ResultSet result)
     {
         // TODO [MPP] This should add row, otherwise it just appends columns to single row.
-        result.addColumnValue(UTF8Type.instance.decompose(txItem.getKsName()));
-        result.addColumnValue(UTF8Type.instance.decompose(txItem.getCfName()));
+        result.addColumnValue(keyspaceNameAsColumn(txItem));
+        result.addColumnValue(columnFamilyNameAsColumn(txItem));
+        result.addColumnValue(tokenAsColumn(txItem));
+    }
+
+    private static ByteBuffer tokenAsColumn(TransactionItem txItem)
+    {
         final Token token = txItem.getToken();
         Preconditions.checkArgument(token instanceof Murmur3Partitioner.LongToken, "Expected token: " + token + " to be instance of Murmur3Partitioner.LongToken");
         Murmur3Partitioner.LongToken longToken = (Murmur3Partitioner.LongToken) token;
-        result.addColumnValue(LongType.instance.decompose((Long) longToken.getTokenValue()));
+        return LongType.instance.decompose((Long) longToken.getTokenValue());
+    }
+
+    private static ByteBuffer columnFamilyNameAsColumn(TransactionItem txItem)
+    {
+        return UTF8Type.instance.decompose(txItem.getCfName());
+    }
+
+    private static ByteBuffer keyspaceNameAsColumn(TransactionItem txItem)
+    {
+        return UTF8Type.instance.decompose(txItem.getKsName());
     }
 
     private static List<ColumnSpecification> getColumnSpecificationsForTransactionItems()
@@ -172,11 +190,29 @@ public class MppServiceUtils
 
     public static ResultSet mapTransactionStateToResultSet(TransactionState transactionState)
     {
-        // TODO [MPP] Right now it ignores TransactionItems
-
         final ResultSet resultSet = new ResultSet(transactionStateMetaData);
-        resultSet.addColumnValue(UUIDType.instance.decompose(transactionState.getTransactionId()));
+
+        if(transactionState.getTransactionItems().isEmpty()) {
+            // Just add single column value
+            resultSet.addColumnValue(transactionIdAsColumn(transactionState));
+            resultSet.addColumnValue(null);
+            resultSet.addColumnValue(null);
+            resultSet.addColumnValue(null);
+        }
+        else {
+            transactionState.getTransactionItems().stream().forEach(txItem -> {
+                resultSet.addRow(Arrays.asList(transactionIdAsColumn(transactionState),
+                                               keyspaceNameAsColumn(txItem),
+                                               columnFamilyNameAsColumn(txItem),
+                                               tokenAsColumn(txItem)));
+            });
+        }
 
         return resultSet;
+    }
+
+    private static ByteBuffer transactionIdAsColumn(TransactionState transactionState)
+    {
+        return UUIDType.instance.decompose(transactionState.getTransactionId());
     }
 }

@@ -28,6 +28,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -59,6 +60,11 @@ public class EmptyTransactionData implements TransactionData
     }
 
     public Collection<String> modifiedCfs()
+    {
+        return Collections.emptyList();
+    }
+
+    public Collection<TransactionItem> asTransactionItems()
     {
         return Collections.emptyList();
     }

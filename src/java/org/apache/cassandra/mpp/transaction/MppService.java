@@ -100,4 +100,6 @@ public interface MppService
 
     @VisibleForTesting
     boolean transactionExistsOnThisNode(TransactionId transactionId);
+
+    TransactionState readLocalTransactionState(TransactionId transactionId);
 }

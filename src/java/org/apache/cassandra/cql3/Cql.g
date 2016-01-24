@@ -276,6 +276,7 @@ cqlStatement returns [ParsedStatement stmt]
     | st40=alterMaterializedViewStatement  { $stmt = st40; }
     | st41=startTransactionStatement       { $stmt = st41; }
     | st42=rollbackTransactionStatement    { $stmt = st42; }
+    | st43=readTransactionStatement        { $stmt = st43; }
     ;
 
 /*
@@ -577,6 +578,52 @@ rollbackTransactionStatement returns [RollbackTransactionStatement.Parsed statem
       (K_LOCALLY { isLocal = true; } )?
     tx=term { return new RollbackTransactionStatement.Parsed(tx, isLocal); }
 
+    ;
+
+/**
+*    Statements:
+*    # Returns local TransactionState for this transaction, Each row has form transaction_id, keyspace_name, columnfamily_name, token
+*    READ TRANSACTIONAL LOCALLY TRANSACTION <transactionId>
+*
+*    # Returns local TransactionState for this transaction. Returns single row with TransactionState encoded as JSON data.
+*    READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION <transactionId>
+*
+*    # Returns rows for this transaction that belong to given column family
+*    READ TRANSACTIONAL LOCALLY TRANSACTION <transactionId> FROM <columnFamilyName>
+*
+*    # ILLEGAL VALIDATE THAT IT IS ILLEGAL
+*    READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION <transactionId> FROM <columnFamilyName>
+*
+*    # Reads all rows with same token just in this local node
+*    READ TRANSACTIONAL LOCALLY TRANSACTION <transactionId> FROM <columnFamilyName> TOKEN <token>
+*
+*    # Reads all rows for given column family name across all nodes (recognized by tokens and transaction items that match column family name)
+*    READ TRANSACTIONAL TRANSACTION AS JSON <transactionStateInJson> FROM <columnFamilyName>
+*
+*    # Reads all rows for given column family name AND token (It reads with QUORUM) across all nodes
+*    # (recognized by tokens and transaction items that match column family name)
+*    READ TRANSACTIONAL TRANSACTION AS JSON <transactionStateInJson> FROM <columnFamilyName> TOKEN <token>
+*/
+readTransactionStatement returns [ReadTransactionStatement.Parsed statement]
+    @init {
+        boolean isLocal = false;
+        boolean isJson = true;
+        Term.Raw transactionId = null;
+        CFName cfName = null;
+        Term.Raw token = null;
+        Json.Raw transactionStateJson = null;
+    }
+    :
+        K_READ K_TRANSACTIONAL
+        (K_LOCALLY { isLocal = true; })?
+        (K_AS K_JSON { isJson = true; })?
+        K_TRANSACTION
+        (
+        (tx=term { transactionId = tx; }) | (K_AS K_JSON tsj=jsonValue { transactionStateJson = tsj; })
+        )
+        (K_FROM cf=columnFamilyName { cfName = cf; } )?
+        (K_TOKEN t=tokenOrBound { token = t; } )?
+        { $statement = new ReadTransactionStatement.Parsed(isLocal, isJson, transactionId, cfName, token, transactionStateJson); }
     ;
 
 createAggregateStatement returns [CreateAggregateStatement expr]
@@ -1317,6 +1364,12 @@ tupleLiteral returns [Tuples.Literal tt]
     : '(' t1=term { l.add(t1); } ( ',' tn=term { l.add(tn); } )* ')'
     ;
 
+tokenOrBound returns [Term.Raw tokenOrBound]
+    : c=constant           { $tokenOrBound = c; }
+    | ':' id=noncol_ident  { $tokenOrBound = newBindVariables(id); }
+    | QMARK                { $tokenOrBound = newBindVariables(null); }
+    ;
+
 value returns [Term.Raw value]
     : c=constant           { $value = c; }
     | l=collectionLiteral  { $value = l; }
@@ -1803,6 +1856,7 @@ K_JSON:        J S O N;
 
 K_TRANSACTIONAL:    T R A N S A C T I O N A L;
 K_TRANSACTION:      T R A N S A C T I O N;
+K_READ:             R E A D;
 K_LOCALLY:          L O C A L L Y;
 
 // Case-insensitive alpha characters

@@ -18,29 +18,22 @@
 
 package org.apache.cassandra.cql3.statements;
 
-import java.nio.ByteBuffer;
 import java.util.UUID;
 
 import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.mpp.MppServicesLocator;
-import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -76,14 +69,6 @@ public class RollbackTransactionStatement implements CQLStatement
 
     }
 
-    private UUID getTransactionId(QueryOptions options)
-    {
-        ByteBuffer b = checkNotNull(transactionId.bindAndGet(options), "Invalid null value of transaction id");
-        UUIDType.instance.validate(b);
-        final UUID transactionId = UUIDType.instance.compose(b);
-        return transactionId;
-    }
-
     public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         throw new RuntimeException("RollbackTransactionStatment execute has not been implemented");
@@ -91,7 +76,7 @@ public class RollbackTransactionStatement implements CQLStatement
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        final UUID transactionId1 = getTransactionId(options);
+        final UUID transactionId1 = MppStatementUtils.getTransactionId(options, transactionId);
 
         final TransactionState transactionState = TransactionStateUtils.fromId(transactionId1);
 
@@ -112,7 +97,7 @@ public class RollbackTransactionStatement implements CQLStatement
     }
 
 
-    public static class Parsed extends ParsedStatement
+    public static class Parsed extends ParsedStatementWithTransaction
     {
 
         public final Term.Raw transactionId;
@@ -130,16 +115,6 @@ public class RollbackTransactionStatement implements CQLStatement
 
             final RollbackTransactionStatement stmt = new RollbackTransactionStatement(transactionId, isLocal, getBoundVariables().size());
             return new ParsedStatement.Prepared(stmt, getBoundVariables(), null);
-        }
-
-        private Term prepareTransactionId(Term.Raw transactionId)
-        {
-            return transactionId.prepare(MppServiceUtils.KS_NAME, transactionIdReceiver());
-        }
-
-        private ColumnSpecification transactionIdReceiver()
-        {
-            return new ColumnSpecification(MppServiceUtils.KS_NAME, MppServiceUtils.TRANSACTION_STATE_CF_NAME, new ColumnIdentifier("[transaction_id]", true), UUIDType.instance);
         }
     }
 }
