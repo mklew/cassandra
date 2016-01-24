@@ -136,8 +136,13 @@ esac
 # times. If in doubt, and if you do not particularly want to tweak, go with
 # 100 MB per physical CPU core.
 
+# Original
 #MAX_HEAP_SIZE="4G"
 #HEAP_NEWSIZE="800M"
+
+# [MPP] Smaller settings for testing with CCM
+MAX_HEAP_SIZE="1G"
+HEAP_NEWSIZE="300M"
 
 # Set this to control the amount of arenas per-thread in glibc
 #export MALLOC_ARENA_MAX=4
@@ -313,3 +318,6 @@ JVM_OPTS="$JVM_OPTS -Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
 JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
 JVM_OPTS="$JVM_OPTS $MX4J_PORT"
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"
+
+# [MPP] Dev optimization Reduces heap size
+JVM_OPTS="$JVM_OPTS -Dcassandra.boot_without_jna=true"
