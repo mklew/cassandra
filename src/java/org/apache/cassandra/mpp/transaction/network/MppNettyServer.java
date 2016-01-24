@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction.network;
 
+import java.net.InetAddress;
+
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
@@ -46,7 +48,7 @@ class MppNettyServer
         this.workerGroup = workerGroup;
     }
 
-    void start(int listenOnPort, MppMessageConsumer mppMessageCallback) throws InterruptedException
+    void start(InetAddress addr, int listenOnPort, MppMessageConsumer mppMessageCallback) throws InterruptedException
     {
         ServerBootstrap b = new ServerBootstrap(); // (2)
         b.group(bossGroup, workerGroup)
@@ -65,7 +67,7 @@ class MppNettyServer
         .childOption(ChannelOption.SO_KEEPALIVE, true); // (6)
 
         // Bind and start to accept incoming connections.
-        socketChannel = b.bind(listenOnPort).sync(); // (7)
+        socketChannel = b.bind(addr, listenOnPort).sync(); // (7)
 
 
         // Wait until the server socket is closed.
