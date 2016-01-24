@@ -44,6 +44,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.MppMessageHandler;
 import org.apache.cassandra.utils.Pair;
 
@@ -64,6 +65,8 @@ public class MppNetworkServiceImpl implements MppNetworkService
     }
 
     private int listeningPort;
+
+    private InetAddress nativeAddr = DatabaseDescriptor.getRpcAddress();
 
     private static final long SHUTDOWN_TIMEOUT_MS = 100;
     private static final long SHUTDOWN_GRACE_PERIOD_TIMEOUT_MS = 50;
@@ -269,7 +272,7 @@ public class MppNetworkServiceImpl implements MppNetworkService
         mppNettyServer = new MppNettyServer(nettyEventLoopGroupsHolder.bossGroup, nettyEventLoopGroupsHolder.workerGroup);
         try
         {
-            mppNettyServer.start(listeningPort, (message, from) -> handleIncomingMessage(message, createReceipient(from.getAddress(), from.getPort())));
+            mppNettyServer.start(nativeAddr, listeningPort, (message, from) -> handleIncomingMessage(message, createReceipient(from.getAddress(), from.getPort())));
             state = State.RUNNING;
         }
         catch (InterruptedException e)
