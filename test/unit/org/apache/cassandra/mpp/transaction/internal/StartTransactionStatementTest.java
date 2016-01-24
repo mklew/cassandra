@@ -37,14 +37,14 @@ import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 24/01/16
  */
-public class BeginTransactionStatementTest extends MppCQLTester
+public class StartTransactionStatementTest extends MppCQLTester
 {
 
     @Test
     public void shouldBeginTransactionAndReturnItsInitialTransactionState() throws Throwable
     {
-        final UntypedResultSet resultSet = execute("BEGIN TRANSACTION");
-        Assert.assertNotNull("Begin transaction should successfully return results", resultSet);
+        final UntypedResultSet resultSet = execute("START TRANSACTION");
+        Assert.assertNotNull("Start transaction should successfully return results", resultSet);
 
         TransactionState txState = mapResultToTransactionState(resultSet);
 

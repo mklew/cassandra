@@ -62,7 +62,7 @@ public class MppServiceImpl implements MppService
         this.privateMemtableStorage = privateMemtableStorage;
     }
 
-    public TransactionState beginTransaction()
+    public TransactionState startTransaction()
     {
         final UUID txId = UUIDs.timeBased();
         logger.info("Begin transaction id {}", txId);

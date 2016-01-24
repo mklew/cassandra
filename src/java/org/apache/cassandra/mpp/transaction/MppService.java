@@ -34,13 +34,13 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 public interface MppService
 {
     /**
-     * CQL: BEGIN TRANSACTION
+     * CQL: START TRANSACTION
      *
      * Returns TransactionState with transaction_id and empty list of transaction items.
      * Doesn't have to initiate nothing in private memtable storage because that happens with first operation.
      *
      */
-    TransactionState beginTransaction();
+    TransactionState startTransaction();
 
     /**
      * This has to start paxos rounds.

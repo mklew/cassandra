@@ -34,7 +34,7 @@ import org.apache.cassandra.mpp.MppExtensionServices;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.mpp.transaction.network.SingleMppMessageResponseExpectations;
-import org.apache.cassandra.mpp.transaction.network.messages.MppBeginTransactionMessageRequest;
+import org.apache.cassandra.mpp.transaction.network.messages.MppStartTransactionMessageRequest;
 import org.apache.cassandra.mpp.transaction.network.messages.MppTransactionStateResponse;
 import org.apache.cassandra.mpp.transaction.testutils.NsServiceLookup;
 import org.apache.cassandra.mpp.transaction.testutils.NsServiceProducer;
@@ -82,7 +82,7 @@ public class MppServiceBeginTransactionTest
             {
                 final NsServiceRef client = nsServiceLookup.getByName("client");
 
-                final CompletableFuture<MppResponseMessage> responseFuture = client.sendMessage(new MppBeginTransactionMessageRequest(), new SingleMppMessageResponseExpectations(), Collections.singleton(MPP_EXTENSION_SERVICES.getNsServicePortRef())).getResponseFuture();
+                final CompletableFuture<MppResponseMessage> responseFuture = client.sendMessage(new MppStartTransactionMessageRequest(), new SingleMppMessageResponseExpectations(), Collections.singleton(MPP_EXTENSION_SERVICES.getNsServicePortRef())).getResponseFuture();
 
                 responseFuture.thenAcceptAsync(response -> {
                     final MppTransactionStateResponse transactionStateResponse = (MppTransactionStateResponse) response;

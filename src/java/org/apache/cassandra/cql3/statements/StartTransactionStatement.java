@@ -39,7 +39,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 24/01/16
  */
-public class BeginTransactionStatement extends ParsedStatement implements CQLStatement
+public class StartTransactionStatement extends ParsedStatement implements CQLStatement
 {
     public int getBoundTerms()
     {
@@ -68,7 +68,7 @@ public class BeginTransactionStatement extends ParsedStatement implements CQLSta
 
     public static ResultMessage executeBeginStatement()
     {
-        final TransactionState transactionState = MppServicesLocator.getInstance().beginTransaction();
+        final TransactionState transactionState = MppServicesLocator.getInstance().startTransaction();
         ResultSet resultSet = MppServiceUtils.mapTransactionStateToResultSet(transactionState);
         return MppServiceUtils.transformResultSetToResultMessage(resultSet);
     }

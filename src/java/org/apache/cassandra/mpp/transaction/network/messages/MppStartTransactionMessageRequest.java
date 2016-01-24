@@ -27,12 +27,12 @@ import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 20/01/16
  */
-public class MppBeginTransactionMessageRequest implements MppRequestMessage
+public class MppStartTransactionMessageRequest implements MppRequestMessage
 {
     @Override
     public MppResponseMessage executeInLocalContext(NodeContext context)
     {
-        final TransactionState transactionState = context.getService().beginTransaction();
+        final TransactionState transactionState = context.getService().startTransaction();
         return new MppTransactionStateResponse(transactionState);
     }
 }
