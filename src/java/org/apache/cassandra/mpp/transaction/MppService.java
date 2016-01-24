@@ -22,6 +22,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
@@ -95,4 +97,7 @@ public interface MppService
      * Returns just transaction item without executing that mutation
      */
     TransactionItem getTransactionItemForMutationNoExecution(TransactionalMutation transactionalMutation);
+
+    @VisibleForTesting
+    boolean transactionExistsOnThisNode(TransactionId transactionId);
 }

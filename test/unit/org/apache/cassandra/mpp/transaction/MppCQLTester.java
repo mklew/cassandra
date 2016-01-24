@@ -39,6 +39,10 @@ public abstract class MppCQLTester extends CQLTester
         mppExtensionServices.startWithoutNetwork();
     }
 
+    protected MppService getMppService() {
+        return mppExtensionServices.getMppModule().getMppService();
+    }
+
     @AfterClass
     public static void mppSetupClassAfter() {
         mppExtensionServices.stop();

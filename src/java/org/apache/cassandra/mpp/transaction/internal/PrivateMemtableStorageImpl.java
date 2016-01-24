@@ -78,6 +78,16 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
         return pairStream.collect(Collectors.toMap(p -> p.left, v -> v.right));
     }
 
+    public boolean transactionExistsInStorage(TransactionId transactionId)
+    {
+        return txIdToData.containsKey(transactionId);
+    }
+
+    public void removePrivateData(TransactionId id)
+    {
+        txIdToData.remove(id);
+    }
+
     private static Function<TransactionItem, Pair<TransactionItem, List<PartitionUpdate>>> readTransaction(TransactionData transactionData)
     {
         return item -> {

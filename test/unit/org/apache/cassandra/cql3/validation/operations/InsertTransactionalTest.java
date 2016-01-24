@@ -130,6 +130,16 @@ public class InsertTransactionalTest extends CQLTester
         {
             return null;
         }
+
+        public boolean transactionExistsInStorage(TransactionId transactionId)
+        {
+            throw new IllegalStateException("Not expected to be used");
+        }
+
+        public void removePrivateData(TransactionId id)
+        {
+            throw new IllegalStateException("Not expected to be used");
+        }
     }
 
 }

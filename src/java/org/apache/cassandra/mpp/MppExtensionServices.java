@@ -122,4 +122,9 @@ public class MppExtensionServices
     {
         return networkService;
     }
+
+    public MppModule getMppModule()
+    {
+        return mppModule;
+    }
 }

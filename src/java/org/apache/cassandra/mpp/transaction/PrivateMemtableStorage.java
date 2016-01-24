@@ -60,4 +60,9 @@ public interface PrivateMemtableStorage
     default Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(UUID transactionId, List<TransactionItem> transactionItems) {
         return readTransactionItems(new TransactionTimeUUID(transactionId), transactionItems);
     }
+
+    boolean transactionExistsInStorage(TransactionId transactionId);
+
+
+    void removePrivateData(TransactionId id);
 }

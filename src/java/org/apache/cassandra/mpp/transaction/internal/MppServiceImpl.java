@@ -84,6 +84,7 @@ public class MppServiceImpl implements MppService
     public void rollbackTransactionLocal(TransactionState transactionState)
     {
         logger.info("Rollback transaction local txState: " + transactionState);
+        privateMemtableStorage.removePrivateData(transactionState.id());
     }
 
     public Map<TransactionItem, List<PartitionUpdate>> readTransactionDataLocalOnly(TransactionId transactionId)
@@ -132,6 +133,11 @@ public class MppServiceImpl implements MppService
     {
         return getTransactionItem(transactionalMutation, getTransactionalMutationsKey(transactionalMutation).getToken(),
                                   getColumnFamilyName(transactionalMutation));
+    }
+
+    public boolean transactionExistsOnThisNode(TransactionId transactionId)
+    {
+        return privateMemtableStorage.transactionExistsInStorage(transactionId);
     }
 
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)

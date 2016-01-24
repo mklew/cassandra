@@ -18,20 +18,16 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
-import java.util.Collections;
-import java.util.UUID;
-import java.util.function.Function;
-import java.util.stream.Stream;
-
 import org.junit.Assert;
 import org.junit.Test;
 
 import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.mpp.transaction.MppCQLTester;
-import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
-import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
+
+import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.START_TRANSACTION;
+import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.mapResultToTransactionState;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -43,7 +39,7 @@ public class StartTransactionStatementTest extends MppCQLTester
     @Test
     public void shouldBeginTransactionAndReturnItsInitialTransactionState() throws Throwable
     {
-        final UntypedResultSet resultSet = execute("START TRANSACTION");
+        final UntypedResultSet resultSet = execute(START_TRANSACTION);
         Assert.assertNotNull("Start transaction should successfully return results", resultSet);
 
         TransactionState txState = mapResultToTransactionState(resultSet);
@@ -52,17 +48,5 @@ public class StartTransactionStatementTest extends MppCQLTester
         Assert.assertTrue("Timestamp means that timeuuid was received", txTimestamp > 0);
     }
 
-    private TransactionState mapResultToTransactionState(UntypedResultSet resultSet)
-    {
-        final Stream<UntypedResultSet.Row> stream = MppServiceUtils.streamResultSet(resultSet);
-        return stream.map(ROW_TO_TRANSACTION_STATE).findFirst().get();
-    }
 
-    private final static Function<UntypedResultSet.Row, TransactionState> ROW_TO_TRANSACTION_STATE = row -> {
-        final UUID transactionId = row.getUUID(MppServiceUtils.TRANSACTION_ID_NAME_COL);
-//        final String cfName = row.getString(MppServiceUtils.CF_NAME_COL);
-//        final long token = row.getLong(MppServiceUtils.TOKEN_NAME_COL);
-        final TransactionState transactionState = TransactionStateUtils.recreateTransactionState(transactionId, Collections.emptyList());
-        return transactionState;
-    };
 }

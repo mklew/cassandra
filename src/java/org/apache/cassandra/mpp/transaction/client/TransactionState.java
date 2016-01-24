@@ -25,6 +25,9 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -59,6 +62,10 @@ public class TransactionState implements Serializable
     public UUID getTransactionId()
     {
         return transactionId;
+    }
+
+    public TransactionId id() {
+        return new TransactionTimeUUID(transactionId);
     }
 
     public Collection<TransactionItem> getTransactionItems()
