@@ -88,10 +88,13 @@ def find_zip(libprefix):
         if zips:
             return max(zips)   # probably the highest version, if multiple
 
-cql_zip = find_zip(CQL_LIB_PREFIX)
-if cql_zip:
-    ver = os.path.splitext(os.path.basename(cql_zip))[0][len(CQL_LIB_PREFIX):]
-    sys.path.insert(0, os.path.join(cql_zip, 'cassandra-driver-' + ver))
+#cql_zip = find_zip(CQL_LIB_PREFIX)
+#if cql_zip:
+#    ver = os.path.splitext(os.path.basename(cql_zip))[0][len(CQL_LIB_PREFIX):]
+#    sys.path.insert(0, os.path.join(cql_zip, 'cassandra-driver-' + ver))
+
+# Points to checked out python-driver from sources
+sys.path.insert(0, os.path.join(CASSANDRA_PATH, '../python-driver'))
 
 third_parties = ('futures-', 'six-')
 
@@ -315,6 +318,8 @@ cqlsh_extra_syntax_rules = r'''
                      | "SERIAL"
                      | "LOCAL_SERIAL"
                      | "LOCAL_ONE"
+                     | "TRANSACTIONAL"
+                     | "LOCAL_TRANSACTIONAL"
                      ;
 
 <serialConsistencyCommand> ::= "SERIAL" "CONSISTENCY" ( level=<serialConsistencyLevel> )?
