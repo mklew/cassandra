@@ -85,4 +85,12 @@ public class TransactionState implements Serializable
         result = 31 * result + transactionItems.hashCode();
         return result;
     }
+
+    public String toString()
+    {
+        return "TransactionState{" +
+               "transactionId=" + transactionId +
+               ", transactionItems=" + transactionItems +
+               '}';
+    }
 }

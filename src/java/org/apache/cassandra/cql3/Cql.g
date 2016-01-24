@@ -275,6 +275,7 @@ cqlStatement returns [ParsedStatement stmt]
     | st39=dropMaterializedViewStatement   { $stmt = st39; }
     | st40=alterMaterializedViewStatement  { $stmt = st40; }
     | st41=startTransactionStatement       { $stmt = st41; }
+    | st42=rollbackTransactionStatement    { $stmt = st42; }
     ;
 
 /*
@@ -562,6 +563,20 @@ batchStatementObjective returns [ModificationStatement.Parsed statement]
 */
 startTransactionStatement returns [StartTransactionStatement stmt]
     : K_START K_TRANSACTION { $stmt = new StartTransactionStatement(); }
+    ;
+
+/**
+*   ROLLBACK TRANSACTION <transactionId>;
+*
+*/
+rollbackTransactionStatement returns [RollbackTransactionStatement.Parsed statement]
+    @init {
+        boolean isLocal = false;
+    }
+    : K_ROLLBACK K_TRANSACTION
+      (K_LOCALLY { isLocal = true; } )?
+    tx=term { return new RollbackTransactionStatement.Parsed(tx, isLocal); }
+
     ;
 
 createAggregateStatement returns [CreateAggregateStatement expr]
@@ -1669,6 +1684,7 @@ K_COUNT:       C O U N T;
 K_SET:         S E T;
 K_BEGIN:       B E G I N;
 K_START:       S T A R T;
+K_ROLLBACK:    R O L L B A C K;
 K_UNLOGGED:    U N L O G G E D;
 K_BATCH:       B A T C H;
 K_APPLY:       A P P L Y;
@@ -1785,8 +1801,9 @@ K_REPLACE:     R E P L A C E;
 
 K_JSON:        J S O N;
 
-K_TRANSACTIONAL: T R A N S A C T I O N A L;
-K_TRANSACTION: T R A N S A C T I O N;
+K_TRANSACTIONAL:    T R A N S A C T I O N A L;
+K_TRANSACTION:      T R A N S A C T I O N;
+K_LOCALLY:          L O C A L L Y;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

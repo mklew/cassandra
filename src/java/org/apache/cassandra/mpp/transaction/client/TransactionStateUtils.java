@@ -46,4 +46,8 @@ public class TransactionStateUtils
     {
         return new TransactionState(id, transactionItems);
     }
+
+    public static TransactionState fromId(UUID id) {
+        return recreateTransactionState(id, Collections.emptyList());
+    }
 }

@@ -58,6 +58,11 @@ public interface MppService
     void rollbackTransaction(TransactionState transactionState);
 
     /**
+     * @param transactionState may contain empty list of transaction items because it is only relevant to this node
+     */
+    void rollbackTransactionLocal(TransactionState transactionState);
+
+    /**
      * Reads transaction data's just, but just on this node.
      *
      * @param transactionId

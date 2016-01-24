@@ -81,6 +81,11 @@ public class MppServiceImpl implements MppService
         throw new NotImplementedException();
     }
 
+    public void rollbackTransactionLocal(TransactionState transactionState)
+    {
+        logger.info("Rollback transaction local txState: " + transactionState);
+    }
+
     public Map<TransactionItem, List<PartitionUpdate>> readTransactionDataLocalOnly(TransactionId transactionId)
     {
         // TODO [MPP] Implement it
