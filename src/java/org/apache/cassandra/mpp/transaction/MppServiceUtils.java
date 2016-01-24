@@ -93,7 +93,7 @@ public class MppServiceUtils
         List<ColumnSpecification> columns = new ArrayList<>(3);
         columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(KS_NAME_COL, true), UTF8Type.instance));
         columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(CF_NAME_COL, true), UTF8Type.instance));
-        columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(TOKEN_NAME_COL, true), UTF8Type.instance));
+        columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(TOKEN_NAME_COL, true), LongType.instance));
         return Collections.unmodifiableList(columns);
     }
 
