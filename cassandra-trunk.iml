@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <module type="JAVA_MODULE" version="4">
+  <component name="FacetManager">
+    <facet type="Python" name="Python">
+      <configuration sdkName="" />
+    </facet>
+  </component>
   <component name="NewModuleRootManager" LANGUAGE_LEVEL="JDK_1_8" inherit-compiler-output="false">
     <output url="file://$MODULE_DIR$/.idea/out/main" />
     <output-test url="file://$MODULE_DIR$/.idea/out/test" />
@@ -14,6 +19,7 @@
       <sourceFolder url="file://$MODULE_DIR$/test/long" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/test/microbench" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/test/resources" type="java-test-resource" />
+      <sourceFolder url="file://$MODULE_DIR$/src/mpp" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.idea" />
       <excludeFolder url="file://$MODULE_DIR$/.settings" />
       <excludeFolder url="file://$MODULE_DIR$/build" />
@@ -26,6 +32,7 @@
     <orderEntry type="library" name="airline-0.6" level="project" />
     <orderEntry type="library" name="antlr-runtime-3.5.2" level="project" />
     <orderEntry type="library" name="asm-5.0.4" level="project" />
+    <orderEntry type="library" name="cassandra-driver-core-2.2.0-rc2-shaded" level="project" />
     <orderEntry type="library" name="commons-cli-1.1" level="project" />
     <orderEntry type="library" name="commons-codec-1.2" level="project" />
     <orderEntry type="library" name="commons-lang3-3.1" level="project" />
@@ -163,6 +170,17 @@
         </CLASSES>
         <JAVADOC />
         <SOURCES />
+      </library>
+    </orderEntry>
+    <orderEntry type="module-library">
+      <library>
+        <CLASSES>
+          <root url="jar://$MODULE_DIR$/lib/fugue-3.1.0.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES>
+          <root url="jar://$MODULE_DIR$/../fugue-3.1.0-sources.jar!/" />
+        </SOURCES>
       </library>
     </orderEntry>
   </component>

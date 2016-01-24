@@ -12,6 +12,8 @@
       <module fileurl="file://$PROJECT_DIR$/../java-driver/driver-mapping/cassandra-driver-mapping.iml" filepath="$PROJECT_DIR$/../java-driver/driver-mapping/cassandra-driver-mapping.iml" group="java-driver" />
       <module fileurl="file://$PROJECT_DIR$/../java-driver/cassandra-driver-parent.iml" filepath="$PROJECT_DIR$/../java-driver/cassandra-driver-parent.iml" group="java-driver" />
       <module fileurl="file://$PROJECT_DIR$/cassandra-trunk.iml" filepath="$PROJECT_DIR$/cassandra-trunk.iml" />
+      <module fileurl="file://$PROJECT_DIR$/mpp-tester/mpp-tester.iml" filepath="$PROJECT_DIR$/mpp-tester/mpp-tester.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../python-driver/python-driver.iml" filepath="$PROJECT_DIR$/../python-driver/python-driver.iml" />
     </modules>
   </component>
 </project>
