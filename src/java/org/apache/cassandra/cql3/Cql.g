@@ -274,6 +274,7 @@ cqlStatement returns [ParsedStatement stmt]
     | st38=createMaterializedViewStatement { $stmt = st38; }
     | st39=dropMaterializedViewStatement   { $stmt = st39; }
     | st40=alterMaterializedViewStatement  { $stmt = st40; }
+    | st41=beginTransactionStatement       { $stmt = st41; }
     ;
 
 /*
@@ -552,6 +553,15 @@ batchStatementObjective returns [ModificationStatement.Parsed statement]
     : i=insertStatement  { $statement = i; }
     | u=updateStatement  { $statement = u; }
     | d=deleteStatement  { $statement = d; }
+    ;
+
+/**
+*   BEGIN TRANSACTION;
+*
+*
+*/
+beginTransactionStatement returns [BeginTransactionStatement stmt]
+    : K_BEGIN K_TRANSACTION { $stmt = new BeginTransactionStatement(); }
     ;
 
 createAggregateStatement returns [CreateAggregateStatement expr]

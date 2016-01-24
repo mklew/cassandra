@@ -37,9 +37,11 @@ import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.Pair;
 
@@ -54,15 +56,26 @@ public class MppServiceUtils
     public static final String KS_NAME_COL = "ks_name";
     public static final String CF_NAME_COL = "cf_name";
     public static final String TOKEN_NAME_COL = "token";
-    private static List<ColumnSpecification> metadata;
+    public static final String TRANSACTION_ID_NAME_COL = "transaction_id";
+    private static List<ColumnSpecification> transactionItemsMetaData;
+    private static List<ColumnSpecification> transactionStateMetaData;
 
     static
     {
-        metadata = getColumnSpecifications();
+        transactionItemsMetaData = getColumnSpecificationsForTransactionItems();
+        transactionStateMetaData = getColumnSpecificationsForTransactionState();
+    }
+
+    private static List<ColumnSpecification> getColumnSpecificationsForTransactionState()
+    {
+        List<ColumnSpecification> columns = new ArrayList<>(1);
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(TRANSACTION_ID_NAME_COL, true), UUIDType.instance));
+        return Collections.unmodifiableList(columns);
     }
 
     public static final String KS_NAME = "mpp_extension";
-    public static final String CF_NAME = "transaction_items";
+    public static final String TRANSACTION_ITEMS_CF_NAME = "transaction_items";
+    public static final String TRANSACTION_STATE_CF_NAME = "transaction_state";
 
     private MppServiceUtils()
     {
@@ -70,7 +83,7 @@ public class MppServiceUtils
 
     static ResultSet newTransactionItemsResultSet()
     {
-        return new ResultSet(metadata);
+        return new ResultSet(transactionItemsMetaData);
     }
 
     static Function<TransactionItem, Function<ResultSet, ResultSet>> addTxItemToResultSet = txItem -> resultSet -> {
@@ -80,6 +93,7 @@ public class MppServiceUtils
 
     private static void addTransactionItemToResultSet(TransactionItem txItem, ResultSet result)
     {
+        // TODO [MPP] This should add row, otherwise it just appends columns to single row.
         result.addColumnValue(UTF8Type.instance.decompose(txItem.getKsName()));
         result.addColumnValue(UTF8Type.instance.decompose(txItem.getCfName()));
         final Token token = txItem.getToken();
@@ -88,12 +102,12 @@ public class MppServiceUtils
         result.addColumnValue(LongType.instance.decompose((Long) longToken.getTokenValue()));
     }
 
-    private static List<ColumnSpecification> getColumnSpecifications()
+    private static List<ColumnSpecification> getColumnSpecificationsForTransactionItems()
     {
         List<ColumnSpecification> columns = new ArrayList<>(3);
-        columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(KS_NAME_COL, true), UTF8Type.instance));
-        columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(CF_NAME_COL, true), UTF8Type.instance));
-        columns.add(new ColumnSpecification(KS_NAME, CF_NAME, new ColumnIdentifier(TOKEN_NAME_COL, true), LongType.instance));
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(KS_NAME_COL, true), UTF8Type.instance));
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(CF_NAME_COL, true), UTF8Type.instance));
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(TOKEN_NAME_COL, true), LongType.instance));
         return Collections.unmodifiableList(columns);
     }
 
@@ -154,5 +168,15 @@ public class MppServiceUtils
         final Iterator<UntypedResultSet.Row> iterator = resultSet.iterator();
         Iterable<UntypedResultSet.Row> iterable = () -> iterator;
         return StreamSupport.stream(iterable.spliterator(), false);
+    }
+
+    public static ResultSet mapTransactionStateToResultSet(TransactionState transactionState)
+    {
+        // TODO [MPP] Right now it ignores TransactionItems
+
+        final ResultSet resultSet = new ResultSet(transactionStateMetaData);
+        resultSet.addColumnValue(UUIDType.instance.decompose(transactionState.getTransactionId()));
+
+        return resultSet;
     }
 }
