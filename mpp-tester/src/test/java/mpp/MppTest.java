@@ -18,11 +18,16 @@
 
 package mpp;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.Test;
 
+import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.Policies;
@@ -38,23 +43,58 @@ public class MppTest
 
     @Test
     public void testWritingToPrivateMemtables() {
+        Session session = getSession();
+
+        final UUID itemId = UUIDs.random();
+        String itemDescription = "Super creazy awesome!";
+        String price = "15 euro";
+
+        // TODO this should be obtained using BEGIN TRANSACTION
+        final UUID txId = UUIDs.timeBased();
+//
+        final ResultSet execute = session.execute("INSERT INTO mpptest.items (item_id, item_description, price) values (?, ?, ?) USING TRANSACTION " + txId, itemId, itemDescription, price);
+        final List<Row> all = execute.all();
+        all.stream().forEach(r -> {
+            System.out.println("Row: " + r);
+
+            final String ksName = r.getString("ks_name");
+            final String cfName = r.getString("cf_name");
+            final Long token = r.getLong("token");
+
+            System.out.println("Keyspace name: " + ksName);
+            System.out.println("ColumnFamily name: " + cfName);
+            System.out.println("Token : " + token);
+        });
+
+//        final UUID itemId = UUID.fromString("55033639-59b5-4270-821a-792d68e675cc");
+//        TODO [MPP] Transaction has to be initiated on server side
+//        final UUID transactionId = UUIDs.timeBased();
+//        String updatedItemDescription = "Book was not so great after all";
+//
+//        session.execute("UPDATE mpptest.items USING TRANSACTION " + transactionId + " SET item_description = '" + updatedItemDescription + "'  WHERE item_id = " + itemId);
+    }
+
+    private Session getSession()
+    {
         Cluster cluster = Cluster.builder().addContactPoint("127.0.0.1")
                                  .withRetryPolicy(new LoggingRetryPolicy(Policies.defaultRetryPolicy()))
                                  .withPort(DatabaseDescriptor.getNativeTransportPort()).build();
-        Session session = cluster.connect("mpptest");
+        return cluster.connect("mpptest");
+    }
 
-//        final UUID itemId = UUIDs.random();
-//        String itemDescription = "This book is awesome!";
-//        String price = "10 euro";
+    @Test
+    public void testPreparedRollback() throws Throwable {
+        Session session = getSession();
+        final UUID txId = UUIDs.timeBased();
+//        PreparedStatement statement = session.prepare(
 //
-//        session.execute("INSERT INTO mpptest.items (item_id, item_description, price) values (?, ?, ?)", itemId, itemDescription, price);
+//                                                     "INSERT INTO users" + "(lastname, age, city, email, firstname)"
+//                                                     + "VALUES (?,?,?,?,?);");
+//
+        PreparedStatement statement = session.prepare("ROLLBACK TRANSACTION LOCALLY ?");
+        BoundStatement boundStatement = new BoundStatement(statement);
 
-        final UUID itemId = UUID.fromString("55033639-59b5-4270-821a-792d68e675cc");
-        // TODO [MPP] Transaction has to be initiated on server side
-        final UUID transactionId = UUIDs.timeBased();
-        String updatedItemDescription = "Book was not so great after all";
-
-        session.execute("UPDATE mpptest.items USING TRANSACTION " + transactionId + " SET item_description = '" + updatedItemDescription + "'  WHERE item_id = " + itemId);
+        session.execute(boundStatement.setUUID(0, txId));
     }
 
 }
