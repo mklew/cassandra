@@ -21,10 +21,12 @@ package org.apache.cassandra.mpp.transaction;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.TransactionalMutation;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -102,4 +104,6 @@ public interface MppService
     boolean transactionExistsOnThisNode(TransactionId transactionId);
 
     TransactionState readLocalTransactionState(TransactionId transactionId);
+
+    void readAllByColumnFamily(TransactionId transactionId, String ksName, String cfName, Consumer<PartitionIterator> cb);
 }

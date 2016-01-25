@@ -29,6 +29,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -115,6 +117,17 @@ public class TransactionDataImpl implements TransactionData
     public Collection<String> modifiedCfs()
     {
         return getMutations().stream().flatMap(m -> m.getPartitionUpdates().stream().map(x -> x.metadata().cfName)).collect(Collectors.toSet());
+    }
+
+    @Override
+    public Stream<PartitionUpdate> partitionUpdatesStream(String ksName, UUID cfId) {
+        Preconditions.checkNotNull(ksName, "Keyspace name is required");
+        Preconditions.checkNotNull(cfId, "ColumnFamily name is required");
+        final Map<DecoratedKey, Mutation> keysToMutation = ksToKeyToMutation.get(ksName);
+
+        return keysToMutation.entrySet().stream()
+                                 .filter(e -> modifiesColumnFamily(cfId, e))
+                                 .map(v->v.getValue().getPartitionUpdate(cfId));
     }
 
     public Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token)

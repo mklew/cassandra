@@ -23,16 +23,22 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.utils.UUIDs;
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.TransactionalMutation;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
@@ -42,6 +48,7 @@ import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
+import org.apache.cassandra.utils.FBUtilities;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 /**
@@ -153,6 +160,24 @@ public class MppServiceImpl implements MppService
         logger.info("Execute readLocalTransactionState transactionId {} returns transaction state ", transactionId, transactionState);
 
         return transactionState;
+    }
+
+    public void readAllByColumnFamily(TransactionId transactionId, String ksName, String cfName, Consumer<PartitionIterator> consumer)
+    {
+        logger.info("Execute readAllByColumnFamily transactionId: {} keyspaceName: {} columnFamilyName: {}", transactionId, ksName, cfName);
+        final TransactionData transactionData = privateMemtableStorage.readTransactionData(transactionId);
+        final UUID cfId = Schema.instance.getId(ksName, cfName);
+
+        int nowInSec = FBUtilities.nowInSeconds();
+        final List<PartitionIterator> partitionIterators = transactionData.partitionUpdatesStream(ksName, cfId)
+                                                               .map(pu -> pu.unfilteredIterator())
+                                                               .map(unfilteredI -> UnfilteredRowIterators.filter(unfilteredI, nowInSec))
+                                                               .map(PartitionIterators::singletonIterator)
+                                                               .collect(Collectors.toList());
+
+        try(final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators)) {
+            consumer.accept(partitionIterator);
+        }
     }
 
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)

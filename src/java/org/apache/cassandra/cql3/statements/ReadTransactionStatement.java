@@ -101,16 +101,35 @@ public class ReadTransactionStatement implements CQLStatement
         // TODO [MPP] Implement it.
         if(isLocal()) {
             assert transactionId != null;
+            final UUID transactionId = MppStatementUtils.getTransactionId(options, this.transactionId);
+            final TransactionTimeUUID txId = new TransactionTimeUUID(transactionId);
 
             if(cfName == null && preparedToken == null) {
                 // Returns local TransactionState for this transaction,
-                final UUID transactionId = MppStatementUtils.getTransactionId(options, this.transactionId);
-                TransactionState txState = MppServicesLocator.getInstance().readLocalTransactionState(new TransactionTimeUUID(transactionId));
+                TransactionState txState = MppServicesLocator.getInstance().readLocalTransactionState(txId);
 
                 return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState));
             }
+            else if (cfName != null)
+            {
+                // read all from column family
+                MppServicesLocator
+                .getInstance()
+                .readAllByColumnFamily(txId,
+                                       cfName.getKeyspace(),
+                                       cfName.getColumnFamily(),
+                                       partitionIterator -> {
+                                           // TODO [MPP] Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
+                                           // Tricky part is setting everything on the SelectStatement. For now, fail with exception
 
+                                           throw new RuntimeException("ReadTransactionStatement. IN CONSUME BLOCK read all from column family not implemented ");
+                                       });
+
+
+                throw new RuntimeException("ReadTransactionStatement. read all from column family not implemented");
+            }
             else {
+                // read all from column family and by token
                 throw new RuntimeException("ReadTransactionStatement. other case not implemented");
             }
         }

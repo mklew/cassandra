@@ -24,6 +24,7 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 
@@ -38,14 +39,21 @@ public class MppTestingUtilities
     public static TransactionState mapResultToTransactionState(UntypedResultSet resultSet)
     {
         final Stream<UntypedResultSet.Row> stream = MppServiceUtils.streamResultSet(resultSet);
-        return stream.map(ROW_TO_TRANSACTION_STATE).findFirst().get();
+        return stream.map(ROW_TO_TRANSACTION_STATE).reduce(TransactionState::merge).get();
     }
 
     public final static Function<UntypedResultSet.Row, TransactionState> ROW_TO_TRANSACTION_STATE = row -> {
         final UUID transactionId = row.getUUID(MppServiceUtils.TRANSACTION_ID_NAME_COL);
-//        final String cfName = row.getString(MppServiceUtils.CF_NAME_COL);
-//        final long token = row.getLong(MppServiceUtils.TOKEN_NAME_COL);
-        final TransactionState transactionState = TransactionStateUtils.recreateTransactionState(transactionId, Collections.emptyList());
-        return transactionState;
+        if(row.has(MppServiceUtils.KS_NAME_COL)) {
+            final String ksName = row.getString(MppServiceUtils.KS_NAME_COL);
+            final String cfName = row.getString(MppServiceUtils.CF_NAME_COL);
+            final long token = row.getLong(MppServiceUtils.TOKEN_NAME_COL);
+            final TransactionItem item = new TransactionItem(token, ksName, cfName);
+            final TransactionState transactionState = TransactionStateUtils.recreateTransactionState(transactionId, Collections.singletonList(item));
+            return transactionState;
+        }
+        else {
+            return TransactionStateUtils.recreateTransactionState(transactionId, Collections.emptyList());
+        }
     };
 }

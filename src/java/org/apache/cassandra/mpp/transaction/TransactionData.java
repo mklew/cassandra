@@ -19,8 +19,11 @@
 package org.apache.cassandra.mpp.transaction;
 
 import java.util.Collection;
+import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
@@ -44,5 +47,7 @@ public interface TransactionData extends ReadableTransactionData
     Collection<String> modifiedCfs();
 
     Collection<TransactionItem> asTransactionItems();
+
+    Stream<PartitionUpdate> partitionUpdatesStream(String ksName, UUID cfId);
 
 }

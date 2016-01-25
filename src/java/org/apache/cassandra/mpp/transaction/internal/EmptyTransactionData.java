@@ -69,6 +69,11 @@ public class EmptyTransactionData implements TransactionData
         return Collections.emptyList();
     }
 
+    public Stream<PartitionUpdate> partitionUpdatesStream(String ksName, UUID cfId)
+    {
+        return Stream.empty();
+    }
+
     public Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
     {
         return Stream.empty();

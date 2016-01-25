@@ -607,7 +607,7 @@ rollbackTransactionStatement returns [RollbackTransactionStatement.Parsed statem
 readTransactionStatement returns [ReadTransactionStatement.Parsed statement]
     @init {
         boolean isLocal = false;
-        boolean isJson = true;
+        boolean isJson = false;
         Term.Raw transactionId = null;
         CFName cfName = null;
         Term.Raw token = null;

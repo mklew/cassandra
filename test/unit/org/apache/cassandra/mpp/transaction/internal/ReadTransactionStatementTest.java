@@ -41,9 +41,6 @@ public class ReadTransactionStatementTest extends MppCQLTester
     public void shouldReadTransactionLocallyByTransactionId() throws Throwable {
         final TransactionState transactionState = mapResultToTransactionState(execute(START_TRANSACTION));
 
-        // TODO insert something, at least 2 rows to 2 different tables
-        // write to transaction
-
         final String cfName1 = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
         int modifiedKey = 101234;
         int key2 = 123;
@@ -61,7 +58,12 @@ public class ReadTransactionStatementTest extends MppCQLTester
         Assert.assertEquals(2, transationStateAsRows.size());
         System.out.println(transationStateAsRows);
 
-        // TODO Assert that transaction state can be built from rows, it should have 2 rows for each insert to different cf
+        final TransactionState actualTransactionState = mapResultToTransactionState(transationStateAsRows);
+        Assert.assertEquals(2, actualTransactionState.getTransactionItems().size());
+        Assert.assertEquals(txId, actualTransactionState.getTransactionId());
+
+        Assert.assertEquals(1, actualTransactionState.getTransactionItems().stream().filter(ti -> ti.getCfName().equals(cfName1)).count());
+        Assert.assertEquals(1, actualTransactionState.getTransactionItems().stream().filter(ti -> ti.getCfName().equals(cfName2)).count());
     }
 
     @Test
@@ -77,16 +79,39 @@ public class ReadTransactionStatementTest extends MppCQLTester
 
     @Test
     public void shouldReadTransactionLocallyAndReturnResultsFromSpecificColumnFamily() throws Throwable {
+        // begin transaction
         final TransactionState transactionState = mapResultToTransactionState(execute(START_TRANSACTION));
-        String cfName = null; // TODO set it
 
-        // TODO insert something to cf
+        final String cfName = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
+        UUID txId = transactionState.getTransactionId();
+
+        int modifiedKey = 101234;
+        int key2 = 123;
+        final String expectedTextValue = "this is some text";
+        final String keyspace = keyspace();
+        // insert transactional
+        final int expectedIValue = 10;
+        final UntypedResultSet ignoreTransactionItemAsRow = execute("INSERT INTO %s (k, s, i) VALUES (?, ?, ?) USING TRANSACTION " + txId, modifiedKey, expectedTextValue, expectedIValue);
 
         final UntypedResultSet rowResults = execute("READ TRANSACTIONAL LOCALLY TRANSACTION " +
                                                  transactionState.getTransactionId()
-                                                 + " FROM " + cfName);
+                                                 + " FROM " + keyspace+"."+cfName);
 
-        // TODO assert that rows are correct rows for that column family
+        Assert.assertEquals(1, rowResults.size());
+
+        final UntypedResultSet.Row one = rowResults.one();
+        final int kValue = one.getInt("k");
+        final String sValue = one.getString("s");
+        final int iValue = one.getInt("i");
+
+        Assert.assertEquals(modifiedKey, kValue);
+        Assert.assertEquals(expectedTextValue, sValue);
+        Assert.assertEquals(expectedIValue, iValue);
+
+//        TODO assert that rows are correct rows for that column family
+
+//        final String text2 = expectedTextValue + " added some text";
+//        final UntypedResultSet resultSet2 = execute("INSERT INTO %s (k, s, i) VALUES (?, ?, ?) USING TRANSACTION " + txId, modifiedKey + 123, text2, 124);
     }
 
     @Test
