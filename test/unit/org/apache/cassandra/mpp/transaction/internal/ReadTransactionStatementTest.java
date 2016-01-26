@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Preconditions;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -96,13 +97,19 @@ public class ReadTransactionStatementTest extends MppCQLTester
     }
 
     private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, String description) throws Throwable {
-        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description, number) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
+        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
         final UntypedResultSet encodedTxState = execute(cql, pk, ck, description);
         return mapResultToTransactionState(encodedTxState);
     }
 
+    private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, Integer number) throws Throwable {
+        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, number) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
+        final UntypedResultSet encodedTxState = execute(cql, pk, ck, number);
+        return mapResultToTransactionState(encodedTxState);
+    }
+
     private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck) throws Throwable {
-        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description, number) values (?, ?) USING TRANSACTION " + transactionState.getTransactionId();
+        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck) values (?, ?) USING TRANSACTION " + transactionState.getTransactionId();
         final UntypedResultSet encodedTxState = execute(cql, pk, ck);
         return mapResultToTransactionState(encodedTxState);
     }
@@ -118,10 +125,52 @@ public class ReadTransactionStatementTest extends MppCQLTester
 
         public Cf1Obj(int pk, String ck, Optional<String> description, Optional<Integer> number)
         {
+            Preconditions.checkNotNull(ck);
             this.pk = pk;
             this.ck = ck;
             this.description = description;
             this.number = number;
+        }
+
+        public static Cf1Obj createNew(int pk, String ck) {
+            return new Cf1Obj(pk, ck, Optional.empty(), Optional.<Integer>empty());
+        }
+
+        public static Cf1Obj createNew(int pk, String ck, String description) {
+            return new Cf1Obj(pk, ck, Optional.of(description), Optional.<Integer>empty());
+        }
+
+        public static Cf1Obj createNew(int pk, String ck, int number) {
+            return new Cf1Obj(pk, ck, Optional.empty(), Optional.of(number));
+        }
+
+        public static Cf1Obj createNew(int pk, String ck, String description, int number) {
+            return new Cf1Obj(pk, ck, Optional.of(description), Optional.of(number));
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            Cf1Obj cf1Obj = (Cf1Obj) o;
+
+            if (pk != cf1Obj.pk) return false;
+            if (!ck.equals(cf1Obj.ck)) return false;
+            if (description != null ? !description.equals(cf1Obj.description) : cf1Obj.description != null)
+                return false;
+            if (number != null ? !number.equals(cf1Obj.number) : cf1Obj.number != null) return false;
+
+            return true;
+        }
+
+        public int hashCode()
+        {
+            int result = pk;
+            result = 31 * result + ck.hashCode();
+            result = 31 * result + (description != null ? description.hashCode() : 0);
+            result = 31 * result + (number != null ? number.hashCode() : 0);
+            return result;
         }
     }
 
@@ -169,6 +218,17 @@ public class ReadTransactionStatementTest extends MppCQLTester
         Assert.assertEquals(description, cf1Obj.description.get());
         Assert.assertEquals(Integer.valueOf(number), cf1Obj.number.get());
 
+        final Cf1Obj otherOne = Cf1Obj.createNew(500, "OtherOneIs500", 889);
+
+        transactionState = transactionState.merge(txInsertToCf1(transactionState, otherOne.pk, otherOne.ck, otherOne.number.get()));
+
+        final Collection<Cf1Obj> shouldHave2 = readTransactionalLocallyFromCf1(transactionState);
+
+        Assert.assertEquals(2, shouldHave2.size());
+
+        final Cf1Obj actualOtherOne = findExactlyOne(otherOne.pk, otherOne.ck, shouldHave2);
+
+        Assert.assertEquals(otherOne, actualOtherOne);
     }
 
     private static Cf1Obj findExactlyOne(int pk, String ck, Collection<Cf1Obj> cf1Objs)
