@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.UUID;
 
 import com.google.common.base.Preconditions;
@@ -31,7 +32,10 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.mpp.MppServicesLocator;
+import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.serializers.UUIDSerializer;
@@ -112,9 +116,20 @@ public class TransactionalMutation implements IMutation
         return MppServicesLocator.getInstance().executeTransactionalMutationLocally(this);
     }
 
-    public TransactionItem toTransactionItem()
+    public TransactionState applyAndGetAsTransactionState() {
+        final TransactionItem txItem = apply();
+        return getTransactionState(txItem);
+    }
+
+    public TransactionState toTransactionState()
     {
-        return MppServicesLocator.getInstance().getTransactionItemForMutationNoExecution(this);
+        final TransactionItem txItem = MppServicesLocator.getInstance().getTransactionItemForMutationNoExecution(this);
+        return getTransactionState(txItem);
+    }
+
+    private TransactionState getTransactionState(TransactionItem txItem)
+    {
+        return TransactionStateUtils.recreateTransactionState(new TransactionTimeUUID(transactionId), Collections.singletonList(txItem));
     }
 
     public Mutation getMutation()

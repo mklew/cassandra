@@ -84,19 +84,22 @@ public class MppServiceUtils
     {
     }
 
-    static ResultSet newTransactionItemsResultSet()
+    static ResultSet newTransactionStateResultSet()
     {
-        return new ResultSet(transactionItemsMetaData);
+        return new ResultSet(transactionStateMetaData);
     }
 
-    static Function<TransactionItem, Function<ResultSet, ResultSet>> addTxItemToResultSet = txItem -> resultSet -> {
-        addTransactionItemToResultSet(txItem, resultSet);
+    static Function<TransactionState, Function<ResultSet, ResultSet>> addTxItemToResultSet = txState -> resultSet -> {
+        addTransactionItemToResultSet(txState, resultSet);
         return resultSet;
     };
 
-    private static void addTransactionItemToResultSet(TransactionItem txItem, ResultSet result)
+    private static void addTransactionItemToResultSet(TransactionState transactionState, ResultSet result)
     {
-        // TODO [MPP] This should add row, otherwise it just appends columns to single row.
+        assert transactionState.getTransactionItems().size() == 1;
+        final TransactionItem txItem = transactionState.getTransactionItems().iterator().next();
+
+        result.addColumnValue(transactionIdAsColumn(transactionState));
         result.addColumnValue(keyspaceNameAsColumn(txItem));
         result.addColumnValue(columnFamilyNameAsColumn(txItem));
         result.addColumnValue(tokenAsColumn(txItem));
@@ -135,9 +138,9 @@ public class MppServiceUtils
         else return new ResultMessage.Rows(resultSet);
     }
 
-    public static ResultSet executeFnOverTransactionalMutations(Collection<? extends IMutation> mutations, Function<TransactionalMutation, TransactionItem> getTransactionItemFn)
+    public static ResultSet executeFnOverTransactionalMutations(Collection<? extends IMutation> mutations, Function<TransactionalMutation, TransactionState> getTransactionItemFn)
     {
-        final ResultSet resultSet = newTransactionItemsResultSet();
+        final ResultSet resultSet = newTransactionStateResultSet();
         mutations.stream()
                  .filter(m -> m instanceof TransactionalMutation)
                  .map(m -> (TransactionalMutation) m)
@@ -154,7 +157,7 @@ public class MppServiceUtils
      */
     public static Pair<ResultMessage, Integer> executeTransactionalMutations(Collection<? extends IMutation> mutations)
     {
-        final ResultSet resultSet = executeFnOverTransactionalMutations(mutations, TransactionalMutation::apply);
+        final ResultSet resultSet = executeFnOverTransactionalMutations(mutations, TransactionalMutation::applyAndGetAsTransactionState);
         final ResultMessage resultMessage = transformResultSetToResultMessage(resultSet);
         return Pair.create(resultMessage, resultSet.size());
     }
@@ -171,7 +174,7 @@ public class MppServiceUtils
     {
         if (mutations.stream().anyMatch(m -> m instanceof TransactionalMutation))
         {
-            final ResultSet resultSet = executeFnOverTransactionalMutations(mutations, TransactionalMutation::toTransactionItem);
+            final ResultSet resultSet = executeFnOverTransactionalMutations(mutations, TransactionalMutation::toTransactionState);
             final ResultMessage resultMessage = transformResultSetToResultMessage(resultSet);
             return resultMessage;
         }
@@ -192,6 +195,13 @@ public class MppServiceUtils
     {
         final ResultSet resultSet = new ResultSet(transactionStateMetaData);
 
+        addTransactionStateToResultSet(transactionState, resultSet);
+
+        return resultSet;
+    }
+
+    private static void addTransactionStateToResultSet(TransactionState transactionState, ResultSet resultSet)
+    {
         if(transactionState.getTransactionItems().isEmpty()) {
             // Just add single column value
             resultSet.addColumnValue(transactionIdAsColumn(transactionState));
@@ -207,8 +217,6 @@ public class MppServiceUtils
                                                tokenAsColumn(txItem)));
             });
         }
-
-        return resultSet;
     }
 
     private static ByteBuffer transactionIdAsColumn(TransactionState transactionState)

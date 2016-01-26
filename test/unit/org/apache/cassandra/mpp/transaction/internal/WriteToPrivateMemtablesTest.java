@@ -32,7 +32,9 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.mpp.transaction.MppCQLTester;
 import org.apache.cassandra.mpp.transaction.MppServiceUtils;
+import org.apache.cassandra.mpp.transaction.MppTestingUtilities;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 import org.joda.time.DateTime;
@@ -55,7 +57,8 @@ public class WriteToPrivateMemtablesTest extends MppCQLTester
         final UntypedResultSet resultSet = execute("INSERT INTO %s (k, s, i) VALUES (?, ?, ?) USING TRANSACTION " + txId, modifiedKey, expectedTextValue, 10);
         Assert.assertNotNull("Mutation using transaction should return results with transaction item", resultSet);
 
-        Collection<TransactionItem> transactionItems = mapResultSetToTransactionItems(resultSet);
+        final TransactionState transactionState = MppTestingUtilities.mapResultToTransactionState(resultSet);
+        Collection<TransactionItem> transactionItems = transactionState.getTransactionItems();
 
         final CFMetaData cfMetaData = currentTableMetadata();
         final String ksName = keyspace();
