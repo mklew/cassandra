@@ -229,6 +229,13 @@ public class ReadTransactionStatementTest extends MppCQLTester
         final Cf1Obj actualOtherOne = findExactlyOne(otherOne.pk, otherOne.ck, shouldHave2);
 
         Assert.assertEquals(otherOne, actualOtherOne);
+
+        // then rollback
+        performRollback(transactionState.getTransactionId());
+
+        final Collection<Cf1Obj> shouldBeEmpty = readTransactionalLocallyFromCf1(transactionState);
+
+        Assert.assertTrue("After rollback it should not return any results", shouldBeEmpty.isEmpty());
     }
 
     private static Cf1Obj findExactlyOne(int pk, String ck, Collection<Cf1Obj> cf1Objs)

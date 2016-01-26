@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -175,8 +176,13 @@ public class MppServiceImpl implements MppService
                                                                .map(PartitionIterators::singletonIterator)
                                                                .collect(Collectors.toList());
 
-        try(final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators)) {
-            consumer.accept(partitionIterator);
+        if(partitionIterators.isEmpty()) {
+            consumer.accept(EmptyIterators.partition());
+        }
+        else {
+            try(final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators)) {
+                consumer.accept(partitionIterator);
+            }
         }
     }
 

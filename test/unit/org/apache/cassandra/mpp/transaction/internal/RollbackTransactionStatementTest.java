@@ -47,14 +47,12 @@ import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.mapResult
 public class RollbackTransactionStatementTest extends MppCQLTester
 {
 
-    public static final String ROLLBACK_TRANSACTION_LOCALLY = "ROLLBACK TRANSACTION LOCALLY ";
-
     @Test
     public void shouldRollbackTransaction() throws Throwable
     {
         final UUID txId = UUIDs.timeBased();
 
-        execute(ROLLBACK_TRANSACTION_LOCALLY + txId);
+        performRollback(txId);
 
         // TODO more assertions, hooks, maybe expose private memtable storage and others for testing.
     }
@@ -96,10 +94,11 @@ public class RollbackTransactionStatementTest extends MppCQLTester
         Assert.assertTrue("Transaction must exist on this node", getMppService().transactionExistsOnThisNode(transactionState.id()));
 
         // perform rollback
-        execute(ROLLBACK_TRANSACTION_LOCALLY + txId);
+        performRollback(txId);
 
         // assert that private memtables are empty
         Assert.assertFalse("Transaction cannot exist on this node", getMppService().transactionExistsOnThisNode(transactionState.id()));
     }
+
 
 }

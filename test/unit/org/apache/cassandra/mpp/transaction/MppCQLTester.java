@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.UUID;
+
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
@@ -46,6 +48,13 @@ public abstract class MppCQLTester extends CQLTester
     @AfterClass
     public static void mppSetupClassAfter() {
         mppExtensionServices.stop();
+    }
+
+    public static final String ROLLBACK_TRANSACTION_LOCALLY = "ROLLBACK TRANSACTION LOCALLY ";
+
+    protected void performRollback(UUID txId) throws Throwable
+    {
+        execute(ROLLBACK_TRANSACTION_LOCALLY + txId);
     }
 
 }
