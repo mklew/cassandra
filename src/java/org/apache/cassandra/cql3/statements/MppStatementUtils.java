@@ -23,7 +23,9 @@ import java.util.UUID;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 
@@ -35,9 +37,18 @@ public class MppStatementUtils
 {
     public static UUID getTransactionId(QueryOptions options, Term transactionIdTerm)
     {
-        ByteBuffer b = checkNotNull(transactionIdTerm.bindAndGet(options), "Invalid null value of transaction id");
-        UUIDType.instance.validate(b);
-        final UUID transactionId = UUIDType.instance.compose(b);
+        ByteBuffer bb = checkNotNull(transactionIdTerm.bindAndGet(options), "Invalid null value of transaction id");
+        UUIDType.instance.validate(bb);
+        final UUID transactionId = UUIDType.instance.compose(bb);
         return transactionId;
+    }
+
+    public static Murmur3Partitioner.LongToken getToken(QueryOptions options, Term preparedToken)
+    {
+        final ByteBuffer bb = checkNotNull(preparedToken.bindAndGet(options), "Invalud null value of token");
+        LongType.instance.validate(bb);
+        final Long t = LongType.instance.compose(bb);
+
+        return new Murmur3Partitioner.LongToken(t);
     }
 }

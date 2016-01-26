@@ -25,6 +25,9 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
+import com.google.common.base.Preconditions;
+
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 
@@ -99,5 +102,11 @@ public class TransactionState implements Serializable
                "transactionId=" + transactionId +
                ", transactionItems=" + transactionItems +
                '}';
+    }
+
+    public Murmur3Partitioner.LongToken singleToken()
+    {
+        Preconditions.checkState(getTransactionItems().size() == 1);
+        return (Murmur3Partitioner.LongToken)getTransactionItems().iterator().next().getToken();
     }
 }

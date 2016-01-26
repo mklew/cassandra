@@ -178,6 +178,11 @@ public class ReadTransactionStatementTest extends MppCQLTester
         final UntypedResultSet rowResults = execute("READ TRANSACTIONAL LOCALLY TRANSACTION " +
                                                     transactionState.getTransactionId()
                                                     + " FROM " + keyspace()+"."+cf1Name);
+        return mapResultToCf1Objs(rowResults);
+    }
+
+    private static Collection<Cf1Obj> mapResultToCf1Objs(UntypedResultSet rowResults)
+    {
         return MppServiceUtils.streamResultSet(rowResults).map(r -> {
             final int pk = r.getInt("pk");
             final String ck = r.getString("ck");
@@ -291,29 +296,34 @@ public class ReadTransactionStatementTest extends MppCQLTester
     @Test
     public void shouldFailOnIllegalStatement() throws Throwable {
         final TransactionState transactionState = startTransaction();
-
-        String cfName = null; // TODO set it
-
-        execute("READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION " + transactionState.getTransactionId() + " FROM " + cfName);
-
-        // TODO EXCEPTION EXPECTED, beucase I don't know how to represent rows from different column families in json.
-        // TODO or actually I think I know, but there is no point in having that functionality
+        createMppTestCf1();
+        // It is possible to implement, but for now I don't see any need for it.
+        // It should be enough to read rows from CF just in normal form - it will be for debugging purposes anyway
+        assertInvalidMessage("Returning rows in json form is not supported operation", "READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION " + transactionState.getTransactionId() + " FROM " + keyspace()+"."+cf1Name);
     }
 
     @Test
     public void shouldReadTransactionLocallyAndReturnRowForColumnFamilyAndToken() throws Throwable {
         final TransactionState transactionState = startTransaction();
-
+        createMppTestCf1();
         // TODO Make at least 2 writes to SAME column family
         String cfName = null; // TODO set it
-        Long token = null; // TODO set it, take it from response of transactional write
 
-        final UntypedResultSet singleRowExpected = execute("READ TRANSACTIONAL LOCALLY TRANSACTION "
-                                                           + transactionState.getTransactionId()
-                                                           + " FROM " + cfName
-                                                           + " TOKEN " + token);
+        txInsertToCf1(transactionState, 1, "some pk", 123);
+        final int pk = 12351;
+        final String ck = "this is completely different pk";
+        Long token = (Long) txInsertToCf1(transactionState, pk, ck, "with some description").singleToken().getTokenValue();
 
-        // TODO Assert that row has expected data
+        txInsertToCf1(transactionState, 555, "yet another", "desc", 1);
+
+        final Collection<Cf1Obj> cf1Objs = mapResultToCf1Objs(execute("READ TRANSACTIONAL LOCALLY TRANSACTION "
+                                                                      + transactionState.getTransactionId()
+                                                                      + " FROM " + keyspace() + "." + cf1Name
+                                                                      + " TOKEN " + token));
+
+        Assert.assertEquals(1, cf1Objs.size());
+        findExactlyOne(pk, ck, cf1Objs);
+
     }
 
     // TODO TEST IT IN MPP_TEST because it requires network READ TRANSACTIONAL TRANSACTION AS JSON <transactionStateInJson> FROM <columnFamilyName>

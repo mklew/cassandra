@@ -186,6 +186,30 @@ public class MppServiceImpl implements MppService
         }
     }
 
+    public void readAllByColumnFamilyAndToken(TransactionId transactionId, String ksName, String cfName, Token token, Consumer<PartitionIterator> consumer)
+    {
+        logger.info("Execute readAllByColumnFamilyAndToken transactionId: {} keyspaceName: {} columnFamilyName: {} token: {}", transactionId, ksName, cfName, token);
+        // TODO [MPP] Refactor to make it DRY
+        final TransactionData transactionData = privateMemtableStorage.readTransactionData(transactionId);
+        final UUID cfId = Schema.instance.getId(ksName, cfName);
+
+        int nowInSec = FBUtilities.nowInSeconds();
+        final List<PartitionIterator> partitionIterators = transactionData.readData(ksName, cfId, token)
+                                                                          .map(pu -> pu.unfilteredIterator())
+                                                                          .map(unfilteredI -> UnfilteredRowIterators.filter(unfilteredI, nowInSec))
+                                                                          .map(PartitionIterators::singletonIterator)
+                                                                          .collect(Collectors.toList());
+
+        if(partitionIterators.isEmpty()) {
+            consumer.accept(EmptyIterators.partition());
+        }
+        else {
+            try(final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators)) {
+                consumer.accept(partitionIterator);
+            }
+        }
+    }
+
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)
     {
         final Collection<UUID> columnFamilyIds = transactionalMutation.getColumnFamilyIds();

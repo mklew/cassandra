@@ -29,6 +29,7 @@ import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -111,6 +112,28 @@ public class ReadTransactionStatement implements CQLStatement
                 TransactionState txState = MppServicesLocator.getInstance().readLocalTransactionState(txId);
 
                 return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState));
+            }
+            else if (cfName != null && preparedToken != null) {
+                // read all from column family
+                final ResultMessage[] message = new ResultMessage[1];
+                Murmur3Partitioner.LongToken token = MppStatementUtils.getToken(options, this.preparedToken);
+
+                MppServicesLocator
+                .getInstance()
+                .readAllByColumnFamilyAndToken(txId,
+                                               cfName.getKeyspace(),
+                                               cfName.getColumnFamily(),
+                                               token,
+                                               partitionIterator -> {
+                                                   // TODO [MPP] Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
+                                                   // Tricky part is setting everything on the SelectStatement. For now, fail with exception
+
+                                                   CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
+                                                   final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
+                                                   message[0] = resultMessage;
+                                               });
+
+                return message[0];
             }
             else if (cfName != null)
             {
