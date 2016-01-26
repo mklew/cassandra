@@ -21,6 +21,8 @@ package org.apache.cassandra.cql3.statements;
 import java.util.Collections;
 import java.util.UUID;
 
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.Json;
@@ -113,6 +115,7 @@ public class ReadTransactionStatement implements CQLStatement
             else if (cfName != null)
             {
                 // read all from column family
+                final ResultMessage[] message = new ResultMessage[1];
                 MppServicesLocator
                 .getInstance()
                 .readAllByColumnFamily(txId,
@@ -122,11 +125,13 @@ public class ReadTransactionStatement implements CQLStatement
                                            // TODO [MPP] Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
                                            // Tricky part is setting everything on the SelectStatement. For now, fail with exception
 
-                                           throw new RuntimeException("ReadTransactionStatement. IN CONSUME BLOCK read all from column family not implemented ");
+                                           CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
+                                           final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
+                                           message[0] = resultMessage;
                                        });
 
-
-                throw new RuntimeException("ReadTransactionStatement. read all from column family not implemented");
+                return message[0];
+//                throw new RuntimeException("ReadTransactionStatement. read all from column family not implemented");
             }
             else {
                 // read all from column family and by token

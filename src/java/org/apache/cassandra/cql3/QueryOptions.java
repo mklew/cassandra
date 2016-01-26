@@ -46,6 +46,12 @@ public abstract class QueryOptions
                                                                        SpecificOptions.DEFAULT,
                                                                        Server.CURRENT_VERSION);
 
+    public static final QueryOptions DEFAULT_TRANSACTIONAL = new DefaultQueryOptions(ConsistencyLevel.LOCAL_TRANSACTIONAL,
+                                                                       Collections.<ByteBuffer>emptyList(),
+                                                                       false,
+                                                                       SpecificOptions.DEFAULT,
+                                                                       Server.CURRENT_VERSION);
+
     public static final CBCodec<QueryOptions> codec = new Codec();
 
     public static QueryOptions fromThrift(ConsistencyLevel consistency, List<ByteBuffer> values)
