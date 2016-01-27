@@ -28,10 +28,13 @@ import com.google.common.base.Preconditions;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.mpp.transaction.MppCQLTester;
 import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.START_TRANSACTION;
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.mapResultToTransactionState;
@@ -75,10 +78,25 @@ public class ReadTransactionStatementTest extends MppCQLTester
     @Test
     public void shouldReadTransactionLocallyByTransactionIdAndGetJsonResponse() throws Throwable {
         final TransactionState transactionState = startTransaction();
+        createMppTestCf1();
 
-        // TODO insert something
+        txInsertToCf1(transactionState, 10, "a");
+        txInsertToCf1(transactionState, 1251, "bbb");
+        txInsertToCf1(transactionState, 12314, "bbb", "some description", 14);
 
         final UntypedResultSet resultsWithJson = execute("READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION " + transactionState.getTransactionId());
+
+        Assert.assertEquals(1, resultsWithJson.size());
+        final String json = resultsWithJson.one().getString(Json.JSON_COLUMN_ID.toString());
+
+        final TransactionStateDto transactionStateDto = Json.JSON_OBJECT_MAPPER.readValue(json, TransactionStateDto.class);
+
+        Assert.assertEquals(3, transactionStateDto.getTransactionItems().size());
+
+        final TransactionItemDto ti = transactionStateDto.getTransactionItems().iterator().next();
+        Assert.assertEquals(cf1Name, ti.getCfName());
+
+        System.out.println(json);
 
         // TODO Assert that resultsWithJson have TransactionState encoded in json. 1 row, 1 column
     }
@@ -332,11 +350,13 @@ public class ReadTransactionStatementTest extends MppCQLTester
 
 
     @Test
-    public void shouldReadLocalTransactionWhenThereIsNoDataReturningNullResponse() throws Throwable {
+    public void shouldReadLocalTransactionWhenThereIsNoDataReturningTxStateWithNoTxItems() throws Throwable {
         // open transaction
         final TransactionState transactionState = startTransaction();
 
-        final UntypedResultSet execute = execute("READ TRANSACTION LOCALLY " + transactionState.getTransactionId());
+        final UntypedResultSet execute = execute("READ TRANSACTIONAL LOCALLY TRANSACTION " + transactionState.getTransactionId());
+        final TransactionState actualState = mapResultToTransactionState(execute);
+        Assert.assertEquals(0, actualState.getTransactionItems().size());
     }
 
     @Test

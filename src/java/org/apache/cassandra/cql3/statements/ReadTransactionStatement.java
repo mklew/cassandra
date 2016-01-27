@@ -42,6 +42,7 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
+import static org.apache.cassandra.mpp.transaction.MppServiceUtils.mapTransactionStateToJson;
 import static org.apache.cassandra.mpp.transaction.MppServiceUtils.mapTransactionStateToResultSet;
 import static org.apache.cassandra.mpp.transaction.MppServiceUtils.transformResultSetToResultMessage;
 
@@ -111,7 +112,13 @@ public class ReadTransactionStatement implements CQLStatement
                 // Returns local TransactionState for this transaction,
                 TransactionState txState = MppServicesLocator.getInstance().readLocalTransactionState(txId);
 
-                return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState));
+                if(isJson) {
+                    return transformResultSetToResultMessage(mapTransactionStateToJson(txState));
+                }
+                else
+                {
+                    return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState));
+                }
             }
             else if (cfName != null && preparedToken != null) {
                 // read all from column family

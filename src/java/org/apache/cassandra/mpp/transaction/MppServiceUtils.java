@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,6 +34,7 @@ import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.IMutation;
@@ -44,6 +46,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.Pair;
 
@@ -54,13 +57,41 @@ import org.apache.cassandra.utils.Pair;
 public class MppServiceUtils
 {
 
+    public static final String KS_NAME = "mpp_extension";
+    public static final String TRANSACTION_ITEMS_CF_NAME = "transaction_state"; // TODO [MPP] Join these two CFs into one.
+    public static final String TRANSACTION_STATE_CF_NAME = "transaction_state";
 
+    public static final String MPP_KEYSPACE = KS_NAME;
     public static final String KS_NAME_COL = "ks_name";
     public static final String CF_NAME_COL = "cf_name";
     public static final String TOKEN_NAME_COL = "token";
     public static final String TRANSACTION_ID_NAME_COL = "transaction_id";
     private static List<ColumnSpecification> transactionItemsMetaData;
     private static List<ColumnSpecification> transactionStateMetaData;
+
+    public static final String TRANSATION_STATES = "transaction_states";
+
+//    private static final CFMetaData TransactionStates =
+//    compile(TRANSATION_STATES,
+//            "transaction states",
+//            "CREATE TABLE %s ("
+//            + "transaction_id timeuuid,"
+//            + "ks_name text,"
+//            + "cf_name text,"
+//            + "token long,"
+//            + "PRIMARY KEY(transaction_id, (ks_name, cf_name, token)))");
+
+//
+//    private static CFMetaData compile(String name, String description, String schema)
+//    {
+//        return CFMetaData.compile(String.format(schema, name), MPP_KEYSPACE)
+//                         .comment(description)
+//                         .gcGraceSeconds((int) TimeUnit.DAYS.toSeconds(90));
+//    }
+
+//    public CFMetaData getTransactionStatesCfMetaData() {
+//        return TransactionStates;
+//    }
 
     static
     {
@@ -76,9 +107,6 @@ public class MppServiceUtils
         return Collections.unmodifiableList(columns);
     }
 
-    public static final String KS_NAME = "mpp_extension";
-    public static final String TRANSACTION_ITEMS_CF_NAME = "transaction_state"; // TODO [MPP] Join these two CFs into one.
-    public static final String TRANSACTION_STATE_CF_NAME = "transaction_state";
 
     private MppServiceUtils()
     {
@@ -136,6 +164,31 @@ public class MppServiceUtils
     {
         if (resultSet.isEmpty()) return new ResultMessage.Void();
         else return new ResultMessage.Rows(resultSet);
+    }
+
+    private static ColumnSpecification getJsonColumn() {
+        return new ColumnSpecification(KS_NAME, TRANSATION_STATES, Json.JSON_COLUMN_ID, UTF8Type.instance);
+    }
+
+    public static ResultSet mapTransactionStateToJson(TransactionState transactionState)
+    {
+        Preconditions.checkNotNull(transactionState);
+        final ColumnSpecification jsonColumn = getJsonColumn();
+        final List<ColumnSpecification> columnSpecifications = Arrays.asList(jsonColumn);
+        final ResultSet resultSet = new ResultSet(columnSpecifications);
+
+        final String json;
+        try
+        {
+            json = Json.JSON_OBJECT_MAPPER.writeValueAsString(TransactionStateDto.fromTransactionState(transactionState));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Cannot write TransactionState as json", e);
+        }
+
+        resultSet.addColumnValue(UTF8Type.instance.decompose(json));
+        return resultSet;
     }
 
     public static ResultSet executeFnOverTransactionalMutations(Collection<? extends IMutation> mutations, Function<TransactionalMutation, TransactionState> getTransactionItemFn)
@@ -223,4 +276,10 @@ public class MppServiceUtils
     {
         return UUIDType.instance.decompose(transactionState.getTransactionId());
     }
+
+    // TODO [MPP] I guess it is not required so far
+//    public static KeyspaceMetadata metadata()
+//    {
+//        return KeyspaceMetadata.create(MPP_KEYSPACE, KeyspaceParams.simple(1), Tables.of(TransactionStates));
+//    }
 }
