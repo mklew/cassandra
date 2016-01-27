@@ -26,7 +26,6 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.Function;
@@ -59,8 +58,9 @@ public class ReadTransactionStatement implements CQLStatement
     private final CFName cfName;
     private final Term preparedToken;
     private final int boundTermsSize;
+    private final Term transactionStateAsJson;
 
-    public ReadTransactionStatement(boolean isLocal, boolean isJson, Term transactionId, CFName cfName, Term preparedToken, int boundTermsSize)
+    public ReadTransactionStatement(boolean isLocal, boolean isJson, Term transactionId, CFName cfName, Term preparedToken, int boundTermsSize, Term transactionStateAsJson)
     {
         this.isLocal = isLocal;
         this.isJson = isJson;
@@ -68,6 +68,7 @@ public class ReadTransactionStatement implements CQLStatement
         this.cfName = cfName;
         this.preparedToken = preparedToken;
         this.boundTermsSize = boundTermsSize;
+        this.transactionStateAsJson = transactionStateAsJson;
     }
 
     public int getBoundTerms()
@@ -84,6 +85,7 @@ public class ReadTransactionStatement implements CQLStatement
     {
         checkFalse(isLocal() && transactionId == null, "If read is locally then transaction id is required");
         checkFalse(isLocal() && isJson() && transactionId != null && cfName != null, "Returning rows in json form is not supported operation");
+        checkFalse(!isLocal() && transactionStateAsJson == null, "If read is not local then transaction state as json has to be available");
     }
 
     public boolean isLocal()
@@ -158,7 +160,20 @@ public class ReadTransactionStatement implements CQLStatement
             }
         }
         else {
-            throw new RuntimeException("ReadTransactionStatement.execute has not been implemented yet");
+            assert transactionStateAsJson != null;
+
+            TransactionState transactionState = MppStatementUtils.getTransactionState(options, this.transactionStateAsJson);
+
+
+            if(isReadingSpecificTokensFromColumnFamily()) {
+                throw new RuntimeException("ReadTransactionStatement reading quorum by CF && TOKEN not implemented");
+            }
+
+            if(isReadingWholeColumnFamily()) {
+                throw new RuntimeException("ReadTransactionStatement reading quorum by CF not implemented");
+            }
+
+            throw new RuntimeException("ReadTransactionStatement illegal state");
         }
     }
 
@@ -195,9 +210,9 @@ public class ReadTransactionStatement implements CQLStatement
         final Term.Raw transactionId;
         final CFName cfName;
         final Term.Raw token;
-        final Json.Raw transactionStateJson;
+        final Term.Raw transactionStateJson;
 
-        public Parsed(boolean isLocal, boolean isJson, Term.Raw transactionId, CFName cfName, Term.Raw token, Json.Raw transactionStateJson)
+        public Parsed(boolean isLocal, boolean isJson, Term.Raw transactionId, CFName cfName, Term.Raw token, Term.Raw transactionStateJson)
         {
             this.isLocal = isLocal;
             this.isJson = isJson;
@@ -211,8 +226,9 @@ public class ReadTransactionStatement implements CQLStatement
         {
             Term transactionId = this.transactionId != null ? prepareTransactionId(this.transactionId) : null;
             Term preparedToken = this.token != null ? prepareToken(this.token) : null;
+            Term transactionStateAsJson = this.transactionStateJson != null ? prepareTransactionStateAsJson(this.transactionStateJson) : null;
 
-            ReadTransactionStatement stmt = new ReadTransactionStatement(isLocal, isJson, transactionId, cfName, preparedToken, getBoundVariables().size());
+            ReadTransactionStatement stmt = new ReadTransactionStatement(isLocal, isJson, transactionId, cfName, preparedToken, getBoundVariables().size(), transactionStateAsJson);
 
             return new ParsedStatement.Prepared(stmt, getBoundVariables(), null);
         }

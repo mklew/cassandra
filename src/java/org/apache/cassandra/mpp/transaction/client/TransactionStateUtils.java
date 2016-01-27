@@ -20,11 +20,15 @@ package org.apache.cassandra.mpp.transaction.client;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.SystemClock;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.utils.UUIDGen;
 
 /**
@@ -57,5 +61,19 @@ public class TransactionStateUtils
 
     public static TransactionState fromId(UUID id) {
         return recreateTransactionState(id, Collections.emptyList());
+    }
+
+    public static TransactionState compose(TransactionStateDto dto)
+    {
+        final UUID transactionId = dto.getTransactionId();
+
+        final List<TransactionItem> transactionItems = dto.getTransactionItems()
+                                                          .stream()
+                                                          .map(ti -> new TransactionItem(new Murmur3Partitioner.LongToken(ti.getToken()),
+                                                                                         ti.getKsName(),
+                                                                                         ti.getCfName()))
+                                                          .collect(Collectors.toList());
+
+        return recreateTransactionState(transactionId, transactionItems);
     }
 }

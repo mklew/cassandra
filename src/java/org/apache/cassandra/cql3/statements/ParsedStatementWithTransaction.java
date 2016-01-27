@@ -22,6 +22,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 
@@ -46,6 +47,17 @@ public abstract class ParsedStatementWithTransaction extends ParsedStatement
     {
         return token.prepare(MppServiceUtils.KS_NAME, tokenReceiver());
     }
+
+    protected static Term prepareTransactionStateAsJson(Term.Raw transactionStateAsJson)
+    {
+        return transactionStateAsJson.prepare(MppServiceUtils.KS_NAME, transactionStateReceiver());
+    }
+
+    protected static ColumnSpecification transactionStateReceiver()
+    {
+        return new ColumnSpecification(MppServiceUtils.KS_NAME, MppServiceUtils.TRANSACTION_STATE_CF_NAME, new ColumnIdentifier("[transaction_state]", true), UTF8Type.instance);
+    }
+
 
     protected static ColumnSpecification tokenReceiver()
     {

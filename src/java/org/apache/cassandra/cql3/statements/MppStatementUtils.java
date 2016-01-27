@@ -18,14 +18,21 @@
 
 package org.apache.cassandra.cql3.statements;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
+import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 
@@ -50,5 +57,21 @@ public class MppStatementUtils
         final Long t = LongType.instance.compose(bb);
 
         return new Murmur3Partitioner.LongToken(t);
+    }
+
+    public static TransactionState getTransactionState(QueryOptions options, Term transactionStateAsJson)
+    {
+        final ByteBuffer bb = checkNotNull(transactionStateAsJson.bindAndGet(options), "Invalud null value of transaction state as json");
+        UTF8Type.instance.validate(bb);
+        try
+        {
+            final TransactionStateDto transactionStateDto = Json.JSON_OBJECT_MAPPER.readValue(ByteBufferUtil.getArray(bb), TransactionStateDto.class);
+
+            return TransactionStateUtils.compose(transactionStateDto);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 }

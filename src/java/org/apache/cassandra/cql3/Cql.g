@@ -611,7 +611,7 @@ readTransactionStatement returns [ReadTransactionStatement.Parsed statement]
         Term.Raw transactionId = null;
         CFName cfName = null;
         Term.Raw token = null;
-        Json.Raw transactionStateJson = null;
+        Term.Raw transactionStateJson = null;
     }
     :
         K_READ K_TRANSACTIONAL
@@ -619,7 +619,7 @@ readTransactionStatement returns [ReadTransactionStatement.Parsed statement]
         (K_AS K_JSON { isJson = true; })?
         K_TRANSACTION
         (
-        (tx=term { transactionId = tx; }) | (K_AS K_JSON tsj=jsonValue { transactionStateJson = tsj; })
+        (tx=term { transactionId = tx; }) | (K_AS K_JSON tsj=term { transactionStateJson = tsj; })
         )
         (K_FROM cf=columnFamilyName { cfName = cf; } )?
         (K_TOKEN t=tokenOrBound { token = t; } )?
