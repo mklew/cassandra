@@ -203,6 +203,11 @@ public class MppServiceImpl implements MppService
         processPartitions(transactionId, ksName, cfName, consumer, (cfId, transactionData) -> transactionData.readData(ksName, cfId, token));
     }
 
+    public void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, Consumer<PartitionIterator> consumer)
+    {
+        // TODO [MPP] Implement it
+    }
+
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)
     {
         final Collection<UUID> columnFamilyIds = transactionalMutation.getColumnFamilyIds();

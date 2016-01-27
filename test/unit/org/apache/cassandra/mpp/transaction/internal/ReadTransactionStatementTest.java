@@ -20,23 +20,19 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Preconditions;
 import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.mpp.transaction.MppCQLTester;
-import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 
-import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.START_TRANSACTION;
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.mapResultToTransactionState;
 
 /**
@@ -97,128 +93,8 @@ public class ReadTransactionStatementTest extends MppCQLTester
         Assert.assertEquals(cf1Name, ti.getCfName());
 
         System.out.println(json);
-
-        // TODO Assert that resultsWithJson have TransactionState encoded in json. 1 row, 1 column
     }
 
-    String cf1Name;
-
-
-    private void createMppTestCf1() {
-        cf1Name = createTable("CREATE TABLE %s (pk int, ck text, description text, number int, PRIMARY KEY(pk, ck))");
-    }
-
-    private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, String description, int number) throws Throwable {
-        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description, number) values (?, ?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
-        final UntypedResultSet encodedTxState = execute(cql, pk, ck, description, number);
-        return mapResultToTransactionState(encodedTxState);
-    }
-
-    private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, String description) throws Throwable {
-        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
-        final UntypedResultSet encodedTxState = execute(cql, pk, ck, description);
-        return mapResultToTransactionState(encodedTxState);
-    }
-
-    private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, Integer number) throws Throwable {
-        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, number) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
-        final UntypedResultSet encodedTxState = execute(cql, pk, ck, number);
-        return mapResultToTransactionState(encodedTxState);
-    }
-
-    private TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck) throws Throwable {
-        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck) values (?, ?) USING TRANSACTION " + transactionState.getTransactionId();
-        final UntypedResultSet encodedTxState = execute(cql, pk, ck);
-        return mapResultToTransactionState(encodedTxState);
-    }
-
-    private static class Cf1Obj {
-        int pk;
-
-        String ck;
-
-        Optional<String> description;
-
-        Optional<Integer> number;
-
-        public Cf1Obj(int pk, String ck, Optional<String> description, Optional<Integer> number)
-        {
-            Preconditions.checkNotNull(ck);
-            this.pk = pk;
-            this.ck = ck;
-            this.description = description;
-            this.number = number;
-        }
-
-        public static Cf1Obj createNew(int pk, String ck) {
-            return new Cf1Obj(pk, ck, Optional.empty(), Optional.<Integer>empty());
-        }
-
-        public static Cf1Obj createNew(int pk, String ck, String description) {
-            return new Cf1Obj(pk, ck, Optional.of(description), Optional.<Integer>empty());
-        }
-
-        public static Cf1Obj createNew(int pk, String ck, int number) {
-            return new Cf1Obj(pk, ck, Optional.empty(), Optional.of(number));
-        }
-
-        public static Cf1Obj createNew(int pk, String ck, String description, int number) {
-            return new Cf1Obj(pk, ck, Optional.of(description), Optional.of(number));
-        }
-
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            Cf1Obj cf1Obj = (Cf1Obj) o;
-
-            if (pk != cf1Obj.pk) return false;
-            if (!ck.equals(cf1Obj.ck)) return false;
-            if (description != null ? !description.equals(cf1Obj.description) : cf1Obj.description != null)
-                return false;
-            if (number != null ? !number.equals(cf1Obj.number) : cf1Obj.number != null) return false;
-
-            return true;
-        }
-
-        public int hashCode()
-        {
-            int result = pk;
-            result = 31 * result + ck.hashCode();
-            result = 31 * result + (description != null ? description.hashCode() : 0);
-            result = 31 * result + (number != null ? number.hashCode() : 0);
-            return result;
-        }
-    }
-
-    private Collection<Cf1Obj> readTransactionalLocallyFromCf1(TransactionState transactionState) throws Throwable {
-        final UntypedResultSet rowResults = execute("READ TRANSACTIONAL LOCALLY TRANSACTION " +
-                                                    transactionState.getTransactionId()
-                                                    + " FROM " + keyspace()+"."+cf1Name);
-        return mapResultToCf1Objs(rowResults);
-    }
-
-    private static Collection<Cf1Obj> mapResultToCf1Objs(UntypedResultSet rowResults)
-    {
-        return MppServiceUtils.streamResultSet(rowResults).map(r -> {
-            final int pk = r.getInt("pk");
-            final String ck = r.getString("ck");
-            final String descriptionColumnName = "description";
-            String description = null;
-            if (r.has(descriptionColumnName))
-            {
-                description = r.getString(descriptionColumnName);
-            }
-            String numberColumnName = "number";
-            Integer number = null;
-            if (r.has(numberColumnName))
-            {
-                number = r.getInt(numberColumnName);
-            }
-            return new Cf1Obj(pk, ck, Optional.ofNullable(description), Optional.ofNullable(number));
-        }).collect(Collectors.toList());
-    }
 
     @Test
     public void shouldReadTransactionLocallyAndReturnResultsFromSpecificColumnFamilyTest2() throws Throwable {
@@ -306,10 +182,7 @@ public class ReadTransactionStatementTest extends MppCQLTester
 //        final UntypedResultSet resultSet2 = execute("INSERT INTO %s (k, s, i) VALUES (?, ?, ?) USING TRANSACTION " + txId, modifiedKey + 123, text2, 124);
     }
 
-    private TransactionState startTransaction() throws Throwable
-    {
-        return mapResultToTransactionState(execute(START_TRANSACTION));
-    }
+
 
     @Test
     public void shouldFailOnIllegalStatement() throws Throwable {
@@ -341,6 +214,25 @@ public class ReadTransactionStatementTest extends MppCQLTester
 
         Assert.assertEquals(1, cf1Objs.size());
         findExactlyOne(pk, ck, cf1Objs);
+
+    }
+
+    @Test
+    public void shouldAcceptTransactionStateEncodedInJson() throws Throwable {
+        final TransactionState transactionState = startTransaction();
+        createMppTestCf1();
+
+        txInsertToCf1(transactionState, 10, "a");
+        txInsertToCf1(transactionState, 1251, "bbb");
+        txInsertToCf1(transactionState, 12314, "bbb", "some description", 14);
+
+        final UntypedResultSet resultsWithJson = execute("READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION " + transactionState.getTransactionId());
+
+        Assert.assertEquals(1, resultsWithJson.size());
+        final String json = resultsWithJson.one().getString(Json.JSON_COLUMN_ID.toString());
+
+
+        execute("READ TRANSACTIONAL TRANSACTION AS JSON '" + json + "' FROM " + keyspace()+"." + cf1Name);
 
     }
 

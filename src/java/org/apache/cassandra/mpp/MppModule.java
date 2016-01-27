@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.mpp;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,13 +34,15 @@ import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
  */
 public class MppModule
 {
-    private MppService mppService;
+    private final ReadTransactionDataServiceImpl readTransactionDataService;
+    private final MppService mppService;
 
     private static final Logger logger = LoggerFactory.getLogger(MppModule.class);
 
-    public MppModule(MppService service)
+    public MppModule(MppService service, ReadTransactionDataServiceImpl readTransactionDataService)
     {
         this.mppService = service;
+        this.readTransactionDataService = readTransactionDataService;
     }
 
     public static MppModule createModule(MppNetworkService mppNetworkService)
@@ -52,11 +55,17 @@ public class MppModule
         service.setPrivateMemtableStorage(privateMemtableStorage);
         readTransactionDataService.setMppNetworkService(mppNetworkService);
 
-        return new MppModule(service);
+        return new MppModule(service, readTransactionDataService);
     }
 
     public MppService getMppService()
     {
         return mppService;
+    }
+
+    @VisibleForTesting
+    public ReadTransactionDataServiceImpl getReadTransactionDataServiceImpl()
+    {
+        return readTransactionDataService;
     }
 }

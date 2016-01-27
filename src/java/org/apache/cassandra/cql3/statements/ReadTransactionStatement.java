@@ -106,6 +106,17 @@ public class ReadTransactionStatement implements CQLStatement
     private ResultMessage executeReadTransactionStatement(QueryOptions options)
     {
         // TODO [MPP] Implement it.
+
+        final ResultMessage[] message = new ResultMessage[1];
+        final Consumer<PartitionIterator> cb = partitionIterator -> {
+            // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
+            // Tricky part is setting everything on the SelectStatement. For now, fail with exception
+
+            CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
+            final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
+            message[0] = resultMessage;
+        };
+
         if(isLocal()) {
             assert transactionId != null;
             final UUID transactionId = MppStatementUtils.getTransactionId(options, this.transactionId);
@@ -119,15 +130,7 @@ public class ReadTransactionStatement implements CQLStatement
                 return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState, isJson));
             }
 
-            final ResultMessage[] message = new ResultMessage[1];
-            final Consumer<PartitionIterator> cb = partitionIterator -> {
-                // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
-                // Tricky part is setting everything on the SelectStatement. For now, fail with exception
 
-                CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
-                final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
-                message[0] = resultMessage;
-            };
             if (isReadingSpecificTokensFromColumnFamily()) {
                 // read all from column family
 
@@ -164,13 +167,19 @@ public class ReadTransactionStatement implements CQLStatement
 
             TransactionState transactionState = MppStatementUtils.getTransactionState(options, this.transactionStateAsJson);
 
-
             if(isReadingSpecificTokensFromColumnFamily()) {
                 throw new RuntimeException("ReadTransactionStatement reading quorum by CF && TOKEN not implemented");
             }
 
             if(isReadingWholeColumnFamily()) {
-                throw new RuntimeException("ReadTransactionStatement reading quorum by CF not implemented");
+                MppServicesLocator
+                .getInstance()
+                .readQuorumByColumnFamily(transactionState,
+                                          cfName.getKeyspace(),
+                                          cfName.getColumnFamily(),
+                                          cb);
+
+                return message[0];
             }
 
             throw new RuntimeException("ReadTransactionStatement illegal state");

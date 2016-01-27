@@ -66,18 +66,34 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
 
     private static final Logger logger = LoggerFactory.getLogger(ReadTransactionDataServiceImpl.class);
 
-    private static class ItemWithAddresses {
+    public static class TransactionItemWithAddresses
+    {
         private final TransactionItem txItem;
 
         private final Collection<InetAddress> endPoints;
 
         private final Integer replicationFactor;
 
-        private ItemWithAddresses(TransactionItem txItem, Collection<InetAddress> endPoints, int replicationFactor)
+        private TransactionItemWithAddresses(TransactionItem txItem, Collection<InetAddress> endPoints, int replicationFactor)
         {
             this.txItem = txItem;
             this.endPoints = endPoints;
             this.replicationFactor = replicationFactor;
+        }
+
+        public TransactionItem getTxItem()
+        {
+            return txItem;
+        }
+
+        public Collection<InetAddress> getEndPoints()
+        {
+            return endPoints;
+        }
+
+        public Integer getReplicationFactor()
+        {
+            return replicationFactor;
         }
     }
 
@@ -110,14 +126,11 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
      */
     public CompletableFuture<TransactionDataPart> readTransactionDataUsingQuorum(TransactionState transactionState) {
 
-        final Stream<ItemWithAddresses> itemsWithAddresses = mapTransactionItemsToTheirEndpoints(transactionState);
-        // Each item belongs to this node plus some other nodes.
-        final Stream<ItemWithAddresses> ownedByThisNode = filterItemsWhichBelongToThisNode(itemsWithAddresses);
+        final Stream<TransactionItemWithAddresses> ownedByThisNode = identifyTransactionItemsOwnedByThisNode(transactionState);
 
-        final Map<Collection<InetAddress>, Map<Integer, List<ItemWithAddresses>>> groupedByReplicasAndByReplicatonFactor = ownedByThisNode.collect(Collectors.groupingBy(x -> x.endPoints, Collectors.groupingBy(x -> x.replicationFactor)));
+        final Map<Collection<InetAddress>, Map<Integer, List<TransactionItemWithAddresses>>> groupedByReplicasAndByReplicatonFactor = ownedByThisNode.collect(Collectors.groupingBy(x -> x.endPoints, Collectors.groupingBy(x -> x.replicationFactor)));
 
-        final Integer numberOfDifferentReplicationFactors = groupedByReplicasAndByReplicatonFactor.entrySet().stream().map(e -> e.getValue().keySet().size()).reduce(0, (a, b) -> a + b);
-        int totalNumberOfRequests = numberOfDifferentReplicationFactors * groupedByReplicasAndByReplicatonFactor.keySet().size();
+        int totalNumberOfRequests = groupedByReplicasAndByReplicatonFactor.entrySet().stream().map(e -> e.getValue().keySet().size()).reduce(0, (a, b) -> a + b);
         assert totalNumberOfRequests > 0;
         logger.debug("Will do {} requests to read tx {}", totalNumberOfRequests, transactionState.getTransactionId());
 
@@ -164,6 +177,13 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
          */
     }
 
+    public Stream<TransactionItemWithAddresses> identifyTransactionItemsOwnedByThisNode(TransactionState transactionState)
+    {
+        final Stream<TransactionItemWithAddresses> itemsWithAddresses = mapTransactionItemsToTheirEndpoints(transactionState);
+        // Each item belongs to this node plus some other nodes.
+        return filterItemsWhichBelongToThisNode(itemsWithAddresses);
+    }
+
     private static CompletableFuture<Collection<MppResponseMessage>> collectionOfFuturesToFutureOfCollection(List<CompletableFuture<Collection<MppResponseMessage>>> futures)
     {
         CompletableFuture<Collection<MppResponseMessage>> allZeroArg = new CompletableFuture<>();
@@ -182,7 +202,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         return receipientsAddresses.stream().map(mppNetworkService::createReceipient).collect(Collectors.toList());
     }
 
-    private static Map<Collection<InetAddress>, List<TransactionItem>> groupBySameSetOfReplicas(Stream<ItemWithAddresses> ownedByThisNode)
+    private static Map<Collection<InetAddress>, List<TransactionItem>> groupBySameSetOfReplicas(Stream<TransactionItemWithAddresses> ownedByThisNode)
     {
         return ownedByThisNode.collect(Collectors.groupingBy(x -> x.endPoints, Collectors.mapping(i -> i.txItem, Collectors.toList())));
     }
@@ -190,26 +210,26 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
     /**
      * @return stream of items with corresponding endpoints
      */
-    private static Stream<ItemWithAddresses> mapTransactionItemsToTheirEndpoints(TransactionState transactionState)
+    private static Stream<TransactionItemWithAddresses> mapTransactionItemsToTheirEndpoints(TransactionState transactionState)
     {
         return transactionState.getTransactionItems().stream().map(mapTransactionItemToEndpoints());
     }
 
-    private static Function<TransactionItem, ItemWithAddresses> mapTransactionItemToEndpoints()
+    private static Function<TransactionItem, TransactionItemWithAddresses> mapTransactionItemToEndpoints()
     {
         return ti -> {
             final AbstractReplicationStrategy replicationStrategy = Keyspace.open(ti.getKsName()).getReplicationStrategy();
             final ArrayList<InetAddress> naturalEndpoints = replicationStrategy.getNaturalEndpoints(ti.getToken());
             final Collection<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(ti.getToken(), ti.getKsName());
             final Iterable<InetAddress> addresses = Iterables.concat(naturalEndpoints, pending);
-            return new ItemWithAddresses(ti, Lists.newArrayList(addresses), replicationStrategy.getReplicationFactor());
+            return new TransactionItemWithAddresses(ti, Lists.newArrayList(addresses), replicationStrategy.getReplicationFactor());
         };
     }
 
     /**
      * @return transaction items for which this node is responsible.
      */
-    private static Stream<ItemWithAddresses> filterItemsWhichBelongToThisNode(Stream<ItemWithAddresses> itemsWithAddresses)
+    private static Stream<TransactionItemWithAddresses> filterItemsWhichBelongToThisNode(Stream<TransactionItemWithAddresses> itemsWithAddresses)
     {
         final InetAddress broadcastAddress = FBUtilities.getBroadcastAddress();
         return itemsWithAddresses.filter(item -> item.endPoints.contains(broadcastAddress));

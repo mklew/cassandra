@@ -107,5 +107,8 @@ public interface MppService
     TransactionState readLocalTransactionState(TransactionId transactionId);
 
     void readAllByColumnFamily(TransactionId transactionId, String ksName, String cfName, Consumer<PartitionIterator> cb);
+
     void readAllByColumnFamilyAndToken(TransactionId transactionId, String ksName, String cfName, Token token, Consumer<PartitionIterator> cb);
+
+    void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, Consumer<PartitionIterator> consumer);
 }
