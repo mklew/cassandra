@@ -49,6 +49,6 @@ public abstract class ParsedStatementWithTransaction extends ParsedStatement
 
     protected static ColumnSpecification tokenReceiver()
     {
-        return new ColumnSpecification(MppServiceUtils.KS_NAME, MppServiceUtils.TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(MppServiceUtils.TOKEN_NAME_COL, true), LongType.instance);
+        return new ColumnSpecification(MppServiceUtils.KS_NAME, MppServiceUtils.TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(MppServiceUtils.TOKEN_NAME_COL, true), LongType.instance);
     }
 }

@@ -69,7 +69,7 @@ public class StartTransactionStatement extends ParsedStatement implements CQLSta
     public static ResultMessage executeBeginStatement()
     {
         final TransactionState transactionState = MppServicesLocator.getInstance().startTransaction();
-        ResultSet resultSet = MppServiceUtils.mapTransactionStateToResultSet(transactionState);
+        ResultSet resultSet = MppServiceUtils.mapTransactionStateToResultSet(transactionState, false);
         return MppServiceUtils.transformResultSetToResultMessage(resultSet);
     }
 

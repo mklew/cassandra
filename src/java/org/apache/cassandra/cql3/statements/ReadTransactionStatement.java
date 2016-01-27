@@ -42,7 +42,6 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-import static org.apache.cassandra.mpp.transaction.MppServiceUtils.mapTransactionStateToJson;
 import static org.apache.cassandra.mpp.transaction.MppServiceUtils.mapTransactionStateToResultSet;
 import static org.apache.cassandra.mpp.transaction.MppServiceUtils.transformResultSetToResultMessage;
 
@@ -112,13 +111,7 @@ public class ReadTransactionStatement implements CQLStatement
                 // Returns local TransactionState for this transaction,
                 TransactionState txState = MppServicesLocator.getInstance().readLocalTransactionState(txId);
 
-                if(isJson) {
-                    return transformResultSetToResultMessage(mapTransactionStateToJson(txState));
-                }
-                else
-                {
-                    return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState));
-                }
+                return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState, isJson));
             }
             else if (cfName != null && preparedToken != null) {
                 // read all from column family
@@ -132,7 +125,7 @@ public class ReadTransactionStatement implements CQLStatement
                                                cfName.getColumnFamily(),
                                                token,
                                                partitionIterator -> {
-                                                   // TODO [MPP] Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
+                                                   // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
                                                    // Tricky part is setting everything on the SelectStatement. For now, fail with exception
 
                                                    CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
@@ -152,7 +145,7 @@ public class ReadTransactionStatement implements CQLStatement
                                        cfName.getKeyspace(),
                                        cfName.getColumnFamily(),
                                        partitionIterator -> {
-                                           // TODO [MPP] Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
+                                           // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
                                            // Tricky part is setting everything on the SelectStatement. For now, fail with exception
 
                                            CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
@@ -161,10 +154,8 @@ public class ReadTransactionStatement implements CQLStatement
                                        });
 
                 return message[0];
-//                throw new RuntimeException("ReadTransactionStatement. read all from column family not implemented");
             }
             else {
-                // read all from column family and by token
                 throw new RuntimeException("ReadTransactionStatement. other case not implemented");
             }
         }

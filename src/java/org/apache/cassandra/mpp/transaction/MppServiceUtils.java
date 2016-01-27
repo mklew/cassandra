@@ -58,18 +58,14 @@ public class MppServiceUtils
 {
 
     public static final String KS_NAME = "mpp_extension";
-    public static final String TRANSACTION_ITEMS_CF_NAME = "transaction_state"; // TODO [MPP] Join these two CFs into one.
-    public static final String TRANSACTION_STATE_CF_NAME = "transaction_state";
+    public static final String TRANSACTION_STATE_CF_NAME = "transaction_states";
 
-    public static final String MPP_KEYSPACE = KS_NAME;
+    public static final String TRANSACTION_ID_NAME_COL = "transaction_id";
     public static final String KS_NAME_COL = "ks_name";
     public static final String CF_NAME_COL = "cf_name";
     public static final String TOKEN_NAME_COL = "token";
-    public static final String TRANSACTION_ID_NAME_COL = "transaction_id";
-    private static List<ColumnSpecification> transactionItemsMetaData;
-    private static List<ColumnSpecification> transactionStateMetaData;
 
-    public static final String TRANSATION_STATES = "transaction_states";
+    private static List<ColumnSpecification> transactionStateMetaData;
 
 //    private static final CFMetaData TransactionStates =
 //    compile(TRANSATION_STATES,
@@ -95,15 +91,16 @@ public class MppServiceUtils
 
     static
     {
-        transactionItemsMetaData = getColumnSpecificationsForTransactionItems();
-        transactionStateMetaData = getColumnSpecificationsForTransactionState(transactionItemsMetaData);
+        transactionStateMetaData = getColumnSpecificationsForTransactionState();
     }
 
-    private static List<ColumnSpecification> getColumnSpecificationsForTransactionState(List<ColumnSpecification> transactionItemsMetaData)
+    private static List<ColumnSpecification> getColumnSpecificationsForTransactionState()
     {
         List<ColumnSpecification> columns = new ArrayList<>(4);
         columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(TRANSACTION_ID_NAME_COL, true), UUIDType.instance));
-        columns.addAll(transactionItemsMetaData);
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(KS_NAME_COL, true), UTF8Type.instance));
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(CF_NAME_COL, true), UTF8Type.instance));
+        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, new ColumnIdentifier(TOKEN_NAME_COL, true), LongType.instance));
         return Collections.unmodifiableList(columns);
     }
 
@@ -118,20 +115,15 @@ public class MppServiceUtils
     }
 
     static Function<TransactionState, Function<ResultSet, ResultSet>> addTxItemToResultSet = txState -> resultSet -> {
-        addTransactionItemToResultSet(txState, resultSet);
+        assert txState.getTransactionItems().size() == 1;
+        final TransactionItem txItem = txState.getTransactionItems().iterator().next();
+
+        resultSet.addColumnValue(transactionIdAsColumn(txState));
+        resultSet.addColumnValue(keyspaceNameAsColumn(txItem));
+        resultSet.addColumnValue(columnFamilyNameAsColumn(txItem));
+        resultSet.addColumnValue(tokenAsColumn(txItem));
         return resultSet;
     };
-
-    private static void addTransactionItemToResultSet(TransactionState transactionState, ResultSet result)
-    {
-        assert transactionState.getTransactionItems().size() == 1;
-        final TransactionItem txItem = transactionState.getTransactionItems().iterator().next();
-
-        result.addColumnValue(transactionIdAsColumn(transactionState));
-        result.addColumnValue(keyspaceNameAsColumn(txItem));
-        result.addColumnValue(columnFamilyNameAsColumn(txItem));
-        result.addColumnValue(tokenAsColumn(txItem));
-    }
 
     private static ByteBuffer tokenAsColumn(TransactionItem txItem)
     {
@@ -151,15 +143,6 @@ public class MppServiceUtils
         return UTF8Type.instance.decompose(txItem.getKsName());
     }
 
-    private static List<ColumnSpecification> getColumnSpecificationsForTransactionItems()
-    {
-        List<ColumnSpecification> columns = new ArrayList<>(3);
-        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(KS_NAME_COL, true), UTF8Type.instance));
-        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(CF_NAME_COL, true), UTF8Type.instance));
-        columns.add(new ColumnSpecification(KS_NAME, TRANSACTION_ITEMS_CF_NAME, new ColumnIdentifier(TOKEN_NAME_COL, true), LongType.instance));
-        return Collections.unmodifiableList(columns);
-    }
-
     public static ResultMessage transformResultSetToResultMessage(ResultSet resultSet)
     {
         if (resultSet.isEmpty()) return new ResultMessage.Void();
@@ -167,7 +150,7 @@ public class MppServiceUtils
     }
 
     private static ColumnSpecification getJsonColumn() {
-        return new ColumnSpecification(KS_NAME, TRANSATION_STATES, Json.JSON_COLUMN_ID, UTF8Type.instance);
+        return new ColumnSpecification(KS_NAME, TRANSACTION_STATE_CF_NAME, Json.JSON_COLUMN_ID, UTF8Type.instance);
     }
 
     public static ResultSet mapTransactionStateToJson(TransactionState transactionState)
@@ -244,7 +227,15 @@ public class MppServiceUtils
         return StreamSupport.stream(iterable.spliterator(), false);
     }
 
-    public static ResultSet mapTransactionStateToResultSet(TransactionState transactionState)
+    public static ResultSet mapTransactionStateToResultSet(TransactionState transactionState, boolean isJson)
+    {
+        if (isJson)
+            return mapTransactionStateToJson(transactionState);
+        else
+            return mapTransactionStateToRows(transactionState);
+    }
+
+    public static ResultSet mapTransactionStateToRows(TransactionState transactionState)
     {
         final ResultSet resultSet = new ResultSet(transactionStateMetaData);
 
