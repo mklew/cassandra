@@ -23,8 +23,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -166,21 +168,30 @@ public class MppServiceImpl implements MppService
     public void readAllByColumnFamily(TransactionId transactionId, String ksName, String cfName, Consumer<PartitionIterator> consumer)
     {
         logger.info("Execute readAllByColumnFamily transactionId: {} keyspaceName: {} columnFamilyName: {}", transactionId, ksName, cfName);
+        processPartitions(transactionId, ksName, cfName, consumer, (cfId, transactionData) -> transactionData.partitionUpdatesStream(ksName, cfId));
+    }
+
+    private void processPartitions(TransactionId transactionId, String ksName, String cfName, Consumer<PartitionIterator> consumer,
+                                   BiFunction<UUID, TransactionData, Stream<PartitionUpdate>> getPartitionUpdates)
+    {
         final TransactionData transactionData = privateMemtableStorage.readTransactionData(transactionId);
         final UUID cfId = Schema.instance.getId(ksName, cfName);
 
         int nowInSec = FBUtilities.nowInSeconds();
-        final List<PartitionIterator> partitionIterators = transactionData.partitionUpdatesStream(ksName, cfId)
-                                                               .map(pu -> pu.unfilteredIterator())
-                                                               .map(unfilteredI -> UnfilteredRowIterators.filter(unfilteredI, nowInSec))
-                                                               .map(PartitionIterators::singletonIterator)
-                                                               .collect(Collectors.toList());
 
-        if(partitionIterators.isEmpty()) {
+        final List<PartitionIterator> partitionIterators = getPartitionUpdates.apply(cfId, transactionData).map(pu -> pu.unfilteredIterator())
+                                                                              .map(unfilteredI -> UnfilteredRowIterators.filter(unfilteredI, nowInSec))
+                                                                              .map(PartitionIterators::singletonIterator)
+                                                                              .collect(Collectors.toList());
+
+        if (partitionIterators.isEmpty())
+        {
             consumer.accept(EmptyIterators.partition());
         }
-        else {
-            try(final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators)) {
+        else
+        {
+            try (final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators))
+            {
                 consumer.accept(partitionIterator);
             }
         }
@@ -189,25 +200,7 @@ public class MppServiceImpl implements MppService
     public void readAllByColumnFamilyAndToken(TransactionId transactionId, String ksName, String cfName, Token token, Consumer<PartitionIterator> consumer)
     {
         logger.info("Execute readAllByColumnFamilyAndToken transactionId: {} keyspaceName: {} columnFamilyName: {} token: {}", transactionId, ksName, cfName, token);
-        // TODO [MPP] Refactor to make it DRY
-        final TransactionData transactionData = privateMemtableStorage.readTransactionData(transactionId);
-        final UUID cfId = Schema.instance.getId(ksName, cfName);
-
-        int nowInSec = FBUtilities.nowInSeconds();
-        final List<PartitionIterator> partitionIterators = transactionData.readData(ksName, cfId, token)
-                                                                          .map(pu -> pu.unfilteredIterator())
-                                                                          .map(unfilteredI -> UnfilteredRowIterators.filter(unfilteredI, nowInSec))
-                                                                          .map(PartitionIterators::singletonIterator)
-                                                                          .collect(Collectors.toList());
-
-        if(partitionIterators.isEmpty()) {
-            consumer.accept(EmptyIterators.partition());
-        }
-        else {
-            try(final PartitionIterator partitionIterator = PartitionIterators.concat(partitionIterators)) {
-                consumer.accept(partitionIterator);
-            }
-        }
+        processPartitions(transactionId, ksName, cfName, consumer, (cfId, transactionData) -> transactionData.readData(ksName, cfId, token));
     }
 
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)

@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.Collections;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
@@ -29,6 +30,7 @@ import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -107,15 +109,26 @@ public class ReadTransactionStatement implements CQLStatement
             final UUID transactionId = MppStatementUtils.getTransactionId(options, this.transactionId);
             final TransactionTimeUUID txId = new TransactionTimeUUID(transactionId);
 
-            if(cfName == null && preparedToken == null) {
+
+            if(isReadingJustTransactionState()) {
                 // Returns local TransactionState for this transaction,
                 TransactionState txState = MppServicesLocator.getInstance().readLocalTransactionState(txId);
 
                 return transformResultSetToResultMessage(mapTransactionStateToResultSet(txState, isJson));
             }
-            else if (cfName != null && preparedToken != null) {
+
+            final ResultMessage[] message = new ResultMessage[1];
+            final Consumer<PartitionIterator> cb = partitionIterator -> {
+                // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
+                // Tricky part is setting everything on the SelectStatement. For now, fail with exception
+
+                CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
+                final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
+                message[0] = resultMessage;
+            };
+            if (isReadingSpecificTokensFromColumnFamily()) {
                 // read all from column family
-                final ResultMessage[] message = new ResultMessage[1];
+
                 Murmur3Partitioner.LongToken token = MppStatementUtils.getToken(options, this.preparedToken);
 
                 MppServicesLocator
@@ -124,34 +137,19 @@ public class ReadTransactionStatement implements CQLStatement
                                                cfName.getKeyspace(),
                                                cfName.getColumnFamily(),
                                                token,
-                                               partitionIterator -> {
-                                                   // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
-                                                   // Tricky part is setting everything on the SelectStatement. For now, fail with exception
-
-                                                   CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
-                                                   final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
-                                                   message[0] = resultMessage;
-                                               });
+                                               cb);
 
                 return message[0];
             }
-            else if (cfName != null)
+            else if (isReadingWholeColumnFamily())
             {
                 // read all from column family
-                final ResultMessage[] message = new ResultMessage[1];
                 MppServicesLocator
                 .getInstance()
                 .readAllByColumnFamily(txId,
                                        cfName.getKeyspace(),
                                        cfName.getColumnFamily(),
-                                       partitionIterator -> {
-                                           // Idea is to extend SelectStatement and just execute it in order not to duplicate a lot of logic.
-                                           // Tricky part is setting everything on the SelectStatement. For now, fail with exception
-
-                                           CFMetaData metaData = Schema.instance.getCFMetaData(cfName.getKeyspace(), cfName.getColumnFamily());
-                                           final ResultMessage resultMessage = MppFakeSelect.create(metaData).createResultMessage(partitionIterator);
-                                           message[0] = resultMessage;
-                                       });
+                                       cb);
 
                 return message[0];
             }
@@ -162,6 +160,21 @@ public class ReadTransactionStatement implements CQLStatement
         else {
             throw new RuntimeException("ReadTransactionStatement.execute has not been implemented yet");
         }
+    }
+
+    private boolean isReadingWholeColumnFamily()
+    {
+        return cfName != null;
+    }
+
+    private boolean isReadingSpecificTokensFromColumnFamily()
+    {
+        return cfName != null && preparedToken != null;
+    }
+
+    private boolean isReadingJustTransactionState()
+    {
+        return cfName == null && preparedToken == null;
     }
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
