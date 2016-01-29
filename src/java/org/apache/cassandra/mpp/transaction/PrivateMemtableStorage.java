@@ -20,6 +20,7 @@ package org.apache.cassandra.mpp.transaction;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.db.Mutation;
@@ -55,9 +56,9 @@ public interface PrivateMemtableStorage
      */
     TransactionData readTransactionData(TransactionId txId);
 
-    Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems);
+    Map<TransactionItem, Optional<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems);
 
-    default Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(UUID transactionId, List<TransactionItem> transactionItems) {
+    default Map<TransactionItem, Optional<PartitionUpdate>> readTransactionItems(UUID transactionId, List<TransactionItem> transactionItems) {
         return readTransactionItems(new TransactionTimeUUID(transactionId), transactionItems);
     }
 

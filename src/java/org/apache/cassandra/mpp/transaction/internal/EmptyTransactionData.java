@@ -20,6 +20,7 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -74,8 +75,8 @@ public class EmptyTransactionData implements TransactionData
         return Stream.empty();
     }
 
-    public Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
+    public Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
     {
-        return Stream.empty();
+        return Optional.empty();
     }
 }

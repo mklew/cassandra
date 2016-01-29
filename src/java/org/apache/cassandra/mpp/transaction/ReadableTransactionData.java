@@ -18,8 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Stream;
 
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
@@ -30,5 +30,11 @@ import org.apache.cassandra.dht.Token;
  */
 public interface ReadableTransactionData
 {
-    Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token);
+    /**
+     * @param ksName keyspace name
+     * @param cfId column family id
+     * @param token token for partition
+     * @return {@link PartitionUpdate} if such update exists for given ksName, cfId and token. PartitionUpdate might have one or more rows.
+     */
+    Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token);
 }

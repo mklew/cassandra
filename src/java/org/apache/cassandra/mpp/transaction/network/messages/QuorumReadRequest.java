@@ -22,10 +22,12 @@ package org.apache.cassandra.mpp.transaction.network.messages;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import com.google.common.base.Preconditions;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +60,7 @@ public class QuorumReadRequest implements MppRequestMessage
 
     public MppResponseMessage executeInLocalContext(NodeContext context)
     {
-        final Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates = context.getStorage().readTransactionItems(transactionId, transactionItems);
+        final Map<TransactionItem, Optional<PartitionUpdate>> transactionItemToPartitionUpdates = context.getStorage().readTransactionItems(transactionId, transactionItems);
 
         final long numberOfMissingItems = numberOfMissingItems(transactionItemToPartitionUpdates);
         if(numberOfMissingItems != 0) {
@@ -69,15 +71,16 @@ public class QuorumReadRequest implements MppRequestMessage
         return new QuorumReadResponse(transactionId, transactionItemToPartitionUpdates, numberOfMissingItems != 0);
     }
 
-    private long numberOfMissingItems(Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates)
+    private long numberOfMissingItems(Map<TransactionItem, Optional<PartitionUpdate>> transactionItemToPartitionUpdates)
     {
-        return transactionItemToPartitionUpdates.entrySet().stream().filter(x->!x.getValue().isEmpty()).count() - transactionItems.size();
+        return transactionItemToPartitionUpdates.entrySet().stream().filter(x->x.getValue().isPresent()).count() - transactionItems.size();
     }
 
-    private Set<TransactionItem> getMissingItems(Map<TransactionItem, List<PartitionUpdate>> transactionItemToPartitionUpdates)
+    private Set<TransactionItem> getMissingItems(Map<TransactionItem, Optional<PartitionUpdate>> transactionItemToPartitionUpdates)
     {
         final Set<TransactionItem> missingItems = new HashSet<>(transactionItems);
-        missingItems.removeAll(transactionItemToPartitionUpdates.keySet());
+        final Set<TransactionItem> allPresent = transactionItemToPartitionUpdates.entrySet().stream().filter(x-> x.getValue().isPresent()).map(Map.Entry::getKey).collect(Collectors.toSet());
+        missingItems.removeAll(allPresent);
         return missingItems;
     }
 }

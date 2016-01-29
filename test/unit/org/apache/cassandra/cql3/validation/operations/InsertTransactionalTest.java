@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -126,7 +127,7 @@ public class InsertTransactionalTest extends CQLTester
             throw new IllegalStateException("Does not expect read");
         }
 
-        public Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems)
+        public Map<TransactionItem, Optional<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems)
         {
             return null;
         }

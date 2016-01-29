@@ -18,8 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
-import java.util.List;
-import java.util.stream.Stream;
+import java.util.Optional;
 
 import org.junit.Test;
 
@@ -39,7 +38,6 @@ import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static java.util.stream.Collectors.toList;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 /**
@@ -123,12 +121,10 @@ public class TransationDataImplTest
 
         // Therefore there should be only one PartitionUpdate defined for TransactionItem
 
-        final Stream<PartitionUpdate> partitionUpdateStream = privateData.readData("ks1", cf1MetaData.cfId, Util.token(partitionKey));
-        final List<PartitionUpdate> partitionUpdates = partitionUpdateStream.collect(toList());
+        final Optional<PartitionUpdate> partitionUpdateOpt = privateData.readData("ks1", cf1MetaData.cfId, Util.token(partitionKey));
 
-        Assert.assertEquals("TransactionItem data uniquely identifies partition update", 1, partitionUpdates.size());
-        Assert.assertEquals(1, partitionUpdates.iterator().next().rowCount());
-
+        Assert.assertTrue("PartitionUpdate should be present", partitionUpdateOpt.isPresent());
+        Assert.assertEquals(1, partitionUpdateOpt.get().rowCount());
         // Another insert with same partitioning key should be merged as PartitionUpdate with two rows.
         final String ck3 = "ck3";
         final PartitionUpdate pu3 = makeCf(cf1MetaData, partitionKey, ck3, "k3v11", "k3v22");
@@ -136,9 +132,7 @@ public class TransationDataImplTest
 
         privateData.addMutation(m3);
 
-        final List<PartitionUpdate> partitionUpdatesAfterPu3 = privateData.readData("ks1", cf1MetaData.cfId, Util.token(partitionKey)).collect(toList());
-        Assert.assertEquals("TransactionItem data uniquely identifies partition update", 1, partitionUpdatesAfterPu3.size());
-        final PartitionUpdate partitionUpdateWithPu3 = partitionUpdatesAfterPu3.iterator().next();
+        final PartitionUpdate partitionUpdateWithPu3 = privateData.readData("ks1", cf1MetaData.cfId, Util.token(partitionKey)).get();
         Assert.assertEquals("Should have two rows for same partitioning key", 2, partitionUpdateWithPu3.rowCount());
 
         Assert.assertEquals("k3v22", UTF8Type.instance.compose(partitionUpdateWithPu3.getRow(getClustering(ck3)).getCell(getColumnDef(cf1MetaData, "c2")).value()));

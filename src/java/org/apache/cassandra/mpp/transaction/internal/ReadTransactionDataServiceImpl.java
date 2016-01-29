@@ -39,6 +39,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
+import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.network.MppMessageReceipient;
@@ -46,10 +47,8 @@ import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.mpp.transaction.network.QuorumMppMessageResponseExpectations;
 import org.apache.cassandra.mpp.transaction.network.messages.QuorumReadRequest;
-import org.apache.cassandra.mpp.transaction.network.messages.QuorumReadResponse;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * Service that reads private memtables of given transaction for this node.
@@ -116,6 +115,121 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         }
     }
 
+    public int countNumberOfRequestsRequired(TransactionState transactionState) {
+        final Stream<TransactionItemWithAddresses> ownedByThisNode = identifyTransactionItemsOwnedByThisNode(transactionState);
+
+        final Map<Collection<InetAddress>, Map<Integer, List<TransactionItemWithAddresses>>> groupedByReplicasAndByReplicatonFactor = ownedByThisNode.collect(Collectors.groupingBy(x -> x.endPoints, Collectors.groupingBy(x -> x.replicationFactor)));
+
+        return groupedByReplicasAndByReplicatonFactor.entrySet().stream().map(e -> e.getValue().keySet().size()).reduce(0, (a, b) -> a + b);
+    }
+
+    /**
+     * This is response from receipient in ReadRequestRecipe, for
+     *
+     * ReadRequestRecipe
+     *
+     */
+    public static class ReadRequestResponse {
+        InetAddress from;
+
+        Map<TransactionItem, Collection<PartitionUpdate>> txItemToPartitionUpdates;
+    }
+
+    public static class FullReadRequestResponse {
+
+        Collection<ReadRequestResponse> responses;
+
+        ReadRequestRecipe readRequestRecipe;
+    }
+
+    public static int quorumFor(int replicationFactor) {
+        return (replicationFactor / 2) + 1;
+    }
+
+    // Partition
+    public static Map<TransactionItem, Collection<PartitionUpdate>> filterPartitionUpdatesToOnlyThoseSeenByQuorumAndJoinThem(int replicationFactor,
+                                                                                                                             Collection<Map<TransactionItem, Collection<PartitionUpdate>>> responses) {
+        final int quorum = quorumFor(replicationFactor);
+
+        // TODO PartitionUpdate key is partitioning key.
+        // PartitionUpdate is also per specific CF -> Same for TransactionItem, therefore I can have One to One relationship instead of TxItem -> Collection<PartitionUpdate>
+        // PartitionUpdate has rows
+        // rows have same token in TransactionItem
+        // I need to consider only rows that exist in quorum
+        // This can be done using clustering keys of rows.
+        // Therefore for each transaction item
+        //
+
+        // TODO Test TransactionData how it looks depending on what updates are inserted.
+
+        return null;
+    }
+
+    public static class ReadRequestRecipe {
+
+        final TransactionId transactionId;
+
+        /**
+         * It has to wait for  (replicationFactor / 2) + 1 responses.
+         * Messages are sent to all of receipients.
+         *
+         * Receipients might be > replicationFactor
+         *
+         * Number of live receipients must be >= (replicationFactor / 2) + 1
+         */
+        final int replicationFactor;
+
+        /**
+         * All of these transaction items are owned by receipients.
+         * Receipients might or might not have correct data, but given quorum responses
+         * it should be possible to reconstruct that data.
+         *
+         *
+         * Case that has to be tested:
+         *   there might be a write with same ks/cf/token, but it will be only at 1 node.
+         *   If there is no quorum responses for any given FULL KEY then this row has to be discarded.
+         */
+        final List<TransactionItem> transactionItemsToBeReadOnEachReceipient;
+
+        final Collection<InetAddress> receipients;
+
+        public ReadRequestRecipe(TransactionId transactionId, int replicationFactor, List<TransactionItem> transactionItemsToBeReadOnEachReceipient, Collection<InetAddress> receipients)
+        {
+            this.transactionId = transactionId;
+            this.replicationFactor = replicationFactor;
+            this.transactionItemsToBeReadOnEachReceipient = transactionItemsToBeReadOnEachReceipient;
+            this.receipients = receipients;
+        }
+
+        public String toString()
+        {
+            return "ReadRequestRecipe{" +
+                   "transactionId=" + transactionId +
+                   ", replicationFactor=" + replicationFactor +
+                   ", transactionItemsToBeReadOnEachReceipient=" + transactionItemsToBeReadOnEachReceipient +
+                   ", receipients=" + receipients +
+                   '}';
+        }
+    }
+
+    public Collection<ReadRequestRecipe> prepareRequests(TransactionState transactionState) {
+
+        final Stream<TransactionItemWithAddresses> ownedByThisNode = identifyTransactionItemsOwnedByThisNode(transactionState);
+
+        final Map<Collection<InetAddress>, Map<Integer, List<TransactionItemWithAddresses>>> groupedByReplicasAndByReplicatonFactor = ownedByThisNode.collect(Collectors.groupingBy(x -> x.endPoints, Collectors.groupingBy(x -> x.replicationFactor)));
+
+        int totalNumberOfRequests = groupedByReplicasAndByReplicatonFactor.entrySet().stream().map(e -> e.getValue().keySet().size()).reduce(0, (a, b) -> a + b);
+        assert totalNumberOfRequests > 0;
+        logger.debug("Will do {} requests to read tx {}", totalNumberOfRequests, transactionState.getTransactionId());
+
+        final List<ReadRequestRecipe> requests = groupedByReplicasAndByReplicatonFactor.entrySet().stream().flatMap(e -> e.getValue().entrySet().stream().map(v -> {
+            final int replicationFactor = v.getKey();
+            final List<TransactionItem> transactionItems = v.getValue().stream().map(x -> x.txItem).collect(Collectors.toList());
+            final Collection<InetAddress> receipientsAddresses = e.getKey();
+            return new ReadRequestRecipe(transactionState.id(), replicationFactor, transactionItems, receipientsAddresses);
+        })).collect(Collectors.toList());
+        return requests;
+    }
 
     /**
      * Invoked when data has to be read from this node and it's replicas for sake of consistency.
@@ -148,24 +262,25 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         }).collect(Collectors.toList());
 
         final CompletableFuture<Collection<MppResponseMessage>> futureOfAllResults = collectionOfFuturesToFutureOfCollection(futures);
-
-        return futureOfAllResults.thenApplyAsync(allResults -> {
-            TransactionItemToUpdates m = new TransactionItemToUpdates(new HashMap<>());
-            final Map<TransactionItem, List<PartitionUpdate>> mergedTxItemToUpdates = allResults.stream().map(x -> (QuorumReadResponse) x)
-                                                                                          .map(x -> new TransactionItemToUpdates(x.getItems()))
-                                                                                          .reduce(m, TransactionItemToUpdates::merge).txItemToUpdates;
-
-            final Stream<Pair<TransactionItem, PartitionUpdate>> pairStream = ownedByThisNode.map(x -> x.txItem).map(txItem -> {
-                final List<PartitionUpdate> partitionUpdates = mergedTxItemToUpdates.get(txItem);
-                // TODO not sure if this is correct way to go because I am not sure whether timestamps are correct
-                final PartitionUpdate mergedPartitionUpdate = PartitionUpdate.merge(partitionUpdates);
-                return Pair.create(txItem, mergedPartitionUpdate);
-            });
-
-            final Map<TransactionItem, PartitionUpdate> ownedData = pairStream.collect(Collectors.toMap(p -> p.left, p -> p.right));
-
-            return (TransactionDataPart) () -> ownedData;
-        });
+        // TODO [MPP] Reorganize code, it does not compile atm because signatures were changed
+        throw new RuntimeException("NOT IMPLEMENTED");
+//        return futureOfAllResults.thenApplyAsync(allResults -> {
+//            TransactionItemToUpdates m = new TransactionItemToUpdates(new HashMap<>());
+//            final Map<TransactionItem, Optional<PartitionUpdate>> mergedTxItemToUpdates = allResults.stream().map(x -> (QuorumReadResponse) x)
+//                                                                                          .map(x -> new TransactionItemToUpdates(x.getItems()))
+//                                                                                          .reduce(m, TransactionItemToUpdates::merge).txItemToUpdates;
+//
+//            final Stream<Pair<TransactionItem, PartitionUpdate>> pairStream = ownedByThisNode.map(x -> x.txItem).map(txItem -> {
+//                final List<PartitionUpdate> partitionUpdates = mergedTxItemToUpdates.get(txItem);
+//                // TODO not sure if this is correct way to go because I am not sure whether timestamps are correct
+//                final PartitionUpdate mergedPartitionUpdate = PartitionUpdate.merge(partitionUpdates);
+//                return Pair.create(txItem, mergedPartitionUpdate);
+//            });
+//
+//            final Map<TransactionItem, PartitionUpdate> ownedData = pairStream.collect(Collectors.toMap(p -> p.left, p -> p.right));
+//
+//            return (TransactionDataPart) () -> ownedData;
+//        });
 
         /**
          * 1. Filter transaction items to only those owned by this replica
@@ -177,7 +292,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
          */
     }
 
-    public Stream<TransactionItemWithAddresses> identifyTransactionItemsOwnedByThisNode(TransactionState transactionState)
+    public static Stream<TransactionItemWithAddresses> identifyTransactionItemsOwnedByThisNode(TransactionState transactionState)
     {
         final Stream<TransactionItemWithAddresses> itemsWithAddresses = mapTransactionItemsToTheirEndpoints(transactionState);
         // Each item belongs to this node plus some other nodes.

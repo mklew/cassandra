@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -130,15 +131,20 @@ public class TransactionDataImpl implements TransactionData
                                  .map(v->v.getValue().getPartitionUpdate(cfId));
     }
 
-    public Stream<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
+    @Override
+    public Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
     {
         final Map<DecoratedKey, Mutation> keysToMutation = ksToKeyToMutation.get(ksName);
 
-        final Stream<PartitionUpdate> partitionUpdates = keysToMutation.entrySet()
+        final List<PartitionUpdate> partitionUpdates = keysToMutation.entrySet()
                                                               .stream()
                                                               .filter(e -> sameToken(token, e) && modifiesColumnFamily(cfId, e))
-                                                              .map(v->v.getValue().getPartitionUpdate(cfId));
-        return partitionUpdates;
+                                                              .map(v->v.getValue().getPartitionUpdate(cfId)).collect(Collectors.toList());
+
+
+        Preconditions.checkState(partitionUpdates.size() <= 1, "It may contain at most 1 PartitionUpdate for concrete CF and token");
+
+        return partitionUpdates.stream().findFirst();
     }
 
     private static boolean modifiesColumnFamily(UUID cfId, Map.Entry<DecoratedKey, Mutation> e)

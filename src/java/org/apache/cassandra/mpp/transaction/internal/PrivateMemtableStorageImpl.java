@@ -20,6 +20,7 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -70,10 +71,10 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
         }
     }
 
-    public Map<TransactionItem, List<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems)
+    public Map<TransactionItem, Optional<PartitionUpdate>> readTransactionItems(TransactionId transactionId, List<TransactionItem> transactionItems)
     {
         final TransactionData transactionData = readTransactionData(transactionId);
-        final Stream<Pair<TransactionItem, List<PartitionUpdate>>> pairStream = transactionItems.stream().map(readTransaction(transactionData));
+        final Stream<Pair<TransactionItem, Optional<PartitionUpdate>>> pairStream = transactionItems.stream().map(readTransaction(transactionData));
 
         return pairStream.collect(Collectors.toMap(p -> p.left, v -> v.right));
     }
@@ -88,14 +89,13 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
         txIdToData.remove(id);
     }
 
-    private static Function<TransactionItem, Pair<TransactionItem, List<PartitionUpdate>>> readTransaction(TransactionData transactionData)
+    private static Function<TransactionItem, Pair<TransactionItem, Optional<PartitionUpdate>>> readTransaction(TransactionData transactionData)
     {
         return item -> {
-            final List<PartitionUpdate> partitionUpdates = transactionData.readData(item.getKsName(),
+            final Optional<PartitionUpdate> partitionUpdate = transactionData.readData(item.getKsName(),
                                                                                     findColumnFamilyId(item),
-                                                                                    item.getToken())
-                                                                          .collect(Collectors.toList());
-            return Pair.create(item, partitionUpdates);
+                                                                                    item.getToken());
+            return Pair.create(item, partitionUpdate);
         };
     }
 

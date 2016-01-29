@@ -18,8 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction.network.messages;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -34,18 +34,18 @@ public class QuorumReadResponse implements MppResponseMessage
 {
     private final UUID transactionId;
 
-    private final Map<TransactionItem, List<PartitionUpdate>> items;
+    private final Map<TransactionItem, Optional<PartitionUpdate>> items;
 
     private final boolean hasMissingItems;
 
-    public QuorumReadResponse(UUID transactionId, Map<TransactionItem, List<PartitionUpdate>> items, boolean hasMissingItems)
+    public QuorumReadResponse(UUID transactionId, Map<TransactionItem, Optional<PartitionUpdate>> items, boolean hasMissingItems)
     {
         this.transactionId = transactionId;
         this.items = items;
         this.hasMissingItems = hasMissingItems;
     }
 
-    public Map<TransactionItem, List<PartitionUpdate>> getItems()
+    public Map<TransactionItem, Optional<PartitionUpdate>> getItems()
     {
         return items;
     }
