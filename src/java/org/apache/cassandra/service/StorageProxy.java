@@ -2546,7 +2546,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * A Runnable that aborts if it doesn't start running before it times out
      */
-    private static abstract class DroppableRunnable implements Runnable
+    public static abstract class DroppableRunnable implements Runnable
     {
         private final long constructionTime = System.nanoTime();
         private final MessagingService.Verb verb;

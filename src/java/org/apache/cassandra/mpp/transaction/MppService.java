@@ -21,10 +21,12 @@ package org.apache.cassandra.mpp.transaction;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -84,6 +86,8 @@ public interface MppService
      */
     Map<TransactionItem, List<PartitionUpdate>> readAllTransactionData(TransactionState transactionState);
 
+    Optional<PartitionUpdate> readSingleTransactionItem(TransactionState transactionState);
+
     /**
      * In progress transactions at this node.
      *
@@ -111,4 +115,6 @@ public interface MppService
     void readAllByColumnFamilyAndToken(TransactionId transactionId, String ksName, String cfName, Token token, Consumer<PartitionIterator> cb);
 
     void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, Consumer<PartitionIterator> consumer);
+
+    void readQuorumByColumnFamilyAndToken(TransactionState transactionState, String ksName, String cfNameColumnFamily, Token token, ConsistencyLevel consistency, Consumer<PartitionIterator> consumer);
 }

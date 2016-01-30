@@ -65,6 +65,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.ILatencySubscriber;
 import org.apache.cassandra.metrics.ConnectionMetrics;
 import org.apache.cassandra.metrics.DroppedMessageMetrics;
+import org.apache.cassandra.mpp.transaction.network.messages.PrivateMemtableReadCommand;
+import org.apache.cassandra.mpp.transaction.network.messages.PrivateMemtableReadResponse;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
@@ -141,6 +143,7 @@ public final class MessagingService implements MessagingServiceMBean
         @Deprecated PAGED_RANGE,
         // remember to add new verbs at the end, since we serialize by ordinal
         PRIVATE_MEMTABLE_WRITE,
+        PRIVATE_MEMTABLE_READ,
         UNUSED_1,
         UNUSED_2,
         UNUSED_3,
@@ -163,6 +166,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.BATCH_REMOVE, Stage.MUTATION);
 
         put(Verb.READ, Stage.READ);
+        put(Verb.PRIVATE_MEMTABLE_READ, Stage.PRIVATE_MEMTABLES_WRITE); // TODO [MPP] Maybe another stage for reads? Guess not
         put(Verb.RANGE_SLICE, Stage.READ);
         put(Verb.INDEX_SCAN, Stage.READ);
         put(Verb.PAGED_RANGE, Stage.READ);
@@ -217,6 +221,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.PRIVATE_MEMTABLE_WRITE, TransactionalMutation.serializer);
         put(Verb.READ_REPAIR, Mutation.serializer);
         put(Verb.READ, ReadCommand.serializer);
+        put(Verb.PRIVATE_MEMTABLE_READ, PrivateMemtableReadCommand.serializer);
         put(Verb.RANGE_SLICE, ReadCommand.rangeSliceSerializer);
         put(Verb.PAGED_RANGE, ReadCommand.legacyPagedRangeCommandSerializer);
         put(Verb.BOOTSTRAP_TOKEN, BootStrapper.StringSerializer.instance);
@@ -251,6 +256,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.RANGE_SLICE, ReadResponse.rangeSliceSerializer);
         put(Verb.PAGED_RANGE, ReadResponse.legacyRangeSliceReplySerializer);
         put(Verb.READ, ReadResponse.serializer);
+        put(Verb.PRIVATE_MEMTABLE_READ, PrivateMemtableReadResponse.serializer);
         put(Verb.TRUNCATE, TruncateResponse.serializer);
         put(Verb.SNAPSHOT, null);
 
@@ -316,6 +322,7 @@ public final class MessagingService implements MessagingServiceMBean
                                                                    Verb.HINT,
                                                                    Verb.READ_REPAIR,
                                                                    Verb.READ,
+                                                                   Verb.PRIVATE_MEMTABLE_READ,
                                                                    Verb.RANGE_SLICE,
                                                                    Verb.PAGED_RANGE,
                                                                    Verb.REQUEST_RESPONSE,

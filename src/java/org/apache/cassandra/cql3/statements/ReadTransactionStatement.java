@@ -168,7 +168,14 @@ public class ReadTransactionStatement implements CQLStatement
             TransactionState transactionState = MppStatementUtils.getTransactionState(options, this.transactionStateAsJson);
 
             if(isReadingSpecificTokensFromColumnFamily()) {
-                throw new RuntimeException("ReadTransactionStatement reading quorum by CF && TOKEN not implemented");
+
+                Murmur3Partitioner.LongToken token = MppStatementUtils.getToken(options, this.preparedToken);
+
+                MppServicesLocator
+                .getInstance()
+                .readQuorumByColumnFamilyAndToken(transactionState, cfName.getKeyspace(), cfName.getColumnFamily(), token, options.getConsistency(), cb);
+
+                return message[0];
             }
 
             if(isReadingWholeColumnFamily()) {

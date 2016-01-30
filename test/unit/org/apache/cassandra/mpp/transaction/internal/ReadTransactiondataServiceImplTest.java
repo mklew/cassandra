@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.net.InetAddress;
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -66,10 +67,17 @@ public class ReadTransactiondataServiceImplTest extends MppCQLTester
         final ReadTransactionDataServiceImpl service = mppExtensionServices.getMppModule().getReadTransactionDataServiceImpl();
 
 
-        final Stream<ReadTransactionDataServiceImpl.TransactionItemWithAddresses> r = service.identifyTransactionItemsOwnedByThisNode(transactionState);
+        final Stream<ReadTransactionDataServiceImpl.TransactionItemWithAddresses> r = ReadTransactionDataServiceImpl.identifyTransactionItemsOwnedByThisNode(transactionState);
         final List<ReadTransactionDataServiceImpl.TransactionItemWithAddresses> collect = r.collect(Collectors.toList());
 
         Assert.assertEquals(1, collect.size());
+
+
+        Assert.assertEquals(1, service.countNumberOfRequestsRequired(transactionState));
+
+        final Collection<ReadTransactionDataServiceImpl.ReadRequestRecipe> readRequestRecipes = service.prepareRequests(transactionState);
+        Assert.assertEquals(1, readRequestRecipes.size());
+        System.out.println(readRequestRecipes.iterator().next());
     }
 
 }

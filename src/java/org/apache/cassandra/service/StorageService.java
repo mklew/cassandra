@@ -100,6 +100,7 @@ import org.apache.cassandra.db.DefinitionsUpdateVerbHandler;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.MigrationRequestVerbHandler;
 import org.apache.cassandra.db.MutationVerbHandler;
+import org.apache.cassandra.db.PrivateMemtableReadCommandVerbHandler;
 import org.apache.cassandra.db.PrivateMemtableWriteVerbHandler;
 import org.apache.cassandra.db.RangeSliceVerbHandler;
 import org.apache.cassandra.db.ReadCommandVerbHandler;
@@ -320,6 +321,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.PRIVATE_MEMTABLE_WRITE, new PrivateMemtableWriteVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.READ_REPAIR, new ReadRepairVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.READ, new ReadCommandVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.PRIVATE_MEMTABLE_READ, new PrivateMemtableReadCommandVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.RANGE_SLICE, new RangeSliceVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.PAGED_RANGE, new RangeSliceVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.COUNTER_MUTATION, new CounterMutationVerbHandler());

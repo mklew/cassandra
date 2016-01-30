@@ -22,12 +22,14 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 
@@ -108,5 +110,12 @@ public class TransactionState implements Serializable
     {
         Preconditions.checkState(getTransactionItems().size() == 1);
         return (Murmur3Partitioner.LongToken)getTransactionItems().iterator().next().getToken();
+    }
+
+    public Optional<TransactionItem> findTransactionItem(String ksName, String cfName, Token token)
+    {
+        return transactionItems.stream().filter(ti -> ti.getKsName().equals(ksName)
+                                                      && ti.getCfName().equals(cfName)
+                                                      && ti.getToken().equals(token)).findFirst();
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import org.junit.Test;
 
@@ -34,6 +35,7 @@ import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -47,7 +49,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 public class TransationDataImplTest
 {
 
-    private static PartitionUpdate makeCf(CFMetaData metadata, String partitionKey, String clusteringKey, String columnValue1, String columnValue2)
+    public static PartitionUpdate makeCf(CFMetaData metadata, String partitionKey, String clusteringKey, String columnValue1, String columnValue2)
     {
         Row.Builder builder = BTreeRow.unsortedBuilder(FBUtilities.nowInSeconds());
         builder.newRow(getClustering(clusteringKey));
@@ -60,12 +62,12 @@ public class TransationDataImplTest
         return PartitionUpdate.singleRowUpdate(metadata, Util.dk(partitionKey), builder.build());
     }
 
-    private static Clustering getClustering(String clusteringKey)
+    public static Clustering getClustering(String clusteringKey)
     {
         return new Clustering(UTF8Type.instance.decompose(clusteringKey));
     }
 
-    private static CFMetaData makeCfMetaData(String ks, String cf)
+    public static CFMetaData makeCfMetaData(String ks, String cf)
     {
         CFMetaData metadata = CFMetaData.Builder.create(ks, cf)
                                                 .addPartitionKey("pkey", UTF8Type.instance)
@@ -77,8 +79,47 @@ public class TransationDataImplTest
         return metadata;
     }
 
+    private static class PartitionUpdateLookup {
+
+        private final String ksName;
+
+        private final UUID cfId;
+
+        private final Token token;
+
+        public PartitionUpdateLookup(String ksName, UUID cfId, Token token)
+        {
+            this.ksName = ksName;
+            this.cfId = cfId;
+            this.token = token;
+        }
+    }
+
     @Test
-    public void testStuff() {
+    public void testShouldReturnEmptyPartitionUpdateIfItDoesntHaveIt() {
+        CFMetaData cf1MetaData = makeCfMetaData("ks1", "cf1");
+        // For same partition key
+        String partitionKey = "k";
+        final String ck1 = "ck1";
+        PartitionUpdate cf1 = makeCf(cf1MetaData, partitionKey, ck1, "k1v1", null);
+        Mutation m1 = new Mutation("ks1", cf1.partitionKey()).add(cf1);
+
+        final TransactionId transactionId = TransactionStateUtils.newTransactionState().id();
+
+        final TransactionDataImpl privateData = new TransactionDataImpl(transactionId);
+
+        privateData.addMutation(m1);
+
+        // when reading for something that does not exist
+        CFMetaData cf2MetaData = makeCfMetaData("ks1", "cf2");
+
+        final Optional<PartitionUpdate> partitionUpdate = privateData.readData("ks1", cf2MetaData.cfId, Util.token(partitionKey));
+
+        Assert.assertFalse(partitionUpdate.isPresent());
+    }
+
+    @Test
+    public void testOperationsScenario() {
         CFMetaData cf1MetaData = makeCfMetaData("ks1", "cf1");
         CFMetaData cf2MetaData = makeCfMetaData("ks1", "cf2");
 
@@ -138,7 +179,7 @@ public class TransationDataImplTest
         Assert.assertEquals("k3v22", UTF8Type.instance.compose(partitionUpdateWithPu3.getRow(getClustering(ck3)).getCell(getColumnDef(cf1MetaData, "c2")).value()));
     }
 
-    private static ColumnDefinition getColumnDef(CFMetaData cf1MetaData, String c)
+    public static ColumnDefinition getColumnDef(CFMetaData cf1MetaData, String c)
     {
         return cf1MetaData.getColumnDefinition(UTF8Type.instance.decompose(c));
     }

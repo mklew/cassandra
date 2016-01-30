@@ -24,9 +24,11 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
+import org.apache.cassandra.mpp.transaction.internal.NativeReadTransactionDataRequestExecutor;
 import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
 import org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
+import org.apache.cassandra.net.MessagingService;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -51,9 +53,13 @@ public class MppModule
         final MppServiceImpl service = new MppServiceImpl();
         final PrivateMemtableStorageImpl privateMemtableStorage = new PrivateMemtableStorageImpl();
 
+        final NativeReadTransactionDataRequestExecutor nativeReadTransactionDataRequestExecutor = new NativeReadTransactionDataRequestExecutor(MessagingService.instance());
+
         ReadTransactionDataServiceImpl readTransactionDataService = new ReadTransactionDataServiceImpl();
+        readTransactionDataService.setExecutor(nativeReadTransactionDataRequestExecutor);
+
         service.setPrivateMemtableStorage(privateMemtableStorage);
-        readTransactionDataService.setMppNetworkService(mppNetworkService);
+        service.setReadTransactionDataService(readTransactionDataService);
 
         return new MppModule(service, readTransactionDataService);
     }

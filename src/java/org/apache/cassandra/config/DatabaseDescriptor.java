@@ -1107,6 +1107,7 @@ public class DatabaseDescriptor
         switch (verb)
         {
             case READ:
+            case PRIVATE_MEMTABLE_READ:
                 return getReadRpcTimeout();
             case RANGE_SLICE:
                 return getRangeRpcTimeout();
@@ -1114,6 +1115,7 @@ public class DatabaseDescriptor
                 return getTruncateRpcTimeout();
             case READ_REPAIR:
             case MUTATION:
+            case PRIVATE_MEMTABLE_WRITE:
             case PAXOS_COMMIT:
             case PAXOS_PREPARE:
             case PAXOS_PROPOSE:

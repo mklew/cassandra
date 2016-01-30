@@ -271,8 +271,10 @@ public enum ConsistencyLevel
                 return true;
             case LOCAL_ONE:
                 return countLocalEndpoints(liveEndpoints) >= 1;
+            case LOCAL_TRANSACTIONAL:
             case LOCAL_QUORUM:
                 return countLocalEndpoints(liveEndpoints) >= blockFor(keyspace);
+            case TRANSACTIONAL:
             case EACH_QUORUM:
                 if (keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
                 {
@@ -301,6 +303,7 @@ public enum ConsistencyLevel
                 if (countLocalEndpoints(liveEndpoints) == 0)
                     throw new UnavailableException(this, 1, 0);
                 break;
+            case LOCAL_TRANSACTIONAL:
             case LOCAL_QUORUM:
                 int localLive = countLocalEndpoints(liveEndpoints);
                 if (localLive < blockFor)
@@ -319,6 +322,7 @@ public enum ConsistencyLevel
                     throw new UnavailableException(this, blockFor, localLive);
                 }
                 break;
+            case TRANSACTIONAL:
             case EACH_QUORUM:
                 if (keyspace.getReplicationStrategy() instanceof NetworkTopologyStrategy)
                 {

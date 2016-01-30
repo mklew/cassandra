@@ -18,9 +18,10 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -32,15 +33,24 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 public interface ReadTransactionDataService
 {
 
-    interface TransactionDataPart {
-        Map<TransactionItem, PartitionUpdate> getPartitionUpdates();
-    }
-
     /**
-     * This Node is replica for transaction data. Others have to be queried.
      *
      * @param transactionState
-     * @return
+     * @param consistencyLevel
+     * @return items that are owned by this node with partition updates using quorum
      */
-    CompletableFuture<TransactionDataPart> readTransactionDataUsingQuorum(TransactionState transactionState);
+    Map<TransactionItem, List<PartitionUpdate>> readRelevantForThisNode(TransactionState transactionState, ConsistencyLevel consistencyLevel);
+
+    /**
+     * Method performs reads to responsible nodes, it waits for quorum of responses with PartitionUpdates for this node.
+     *
+     *
+     * @param transactionId
+     * @param transactionItem - it does not have to be owned by this particular node
+     * @param consistencyLevel
+     * @return map with single entry
+     */
+    Map<TransactionItem, List<PartitionUpdate>> readSingleTransactionItem(TransactionId transactionId,
+                                                                                TransactionItem transactionItem,
+                                                                                ConsistencyLevel consistencyLevel);
 }
