@@ -259,6 +259,8 @@ public class MppServiceImpl implements MppService
     {
         logger.info("Execute readQuorumByColumnFamilyAndToken transactionState: {} keyspaceName: {} columnFamilyName: {} token: {}", transactionState, ksName, cfName, token);
 
+        logger.info("MppServiceImpl#readQuorumByColumnFamilyAndToken");
+
         Optional<TransactionItem> txItemOpt = transactionState.findTransactionItem(ksName, cfName, token);
         if(!txItemOpt.isPresent()) {
             throw new RuntimeException(String.format("TransactionState %s does not have such item ksName %s cfName %s token %s", transactionState, ksName, cfName, token));

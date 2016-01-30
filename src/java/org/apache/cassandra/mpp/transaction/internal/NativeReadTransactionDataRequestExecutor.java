@@ -72,6 +72,8 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
 
     public static class PrivateMemtableReadCallback implements IAsyncCallbackWithFailure<PrivateMemtableReadResponse> {
 
+        private static final Logger logger = LoggerFactory.getLogger(PrivateMemtableReadCallback.class);
+
         private final SingleReadRequestRecipe readRequestRecipe;
 
         private final ConsistencyLevel consistencyLevel;
@@ -103,6 +105,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
             this.consistencyLevel = consistencyLevel;
             blockfor = endpoints.size();
             this.start = System.nanoTime();
+            logger.debug("PrivateMemtableReadCallback endpoints {} blockFor {}", endpoints, blockfor);
         }
 
         /**
@@ -117,6 +120,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
 
         public void onFailure(InetAddress from)
         {
+            logger.debug("PrivateMemtableReadCallback failure from address {}", from);
             int n = waitingFor(from)
                     ? failuresUpdater.incrementAndGet(this)
                     : failures;
@@ -178,7 +182,10 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
 
         public void response(MessageIn<PrivateMemtableReadResponse> message)
         {
+            logger.debug("PrivateMemtableReadCallback response arrived");
             final Optional<PartitionUpdate> partitionUpdateOpt = message.payload.getPartitionUpdateOpt();
+
+            logger.debug("PrivateMemtableReadCallback response isPartitionUpdatePresent {}", partitionUpdateOpt.isPresent());
 
             if(partitionUpdateOpt.isPresent()) {
                 lock.lock();  // block until condition holds
@@ -261,6 +268,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
          */
         protected void makeRequests(PrivateMemtableReadCommand privateMemtableReadCommand, Iterable<InetAddress> endpoints)
         {
+            logger.debug("makeRequests to endpoints {} ", Lists.newArrayList(endpoints));
             MessageOut<PrivateMemtableReadCommand> message = null;
             boolean hasLocalEndpoint = false;
 
@@ -272,7 +280,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
                     continue;
                 }
 
-                logger.trace("reading data from {}", endpoint);
+                logger.info("reading data from {}", endpoint);
                 if (message == null)
                     message = privateMemtableReadCommand.createMessage(); // TODO [MPP] I don't differentiate on versions here
                 MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
@@ -281,7 +289,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
             // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
             if (hasLocalEndpoint)
             {
-                logger.trace("reading data locally");
+                logger.info("reading data locally");
                 StageManager.getStage(Stage.PRIVATE_MEMTABLES_WRITE).maybeExecuteImmediately(new LocalPrivateMemtableReadRunnable(privateMemtableReadCommand, handler));
             }
         }
@@ -371,14 +379,19 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
      */
     public List<PartitionUpdate> executeRecipe(SingleReadRequestRecipe singleReadRequestRecipe, ConsistencyLevel consistencyLevel)
     {
-        final ReadTransactionDataExecutor readExecutor = ReadTransactionDataExecutor.getReadExecutor(singleReadRequestRecipe, consistencyLevel);
+
+        // TODO [MPP] Fix overridden consistencyLevel - so far it didn't work if I were setting it on SimpleStatement
+        final ReadTransactionDataExecutor readExecutor = ReadTransactionDataExecutor.getReadExecutor(singleReadRequestRecipe, ConsistencyLevel.LOCAL_TRANSACTIONAL);
 
         // Sends to all, because it uses DumbExecutor
+        logger.info("NativeReadTransactionDataRequestExecutor executing readExecutor");
         readExecutor.executeAsync();
 
         // TODO [MPP] there could be an lifecycle object wrapping executor that could call these methods: executeAsync, tryAdditionalReplicas etc.
-
+        logger.info("NativeReadTransactionDataRequestExecutor doing GET on readExecutor");
         final List<PartitionUpdate> partitionUpdates = readExecutor.get();
+
+        logger.info("NativeReadTransactionDataRequestExecutor after GET on readExecutor with partition updates size {}", partitionUpdates.size());
 
         return partitionUpdates;
     }

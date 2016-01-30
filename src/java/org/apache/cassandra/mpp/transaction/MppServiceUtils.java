@@ -32,6 +32,7 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.base.Preconditions;
 
+import com.datastax.driver.core.Row;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Json;
@@ -266,6 +267,11 @@ public class MppServiceUtils
     private static ByteBuffer transactionIdAsColumn(TransactionState transactionState)
     {
         return UUIDType.instance.decompose(transactionState.getTransactionId());
+    }
+
+    public static Stream<Row> streamResultSet(com.datastax.driver.core.ResultSet resultSet)
+    {
+        return StreamSupport.stream(resultSet.spliterator(), false);
     }
 
     // TODO [MPP] I guess it is not required so far

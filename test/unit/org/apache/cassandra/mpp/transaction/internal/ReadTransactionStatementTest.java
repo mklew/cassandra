@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.net.InetAddress;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -28,11 +29,15 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.mpp.transaction.MppCQLTester;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
+import org.apache.cassandra.service.StorageService;
 
+import static org.apache.cassandra.Util.token;
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.mapResultToTransactionState;
 
 /**
@@ -219,12 +224,23 @@ public class ReadTransactionStatementTest extends MppCQLTester
 
     @Test
     public void shouldAcceptTransactionStateEncodedInJson() throws Throwable {
+        String ONE = "1";
+        String SIX = "6";
+
+        TokenMetadata tmd;
+
+        tmd = StorageService.instance.getTokenMetadata();
+        tmd.updateNormalToken(token(ONE), InetAddress.getByName("127.0.0.1"));
+        tmd.updateNormalToken(token(SIX), InetAddress.getByName("127.0.0.6"));
+
         final TransactionState transactionState = startTransaction();
         createMppTestCf1();
 
         txInsertToCf1(transactionState, 10, "a");
         txInsertToCf1(transactionState, 1251, "bbb");
-        txInsertToCf1(transactionState, 12314, "bbb", "some description", 14);
+        final TransactionState transactionState1 = txInsertToCf1(transactionState, 12314, "bbb", "some description", 14);
+
+        final Murmur3Partitioner.LongToken token = transactionState1.singleToken();
 
         final UntypedResultSet resultsWithJson = execute("READ TRANSACTIONAL LOCALLY AS JSON TRANSACTION " + transactionState.getTransactionId());
 
@@ -232,8 +248,8 @@ public class ReadTransactionStatementTest extends MppCQLTester
         final String json = resultsWithJson.one().getString(Json.JSON_COLUMN_ID.toString());
 
 
-        execute("READ TRANSACTIONAL TRANSACTION AS JSON '" + json + "' FROM " + keyspace()+"." + cf1Name);
-
+        execute("READ TRANSACTIONAL TRANSACTION AS JSON '" + json + "' FROM " + keyspace()+"." + cf1Name + " TOKEN " + token.getTokenValue());
+        // TODO [MPP] Assertions, although this runs network free
     }
 
     // TODO TEST IT IN MPP_TEST because it requires network READ TRANSACTIONAL TRANSACTION AS JSON <transactionStateInJson> FROM <columnFamilyName>

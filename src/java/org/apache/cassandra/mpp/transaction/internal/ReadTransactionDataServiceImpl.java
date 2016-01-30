@@ -110,6 +110,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
                                                                                        TransactionItem transactionItem,
                                                                                        ConsistencyLevel consistencyLevel)
     {
+        logger.info("ReadTransactionDataServiceImpl#readSingleTransactionItem transactionId {}", transactionId);
         final Collection<ReadRequestRecipe> readRequestRecipes = prepareRequests(TransactionStateUtils.recreateTransactionState(transactionId,
                                                                                                                                 Collections.singletonList(transactionItem)));
 
@@ -122,6 +123,8 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
 
         final SingleReadRequestRecipe singleReadRequestRecipe = singleReadRequestRecipes.iterator().next();
         final Pair<TransactionItem, List<PartitionUpdate>> transactionItemCollectionPair = executeSingleReadRequestRecipe(singleReadRequestRecipe, consistencyLevel);
+        logger.info("ReadTransactionDataServiceImpl#readSingleTransactionItem transactionId {} got response for transaction item {} with {} partition updates", transactionId,
+                    transactionItemCollectionPair.left, transactionItemCollectionPair.right.size());
 
         return Collections.singletonMap(transactionItemCollectionPair.left, transactionItemCollectionPair.right);
     }

@@ -170,6 +170,7 @@ public class ReadTransactionStatement implements CQLStatement
             if(isReadingSpecificTokensFromColumnFamily()) {
 
                 Murmur3Partitioner.LongToken token = MppStatementUtils.getToken(options, this.preparedToken);
+                System.out.println("isReadingSpecificTokensFromColumnFamily using quorum");
 
                 MppServicesLocator
                 .getInstance()
