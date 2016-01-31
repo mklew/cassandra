@@ -64,4 +64,9 @@ public class TransactionTimeUUID implements TransactionId, Comparable<Transactio
     {
         return "TxID[" + id + ']';
     }
+
+    public UUID unwrap()
+    {
+        return getId();
+    }
 }

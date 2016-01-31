@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,4 +67,6 @@ public interface PrivateMemtableStorage
 
 
     void removePrivateData(TransactionId id);
+
+    Collection<TransactionId> getInProgressTransactions();
 }

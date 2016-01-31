@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -87,6 +89,11 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
     public void removePrivateData(TransactionId id)
     {
         txIdToData.remove(id);
+    }
+
+    public Collection<TransactionId> getInProgressTransactions()
+    {
+        return Collections.unmodifiableSet(txIdToData.keySet());
     }
 
     private static Function<TransactionItem, Pair<TransactionItem, Optional<PartitionUpdate>>> readTransaction(TransactionData transactionData)

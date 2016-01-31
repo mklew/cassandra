@@ -84,6 +84,11 @@ public abstract class MppCQLTester extends CQLTester
         return mapResultToTransactionState(encodedTxState);
     }
 
+    protected void normalInsertToCf1(int pk, String ck, String description, Integer number) throws Throwable {
+        final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description, number) values (?, ?, ?, ?)" ;
+        execute(cql, pk, ck, description, number);
+    }
+
     protected TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, String description) throws Throwable {
         final String cql = "INSERT INTO " + keyspace() +"." + cf1Name + " (pk, ck, description) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
         final UntypedResultSet encodedTxState = execute(cql, pk, ck, description);

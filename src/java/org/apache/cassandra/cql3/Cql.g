@@ -277,6 +277,8 @@ cqlStatement returns [ParsedStatement stmt]
     | st41=startTransactionStatement       { $stmt = st41; }
     | st42=rollbackTransactionStatement    { $stmt = st42; }
     | st43=readTransactionStatement        { $stmt = st43; }
+    | st44=flushTransactionStatement       { $stmt = st44; }
+    | st45=commitTransactionStatement      { $stmt = st45; }
     ;
 
 /*
@@ -624,6 +626,34 @@ readTransactionStatement returns [ReadTransactionStatement.Parsed statement]
         (K_FROM cf=columnFamilyName { cfName = cf; } )?
         (K_TOKEN t=tokenOrBound { token = t; } )?
         { $statement = new ReadTransactionStatement.Parsed(isLocal, isJson, transactionId, cfName, token, transactionStateJson); }
+    ;
+
+
+/**
+*   Flushes current changes (as is) from private memtables to real ones.
+*
+*/
+flushTransactionStatement returns [FlushTransactionStatement.Parsed statement]
+    @init {
+        Term.Raw transactionId = null;
+    }
+    :
+    K_FLUSH K_LOCALLY K_TRANSACTION tx=term { transactionId = tx; }
+    { $statement = new FlushTransactionStatement.Parsed(transactionId); }
+    ;
+
+
+/**
+*
+*   Tries to commit transaction
+*/
+commitTransactionStatement returns [CommitTransactionStatement.Parsed statement]
+    @init {
+        Term.Raw transactionStateJson = null;
+    }
+    :
+        K_COMMIT K_TRANSACTION (K_AS K_JSON tsj=term { transactionStateJson = tsj; })
+        { $statement = new CommitTransactionStatement.Parsed(transactionStateJson); }
     ;
 
 createAggregateStatement returns [CreateAggregateStatement expr]
@@ -1857,6 +1887,8 @@ K_JSON:        J S O N;
 K_TRANSACTIONAL:    T R A N S A C T I O N A L;
 K_TRANSACTION:      T R A N S A C T I O N;
 K_READ:             R E A D;
+K_FLUSH:            F L U S H;
+K_COMMIT:            C O M M I T;
 K_LOCALLY:          L O C A L L Y;
 
 // Case-insensitive alpha characters

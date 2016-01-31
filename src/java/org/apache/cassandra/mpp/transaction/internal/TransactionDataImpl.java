@@ -50,6 +50,8 @@ public class TransactionDataImpl implements TransactionData
     private final TransactionId txId;
     private final long creationNano = System.nanoTime();
 
+    private volatile boolean hasBeenApplied = false;
+
     // TODO [MPP] this will be changed to actual private memtables, or maybe not.
     private final Map<String, Map<DecoratedKey, Mutation>> ksToKeyToMutation = new HashMap<>();
 
@@ -71,6 +73,7 @@ public class TransactionDataImpl implements TransactionData
 
     public void addMutation(Mutation mutation)
     {
+        Preconditions.checkState(!hasBeenApplied, "Cannot add mutation to already applied transaction's data. There could be some race condition");
         final String ksName = mutation.getKeyspaceName();
 
         final Map<DecoratedKey, Mutation> keyToMutation = ksToKeyToMutation.get(ksName);
@@ -129,6 +132,23 @@ public class TransactionDataImpl implements TransactionData
         return keysToMutation.entrySet().stream()
                                  .filter(e -> modifiesColumnFamily(cfId, e))
                                  .map(v->v.getValue().getPartitionUpdate(cfId));
+    }
+
+    public void applyAllMutations(long applyTimestamp)
+    {
+        Preconditions.checkArgument(!hasBeenApplied, "Cannot apply same transaction data twice");
+        ksToKeyToMutation.entrySet().stream().map(Map.Entry::getValue).flatMap(m -> m.entrySet().stream().map(Map.Entry::getValue))
+                         .map(Mutation::copy) // copy, to refresh createdAt which is used to determine rpc timeout
+                         .map(m -> {
+                             // Update timestamps of all partition updates
+                             m.getPartitionUpdates().forEach(pu -> pu.updateAllTimestamp(applyTimestamp));
+                             return m;
+                         })
+                         .forEach(mutation -> mutation.apply());
+
+        // Mutations happen in different thread so this method returns before actually doing mutations.
+        // It is done same way for paxos and others therefore it should be enough and should not fail.
+        hasBeenApplied = true;
     }
 
     @Override

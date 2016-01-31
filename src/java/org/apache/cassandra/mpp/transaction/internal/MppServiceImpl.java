@@ -21,7 +21,6 @@ package org.apache.cassandra.mpp.transaction.internal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BiFunction;
@@ -96,15 +95,23 @@ public class MppServiceImpl implements MppService
         return new TransactionState(txId, Collections.emptyList());
     }
 
-    public void commitTransaction()
+    /**
+     * It should block until end of transaction, and then return.
+     *
+     * @param transactionState
+     * @param consistencyLevel
+     */
+    public void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel)
     {
+        logger.info("Commit transaction called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
+
         // TODO [MPP] Implement it
         throw new NotImplementedException();
     }
 
     public void rollbackTransaction(TransactionState transactionState)
     {
-        // TODO [MPP] Implement it
+        // TODO [MPP][MPP-23] Implement it
         throw new NotImplementedException();
     }
 
@@ -114,21 +121,9 @@ public class MppServiceImpl implements MppService
         privateMemtableStorage.removePrivateData(transactionState.id());
     }
 
-    public Map<TransactionItem, List<PartitionUpdate>> readTransactionDataLocalOnly(TransactionId transactionId)
-    {
-        // TODO [MPP] Implement it
-        throw new NotImplementedException();
-    }
-
-    public Map<TransactionItem, List<PartitionUpdate>> readAllTransactionData(TransactionState transactionState)
-    {
-        // TODO [MPP] Implement it
-        throw new NotImplementedException();
-    }
-
     public Collection<TransactionId> getInProgressTransactions()
     {
-        return null;
+        return privateMemtableStorage.getInProgressTransactions();
     }
 
     @Override
@@ -280,6 +275,21 @@ public class MppServiceImpl implements MppService
         processPartitionStream(consumer, Stream.of(partitionUpdate));
     }
 
+    public void flushTransactionLocally(TransactionId transactionId)
+    {
+        logger.info("flushTransactionLocally executes for transaction id {}", transactionId);
+
+        // Normally it should be timestamp that comes from Paxos Ballot during Paxos Commit phase.
+        final long timestampOfWrite = FBUtilities.timestampMicros();
+
+        Preconditions.checkState(privateMemtableStorage.transactionExistsInStorage(transactionId), "TransactionData not found for transaction id %s", transactionId);
+        final TransactionData transactionData = getTransactionData(transactionId);
+
+        transactionData.applyAllMutations(timestampOfWrite);
+
+        privateMemtableStorage.removePrivateData(transactionId);
+    }
+
     private PartitionUpdate readSingleTransactionItemAndMergePartitionUpdates(TransactionState transactionState, ConsistencyLevel consistency, TransactionItem transactionItem)
     {
         final List<PartitionUpdate> partitionUpdates = readTransactionDataService.readSingleTransactionItem(transactionState.id(), transactionItem, consistency).get(transactionItem);
@@ -287,7 +297,7 @@ public class MppServiceImpl implements MppService
         return PartitionUpdate.merge(partitionUpdates);
     }
 
-    private String getColumnFamilyName(TransactionalMutation transactionalMutation)
+    private static String getColumnFamilyName(TransactionalMutation transactionalMutation)
     {
         final Collection<UUID> columnFamilyIds = transactionalMutation.getColumnFamilyIds();
         Preconditions.checkArgument(columnFamilyIds.size() == 1, "TransactionalMutation should modify only single table");

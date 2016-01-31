@@ -50,4 +50,5 @@ public interface TransactionData extends ReadableTransactionData
 
     Stream<PartitionUpdate> partitionUpdatesStream(String ksName, UUID cfId);
 
+    void applyAllMutations(long applyTimestamp);
 }

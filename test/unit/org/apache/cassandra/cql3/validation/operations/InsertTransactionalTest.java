@@ -19,6 +19,8 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -140,6 +142,11 @@ public class InsertTransactionalTest extends CQLTester
         public void removePrivateData(TransactionId id)
         {
             throw new IllegalStateException("Not expected to be used");
+        }
+
+        public Collection<TransactionId> getInProgressTransactions()
+        {
+            return Collections.emptyList();
         }
     }
 

@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.util.UUID;
+
 /**
  * Marker for ID.
  *
@@ -26,4 +28,5 @@ package org.apache.cassandra.mpp.transaction;
  */
 public interface TransactionId extends Comparable<TransactionId>
 {
+    UUID unwrap();
 }

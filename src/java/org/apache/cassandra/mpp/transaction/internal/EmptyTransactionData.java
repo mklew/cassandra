@@ -75,6 +75,11 @@ public class EmptyTransactionData implements TransactionData
         return Stream.empty();
     }
 
+    public void applyAllMutations(long applyTimestamp)
+    {
+
+    }
+
     public Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
     {
         return Optional.empty();

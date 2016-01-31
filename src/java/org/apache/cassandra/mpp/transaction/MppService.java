@@ -53,8 +53,10 @@ public interface MppService
      * This has to start paxos rounds.
      *
      * TODO [MPP] Test it via my networking
+     * @param transactionState
+     * @param consistencyLevel
      */
-    void commitTransaction();
+    void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel);
 
     /**
      * This has to message all nodes that took part in transaction and tell them to get rid of private memtables
@@ -68,23 +70,6 @@ public interface MppService
      * @param transactionState may contain empty list of transaction items because it is only relevant to this node
      */
     void rollbackTransactionLocal(TransactionState transactionState);
-
-    /**
-     * Reads transaction data's just, but just on this node.
-     *
-     * @param transactionId
-     * @return
-     */
-    Map<TransactionItem, List<PartitionUpdate>> readTransactionDataLocalOnly(TransactionId transactionId);
-
-    /**
-     * Reads all data for that transaction, it forwards reads to other nodes in that transaction.
-     *
-     *
-     * @param transactionState
-     * @return
-     */
-    Map<TransactionItem, List<PartitionUpdate>> readAllTransactionData(TransactionState transactionState);
 
     Optional<PartitionUpdate> readSingleTransactionItem(TransactionState transactionState);
 
@@ -117,4 +102,6 @@ public interface MppService
     void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, ConsistencyLevel consistencyLevel, Consumer<PartitionIterator> consumer);
 
     void readQuorumByColumnFamilyAndToken(TransactionState transactionState, String ksName, String cfNameColumnFamily, Token token, ConsistencyLevel consistency, Consumer<PartitionIterator> consumer);
+
+    void flushTransactionLocally(TransactionId transactionId);
 }
