@@ -128,6 +128,28 @@ public class MppTest
                 return new Item(itemId, description, price);
             }).collect(Collectors.toList());
         }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            Item item = (Item) o;
+
+            if (description != null ? !description.equals(item.description) : item.description != null) return false;
+            if (!itemId.equals(item.itemId)) return false;
+            if (price != null ? !price.equals(item.price) : item.price != null) return false;
+
+            return true;
+        }
+
+        public int hashCode()
+        {
+            int result = itemId.hashCode();
+            result = 31 * result + (description != null ? description.hashCode() : 0);
+            result = 31 * result + (price != null ? price.hashCode() : 0);
+            return result;
+        }
     }
 
     @Test
@@ -168,6 +190,16 @@ public class MppTest
         Assert.assertEquals(priceless.description, item.description);
         Assert.assertEquals(priceless.price, item.price);
         Assert.assertNull(item.price);
+
+
+        final String readAllCfStmt = "READ TRANSACTIONAL TRANSACTION AS JSON '" + txStateJson + "' FROM mpptest.items ";
+
+        final ResultSet allCf = sessionN1.execute(readAllCfStmt);
+        final List<Item> allItems = Item.readItems(allCf);
+
+        Assert.assertEquals(1, allItems.stream().filter(i -> i.equals(itemWithDescriptionAndPrice)).count());
+        Assert.assertEquals(1, allItems.stream().filter(i -> i.equals(priceless)).count());
+        Assert.assertEquals(1, allItems.stream().filter(i -> i.equals(itemWithJustId)).count());
     }
 
     private String getJson(TransactionStateDto transactionStateDto)

@@ -114,7 +114,7 @@ public interface MppService
 
     void readAllByColumnFamilyAndToken(TransactionId transactionId, String ksName, String cfName, Token token, Consumer<PartitionIterator> cb);
 
-    void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, Consumer<PartitionIterator> consumer);
+    void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, ConsistencyLevel consistencyLevel, Consumer<PartitionIterator> consumer);
 
     void readQuorumByColumnFamilyAndToken(TransactionState transactionState, String ksName, String cfNameColumnFamily, Token token, ConsistencyLevel consistency, Consumer<PartitionIterator> consumer);
 }

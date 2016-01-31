@@ -180,11 +180,12 @@ public class ReadTransactionStatement implements CQLStatement
             }
 
             if(isReadingWholeColumnFamily()) {
+                System.out.println("isReadingWholeColumnFamily using quorum");
                 MppServicesLocator
                 .getInstance()
                 .readQuorumByColumnFamily(transactionState,
                                           cfName.getKeyspace(),
-                                          cfName.getColumnFamily(),
+                                          cfName.getColumnFamily(), options.getConsistency(),
                                           cb);
 
                 return message[0];

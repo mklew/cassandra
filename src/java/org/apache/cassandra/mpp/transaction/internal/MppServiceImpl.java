@@ -249,10 +249,17 @@ public class MppServiceImpl implements MppService
         processPartitions(transactionId, ksName, cfName, consumer, (cfId, transactionData) -> transactionData.readData(ksName, cfId, token).map(Stream::of).orElse(Stream.empty()));
     }
 
-    public void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfNameColumnFamily, Consumer<PartitionIterator> consumer)
+    public void readQuorumByColumnFamily(TransactionState transactionState, String ksName, String cfName, ConsistencyLevel consistencyLevel, Consumer<PartitionIterator> consumer)
     {
-        // TODO [MPP] Implement it
-        throw new RuntimeException("readQuorumByColumnFamily Not implemented yet ");
+        logger.info("Execute readQuorumByColumnFamily transactionState: {} keyspaceName: {} columnFamilyName: {}", transactionState, ksName, cfName);
+
+        final Stream<PartitionUpdate> partitionUpdateStream = transactionState.getTransactionItems().stream()
+                                                                              .filter(ti -> ti.getKsName().equals(ksName) && ti.getCfName().equals(cfName))
+                                                                              .map(ti -> {
+                                                                                  final PartitionUpdate partitionUpdate = readSingleTransactionItemAndMergeItUsingQuorumSemantics(transactionState, consistencyLevel, ti);
+                                                                                  return partitionUpdate;
+                                                                              });
+        processPartitionStream(consumer, partitionUpdateStream);
     }
 
     public void readQuorumByColumnFamilyAndToken(TransactionState transactionState, String ksName, String cfName, Token token, ConsistencyLevel consistency, Consumer<PartitionIterator> consumer)
@@ -268,15 +275,21 @@ public class MppServiceImpl implements MppService
 
         final TransactionItem transactionItem = txItemOpt.get();
 
+        final PartitionUpdate partitionUpdate = readSingleTransactionItemAndMergeItUsingQuorumSemantics(transactionState, consistency, transactionItem);
+
+        processPartitionStream(consumer, Stream.of(partitionUpdate));
+    }
+
+    private PartitionUpdate readSingleTransactionItemAndMergeItUsingQuorumSemantics(TransactionState transactionState, ConsistencyLevel consistency, TransactionItem transactionItem)
+    {
+        final List<PartitionUpdate> partitionUpdates = readTransactionDataService.readSingleTransactionItem(transactionState.id(), transactionItem, consistency).get(transactionItem);
+
         // TODO [MPP] Filter rows within partition update if row does not exist among quorum of partition updates
         // These is at least quorum of partition updates. For now I'll just merge them and return PartitionIterator, but additional logic is needed
         // Concrerely if there were updates to same partition which failed, then one Partition might have incorrect row (or rows).
         // Therefore only rows that exist in at least quorum of partition updates should be considered as valid. Rest should be ignored
-        final List<PartitionUpdate> partitionUpdates = readTransactionDataService.readSingleTransactionItem(transactionState.id(), transactionItem, consistency).get(transactionItem);
 
-        final PartitionUpdate partitionUpdate = PartitionUpdate.merge(partitionUpdates);
-
-        processPartitionStream(consumer, Stream.of(partitionUpdate));
+        return PartitionUpdate.merge(partitionUpdates);
     }
 
     private String getColumnFamilyName(TransactionalMutation transactionalMutation)
