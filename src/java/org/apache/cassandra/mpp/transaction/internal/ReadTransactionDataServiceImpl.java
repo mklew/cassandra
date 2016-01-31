@@ -73,14 +73,6 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
 
     private static final Logger logger = LoggerFactory.getLogger(ReadTransactionDataServiceImpl.class);
 
-
-    // TODO LATER ON, what rows to pick
-    // PartitionUpdate has rows
-    // rows have same token in TransactionItem
-    // I need to consider only rows that exist in quorum
-    // This can be done using clustering keys of rows.
-    // Therefore for each transaction item
-    //
     @Override
     public Map<TransactionItem, List<PartitionUpdate>> readRelevantForThisNode(TransactionState transactionState, ConsistencyLevel consistencyLevel)
     {

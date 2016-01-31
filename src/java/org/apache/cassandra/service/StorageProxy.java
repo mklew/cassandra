@@ -622,7 +622,6 @@ public class StorageProxy implements StorageProxyMBean
     public static ResultMessage mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
-        // TODO [MPP] Look at this logic and sd
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 

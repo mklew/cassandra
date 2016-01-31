@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -177,6 +179,29 @@ public class TransationDataImplTest
         Assert.assertEquals("Should have two rows for same partitioning key", 2, partitionUpdateWithPu3.rowCount());
 
         Assert.assertEquals("k3v22", UTF8Type.instance.compose(partitionUpdateWithPu3.getRow(getClustering(ck3)).getCell(getColumnDef(cf1MetaData, "c2")).value()));
+    }
+
+    /**
+     * https://cassandra-transactions.myjetbrains.com/youtrack/issue/MPP-15
+     */
+    @Test
+    public void shouldMergePartitionUpdatesPayingAttentionToQuorumSemantics() {
+        CFMetaData cf1MetaData = makeCfMetaData("ks1", "cf1");
+        String partitionKey = "partition1";
+
+        PartitionUpdate partitionUpdateNode1 = makeCf(cf1MetaData, partitionKey, "ck1", "k1v1", null);
+        PartitionUpdate partitionUpdateNode2 = makeCf(cf1MetaData, partitionKey, "ck1", "k1v1", null);
+        PartitionUpdate partitionUpdateNode3 = makeCf(cf1MetaData, partitionKey, "ck1", "k1v2", null); // c2 has different value
+        PartitionUpdate partitionUpdateNode3ExtraThatFailed = makeCf(cf1MetaData, partitionKey, "ck2", "k2v2", null);
+
+        final PartitionUpdate partitionUpdateWithFailedUpdate = PartitionUpdate.merge(Arrays.asList(partitionUpdateNode3, partitionUpdateNode3ExtraThatFailed));
+
+        List<PartitionUpdate> quorumOfResponses = Arrays.asList(partitionUpdateNode1, partitionUpdateNode2, partitionUpdateWithFailedUpdate);
+
+        final PartitionUpdate mergedUsingQuorum = PartitionUpdate.merge(quorumOfResponses);
+
+        Assert.assertEquals("k1v2", UTF8Type.instance.compose(mergedUsingQuorum.getRow(getClustering("ck1")).getCell(getColumnDef(cf1MetaData, "c1")).value()));
+        Assert.assertEquals(2, mergedUsingQuorum.rowCount());
     }
 
     public static ColumnDefinition getColumnDef(CFMetaData cf1MetaData, String c)

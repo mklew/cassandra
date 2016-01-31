@@ -256,7 +256,7 @@ public class MppServiceImpl implements MppService
         final Stream<PartitionUpdate> partitionUpdateStream = transactionState.getTransactionItems().stream()
                                                                               .filter(ti -> ti.getKsName().equals(ksName) && ti.getCfName().equals(cfName))
                                                                               .map(ti -> {
-                                                                                  final PartitionUpdate partitionUpdate = readSingleTransactionItemAndMergeItUsingQuorumSemantics(transactionState, consistencyLevel, ti);
+                                                                                  final PartitionUpdate partitionUpdate = readSingleTransactionItemAndMergePartitionUpdates(transactionState, consistencyLevel, ti);
                                                                                   return partitionUpdate;
                                                                               });
         processPartitionStream(consumer, partitionUpdateStream);
@@ -275,19 +275,14 @@ public class MppServiceImpl implements MppService
 
         final TransactionItem transactionItem = txItemOpt.get();
 
-        final PartitionUpdate partitionUpdate = readSingleTransactionItemAndMergeItUsingQuorumSemantics(transactionState, consistency, transactionItem);
+        final PartitionUpdate partitionUpdate = readSingleTransactionItemAndMergePartitionUpdates(transactionState, consistency, transactionItem);
 
         processPartitionStream(consumer, Stream.of(partitionUpdate));
     }
 
-    private PartitionUpdate readSingleTransactionItemAndMergeItUsingQuorumSemantics(TransactionState transactionState, ConsistencyLevel consistency, TransactionItem transactionItem)
+    private PartitionUpdate readSingleTransactionItemAndMergePartitionUpdates(TransactionState transactionState, ConsistencyLevel consistency, TransactionItem transactionItem)
     {
         final List<PartitionUpdate> partitionUpdates = readTransactionDataService.readSingleTransactionItem(transactionState.id(), transactionItem, consistency).get(transactionItem);
-
-        // TODO [MPP] Filter rows within partition update if row does not exist among quorum of partition updates
-        // These is at least quorum of partition updates. For now I'll just merge them and return PartitionIterator, but additional logic is needed
-        // Concrerely if there were updates to same partition which failed, then one Partition might have incorrect row (or rows).
-        // Therefore only rows that exist in at least quorum of partition updates should be considered as valid. Rest should be ignored
 
         return PartitionUpdate.merge(partitionUpdates);
     }
