@@ -27,7 +27,7 @@ import org.apache.cassandra.dht.Token;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 26/11/15
  */
-public class TransactionItem implements Serializable
+public class TransactionItem implements Serializable, Comparable<TransactionItem>
 {
     /**
      * Probably {@link org.apache.cassandra.dht.Murmur3Partitioner.LongToken}
@@ -100,5 +100,20 @@ public class TransactionItem implements Serializable
                ", ksName='" + ksName + '\'' +
                ", cfName='" + cfName + '\'' +
                '}';
+    }
+
+    public int compareTo(TransactionItem o)
+    {
+        final int ksCompare = ksName.compareTo(o.ksName);
+        if(ksCompare != 0) {
+            return ksCompare;
+        }
+
+        final int cfCompare = cfName.compareTo(o.cfName);
+        if(cfCompare != 0) {
+            return cfCompare;
+        }
+
+        return token.compareTo(o.token);
     }
 }

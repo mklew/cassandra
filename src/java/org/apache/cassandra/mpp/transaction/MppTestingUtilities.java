@@ -26,6 +26,7 @@ import java.util.stream.Stream;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
@@ -75,10 +76,22 @@ public class MppTestingUtilities
         }
     };
 
-
     public static TransactionState mapResultToTransactionState(ResultSet resultSet)
     {
         final Stream<Row> stream = MppServiceUtils.streamResultSet(resultSet);
         return stream.map(TYPED_ROW_TO_TRANSACTION_STATE).reduce(TransactionState::merge).get();
+    }
+
+    public static TransactionItem newTransactionItem(String ksName, String cfName, long token) {
+        return new TransactionItem(new Murmur3Partitioner.LongToken(token), ksName, cfName);
+    }
+
+    public static TransactionState newTransactionState(TransactionItem ... items) {
+        final TransactionState transactionState = TransactionStateUtils.newTransactionState();
+        for (TransactionItem item : items)
+        {
+            transactionState.addTxItem(item);
+        }
+        return transactionState;
     }
 }

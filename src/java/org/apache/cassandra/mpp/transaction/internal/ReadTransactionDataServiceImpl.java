@@ -377,6 +377,8 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
         return filterStreamItemsWhichBelongToThisNode(itemsWithAddresses);
     }
 
+    public static Function<TransactionState, Stream<TransactionItem>> TRANSACTION_ITEMS_OWNED_BY_THIS_NODE = transactionState -> identifyTransactionItemsOwnedByThisNode(transactionState).map(TransactionItemWithAddresses::getTxItem);
+
     private static CompletableFuture<Collection<MppResponseMessage>> collectionOfFuturesToFutureOfCollection(List<CompletableFuture<Collection<MppResponseMessage>>> futures)
     {
         CompletableFuture<Collection<MppResponseMessage>> allZeroArg = new CompletableFuture<>();
