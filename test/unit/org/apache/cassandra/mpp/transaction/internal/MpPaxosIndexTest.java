@@ -18,10 +18,15 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import junit.framework.Assert;
@@ -81,7 +86,172 @@ public class MpPaxosIndexTest
         });
     }
 
+    /**
+     * Each transaction that registers is participant of at most 1 paxos.
+     * Participant might have other tx registered on its "rollback me list"
+     */
     @Test
+    public void transactionShouldStartPaxosRoundIfThereAreNoOtherTransactions() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+
+        mpPaxosIndex.acquireIndex(tx1, (index, items) -> {
+            final MpPaxosIndex.MppIndexResultActions result = index.addItToIndex(tx1, items);
+            Assert.assertTrue("Should proceed because there are no conflicts to be checked", result.canProceed());
+        });
+
+        final MpPaxosIndex.MpPaxosParticipant participant = mpPaxosIndex.getIndexUnsafe().get(ti1).getParticipantsUnsafe().iterator().next();
+        final MpPaxosIndex.MpPaxosParticipant participantForTi2 = mpPaxosIndex.getIndexUnsafe().get(ti2).getParticipantsUnsafe().iterator().next();
+        final MpPaxosIndex.MpPaxosParticipant participantForTi3 = mpPaxosIndex.getIndexUnsafe().get(ti3).getParticipantsUnsafe().iterator().next();
+
+        Assert.assertSame(participant, participantForTi2);
+        Assert.assertSame(participant, participantForTi3);
+
+        Assert.assertTrue(participant.isParticipatingInPaxosRound());
+        Assert.assertEquals(tx1, participant.getTransactionState());
+    }
+
+    /**
+     * Tx1: 1,2,3
+     * Tx2: 2,4
+     *
+     * Tx2 joins and it sees Tx1 so it should check for conflict with it.
+     */
+    @Test
+    public void shouldCheckForConflictWhenItTriesToJoin() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+
+        Assert.assertTrue(mpPaxosIndex.acquireIndexAndAdd(tx1).canProceed());
+
+        final MpPaxosIndex.MppIndexResultActions tx2Results = mpPaxosIndex.acquireIndexAndAdd(tx2);
+
+        Assert.assertFalse(tx2Results.canProceed());
+        Assert.assertTrue(tx2Results.hasToCheckForConflicts());
+
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().get(ti1).getParticipantsUnsafe().size());
+        Assert.assertEquals(2, mpPaxosIndex.getIndexUnsafe().get(ti2).getParticipantsUnsafe().size());
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().get(ti3).getParticipantsUnsafe().size());
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().get(ti4).getParticipantsUnsafe().size());
+
+        assertParticipantsInOrder(ti2, tx1, tx2);
+
+        final MpPaxosIndex.MpPaxosParticipant participant = findParticipantForStateAndItem(tx2, ti2);
+
+        Assert.assertFalse(participant.isParticipatingInPaxosRound());
+
+        assertHasToCheckConflictWith(tx2Results, tx1, ti2);
+    }
+
+    public void assertParticipantsInOrder(TransactionItem ti, TransactionState ... txs) {
+        final MpPaxosIndex.MppPaxosRoundPointers mppPaxosRoundPointers = mpPaxosIndex.getIndexUnsafe().get(ti);
+        final LinkedHashSet<MpPaxosIndex.MpPaxosParticipant> participantsUnsafe = (LinkedHashSet<MpPaxosIndex.MpPaxosParticipant>) mppPaxosRoundPointers.getParticipantsUnsafe();
+        final Iterator<MpPaxosIndex.MpPaxosParticipant> iterator = participantsUnsafe.iterator();
+        for (TransactionState tx : txs)
+        {
+            final MpPaxosIndex.MpPaxosParticipant next = iterator.next();
+            Assert.assertEquals(tx, next.getTransactionState());
+        }
+        Assert.assertFalse(iterator.hasNext());
+    }
+
+    @Test
+    public void shouldCreateNewPaxosRoundIfResolutionSaysThereAreNoConflicts() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+
+        mpPaxosIndex.acquireIndexAndAdd(tx1);
+        final MpPaxosIndex.MppIndexResultActions results = mpPaxosIndex.acquireIndexAndAdd(tx2);
+        final Map<TransactionItem, List<TransactionState>> conflictsToBeChecked = results.getConflictsToBeChecked();
+        assertHasToCheckConflictWith(results, tx1, ti2);
+        // for each transaction state, try to resolve conflict. In the meantime index state can change in any way.
+        MpPaxosIndex.MppIndexResultActions results2 = mpPaxosIndex.acquireAndMarkTxAndNonConflicting(tx2, ti2, tx1);
+
+        Assert.assertTrue(results2.canProceed());
+        Assert.assertFalse(results2.hasToCheckForConflicts());
+        final MpPaxosIndex.MpPaxosParticipant participant = findParticipantForStateAndItem(tx2, ti2);
+
+        Assert.assertEquals(0, participant.getParticipantsToRollback().size());
+
+        assertHasNonConflicting(participant, tx1);
+    }
+
+
+    private void assertHasNonConflicting(MpPaxosIndex.MpPaxosParticipant participant, TransactionState tx1)
+    {
+        Assert.assertTrue(participant.getNonConflictingUnsafe().contains(tx1.getTransactionId()));
+    }
+
+    private static void assertHasToCheckConflictWith(MpPaxosIndex.MppIndexResultActions results, TransactionState conflicting, TransactionItem onItem)
+    {
+        final List<TransactionState> transactionStates = results.getConflictsToBeChecked().get(onItem);
+        Assert.assertTrue(transactionStates.contains(conflicting));
+    }
+
+    private MpPaxosIndex.MpPaxosParticipant findParticipantForStateAndItem(TransactionState tx, TransactionItem ti)
+    {
+        return mpPaxosIndex.getIndexUnsafe().get(ti).getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst().get();
+    }
+
+    /**
+     * Tx1: 1,2,3
+     * Tx2: 2,4
+     *
+     * Tx2 joins so it should have same paxos round id as Tx1
+     */
+    @Test
+    public void shouldInheritPaxosIdIfItJoinsRound() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        mpPaxosIndex.acquireIndexAndAdd(tx1);
+        mpPaxosIndex.acquireIndexAndAdd(tx2);
+
+        final MpPaxosIndex.MppIndexResultActions results = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx2, ti2, tx1);
+
+        Assert.assertTrue(results.canProceed());
+
+        final MpPaxosIndex.MpPaxosParticipant p2 = findParticipantForStateAndItem(tx2, ti2);
+        final MpPaxosIndex.MpPaxosParticipant p1 = findParticipantForStateAndItem(tx1, ti2);
+        Assert.assertEquals(p1.getPaxosId(), p2.getPaxosId());
+        assertHasParticipantToRollback(p1, p2);
+        assertHasParticipantToRollback(p2, p1);
+    }
+
+    private void assertHasParticipantToRollback(MpPaxosIndex.MpPaxosParticipant p1, MpPaxosIndex.MpPaxosParticipant p2)
+    {
+        Assert.assertTrue(p1.getParticipantsToRollback().contains(p2));
+    }
+
+    /**
+     * Tx1: 1,2,3
+     * Tx2: 2,4
+     * Tx4: 4
+     *
+     * order of registration: Tx1, Tx2, Tx4
+     * order of conflict checking: Tx4, Tx2
+     */
+    @Test
+    public void cannotJoinRoundIfThereAreMoreThan1() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        final TransactionState tx4 = newTransactionState(ti4);
+
+        final MpPaxosIndex.MppIndexResultActions r1 = mpPaxosIndex.acquireIndexAndAdd(tx1);
+        final MpPaxosIndex.MppIndexResultActions r2 = mpPaxosIndex.acquireIndexAndAdd(tx2);
+        final MpPaxosIndex.MppIndexResultActions r4 = mpPaxosIndex.acquireIndexAndAdd(tx4);
+        assertHasToCheckConflictWith(r4, tx2, ti4);
+        assertHasToCheckConflictWith(r2, tx1, ti2);
+
+        final MpPaxosIndex.MppIndexResultActions r4after = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx4, ti4, tx2);
+        Assert.assertTrue(r4after.canProceed());
+
+        final MpPaxosIndex.MppIndexResultActions r2AfterConflict = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx2, ti2, tx1);
+
+        // Tx2 cannot proceed
+        Assert.assertFalse(r2AfterConflict.canProceed());
+    }
+
+    @Test
+    @Ignore
     public void testShouldHoldInvariants()
     {
         final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
@@ -101,23 +271,23 @@ public class MpPaxosIndexTest
 
             Assert.assertFalse("There cannot be paxos instance for tx4 yet because it needs to be checked against conflict with tx2", result.hasSingleLogicalPaxosInstanceAtThisNode());
 
-            Assert.assertEquals(1, result.getResults().size());
-            result.getResults().forEach((ti, tiResult) -> {
-                // Assert result
-                Assert.assertEquals(MpPaxosIndex.IndexResultType.ADDED_TO_CHECK_FOR_CONFLICTS, tiResult.getResultType());
-
-                Assert.assertEquals(1, tiResult.getTransactionsToCheckForConflict().size());
-                Assert.assertTrue("Have to check for conflict with transaction tx2", tiResult.getTransactionsToCheckForConflict().contains(tx2));
-            });
+//            Assert.assertEquals(1, result.getResults().size());
+//            result.getResults().forEach((ti, tiResult) -> {
+//                Assert result
+//                Assert.assertEquals(MpPaxosIndex.IndexResultType.ADDED_TO_CHECK_FOR_CONFLICTS, tiResult.getResultType());
+//
+//                Assert.assertEquals(1, tiResult.getTransactionsToCheckForConflict().size());
+//                Assert.assertTrue("Have to check for conflict with transaction tx2", tiResult.getTransactionsToCheckForConflict().contains(tx2));
+//            });
 
 
             // Assert index internal state
             final MpPaxosIndex.MppPaxosRoundPointers pointers = index.getIndexUnsafe().get(ti4);
-            Assert.assertEquals(1, pointers.roundsSize());
-            final MpPaxosIndex.MpPaxosRoundPointer roundPointer = findPointerByInitiator(tx2, pointers);
+//            Assert.assertEquals(1, pointers.roundsSize());
+//            final MpPaxosIndex.MpPaxosRoundPointer roundPointer = findPointerByInitiator(tx2, pointers);
 
-            Assert.assertEquals("Has only tx4 in awaiting", 1, roundPointer.getCandidatesToBeCheckedForConflicts().size());
-            Assert.assertTrue("Has tx4 in awaiting", roundPointer.getCandidatesToBeCheckedForConflicts().contains(tx4));
+//            Assert.assertEquals("Has only tx4 in awaiting", 1, roundPointer.getCandidatesToBeCheckedForConflicts().size());
+//            Assert.assertTrue("Has tx4 in awaiting", roundPointer.getCandidatesToBeCheckedForConflicts().contains(tx4));
         });
 
         mpPaxosIndex.acquireIndex(tx1, (index, items) -> {
@@ -131,8 +301,8 @@ public class MpPaxosIndexTest
         });
     }
 
-    private MpPaxosIndex.MpPaxosRoundPointer findPointerByInitiator(TransactionState initiator, MpPaxosIndex.MppPaxosRoundPointers pointers)
-    {
-        return pointers.getPaxosRounds().stream().filter(piRound -> piRound.getRoundInitiatorId().equals(initiator.id())).findFirst().get();
-    }
+//    private MpPaxosIndex.MpPaxosRoundPointer findPointerByInitiator(TransactionState initiator, MpPaxosIndex.MppPaxosRoundPointers pointers)
+//    {
+//        return pointers.getPaxosRounds().stream().filter(piRound -> piRound.getRoundInitiatorId().equals(initiator.id())).findFirst().get();
+//    }
 }
