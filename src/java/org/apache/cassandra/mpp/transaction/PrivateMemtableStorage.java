@@ -35,7 +35,7 @@ import org.apache.cassandra.mpp.transaction.client.TransactionItem;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 01/11/15
  */
-public interface PrivateMemtableStorage
+public interface PrivateMemtableStorage extends DeleteTransactionsDataService
 {
     /**
      * Stores mutation in PrivateMemtable for this transaction in its TransactionData

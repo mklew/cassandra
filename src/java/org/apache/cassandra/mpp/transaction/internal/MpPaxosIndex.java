@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.Lock;
 import java.util.function.BiConsumer;
+import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -40,11 +41,15 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Striped;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl.TRANSACTION_ITEMS_OWNED_BY_THIS_NODE;
@@ -58,7 +63,21 @@ public class MpPaxosIndex
 
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
 
+    private static final Logger logger = LoggerFactory.getLogger(MpPaxosIndex.class);
+
     private Map<TransactionItem, MppPaxosRoundPointers> index = new HashMap<>();
+
+    private DeleteTransactionsDataService deleteTransactionsDataService;
+
+    public DeleteTransactionsDataService getDeleteTransactionsDataService()
+    {
+        return deleteTransactionsDataService;
+    }
+
+    public void setDeleteTransactionsDataService(DeleteTransactionsDataService deleteTransactionsDataService)
+    {
+        this.deleteTransactionsDataService = deleteTransactionsDataService;
+    }
 
     public Map<TransactionItem, MppPaxosRoundPointers> getIndexUnsafe()
     {
@@ -97,7 +116,7 @@ public class MpPaxosIndex
 
 //            final Map<TransactionItem, MppIndexForItemResult> resultForItem = gotIndex.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toMap(Function.identity(), ti -> sameResultForAll));
 
-            return createIndexResult(paxosId);
+            return createIndexResult(paxosId, paxosParticipant);
         }
         else
         {
@@ -212,7 +231,7 @@ public class MpPaxosIndex
         final Collection<MpPaxosParticipant> conflictingParticipants = paxosParticipant.getParticipantsToRollback();
 
         final Stream<MpPaxosParticipant> allParticipantsForAllItems = indexForItems.entrySet().stream().map(Map.Entry::getValue).filter(Optional::isPresent).map(Optional::get).flatMap(p -> p.getParticipantsUnsafe().stream());
-        final Set<UUID> paxosRoundsFromConflictingTransactions = allParticipantsForAllItems.filter(conflictingParticipants::contains).map(p -> p.paxosId).filter(Optional::isPresent).map(Optional::get).collect(Collectors.toSet());
+        final Set<UUID> paxosRoundsFromConflictingTransactions = allParticipantsForAllItems.filter(conflictingParticipants::contains).filter(MpPaxosParticipant::isParticipatingInPaxosRound).map(p -> p.paxosId).filter(Optional::isPresent).map(Optional::get).collect(Collectors.toSet());
 
 
         // these are guys with whom it still has to resolve conflict.
@@ -225,7 +244,7 @@ public class MpPaxosIndex
             // TODO start new round or proceed in current? something has happened that all the other transactions were removed
             final UUID paxosId = inititatePaxosState();
             paxosParticipant.joinRound(paxosId);
-            return new MppIndexResultActions(Sets.newHashSet(paxosId), needToResolveConflictWithThese);
+            return new MppIndexResultActions(Sets.newHashSet(paxosId), needToResolveConflictWithThese, paxosParticipant);
         }
         else if(paxosRoundsFromConflictingTransactions.size() == 1 && txToCheckForConflictWith.isEmpty()) {
             // All conflicts were resolved and there is only single paxos round -> This is expected use case
@@ -244,7 +263,7 @@ public class MpPaxosIndex
             // TODO log it
         }
 
-        return new MppIndexResultActions(paxosRoundsFromConflictingTransactions, needToResolveConflictWithThese);
+        return new MppIndexResultActions(paxosRoundsFromConflictingTransactions, needToResolveConflictWithThese, paxosParticipant);
     }
 
     private Map<TransactionItem, List<MpPaxosParticipant>> filterParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate)
@@ -252,7 +271,7 @@ public class MpPaxosIndex
         return filterAndMapParticipants(participantsMap, predicate, Function.identity());
     }
 
-    private <T> Map<TransactionItem, List<T>> filterAndMapParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate, Function<MpPaxosParticipant, T> mapper)
+    private static <T> Map<TransactionItem, List<T>> filterAndMapParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate, Function<MpPaxosParticipant, T> mapper)
     {
         return participantsMap
                .entrySet()
@@ -272,7 +291,9 @@ public class MpPaxosIndex
     {
         final MppIndexResultActions[] result = new MppIndexResultActions[1];
         acquireIndex(transactionStateToAcquire, (index, items) -> {
-            result[0] = resolveConflict(transactionStateToAcquire, resolvedItem, nonConflictingTx, false);
+            Pair<Optional<RemoveParticipantsFromIndex>, MppIndexResultActions> optionalMppIndexResultActionsPair = resolveConflict(transactionStateToAcquire, resolvedItem, nonConflictingTx, false);
+            Preconditions.checkState(!optionalMppIndexResultActionsPair.left.isPresent());
+            result[0] = optionalMppIndexResultActionsPair.right;
         });
         return result[0];
     }
@@ -280,13 +301,195 @@ public class MpPaxosIndex
     public MppIndexResultActions acquireAndMarkTxAsConflicting(TransactionState thisTransactionState, TransactionItem item, TransactionState conflictingTx)
     {
         final MppIndexResultActions[] result = new MppIndexResultActions[1];
+        final Optional<RemoveParticipantsFromIndex>[] rollbackAction = new Optional[1];
         acquireIndex(thisTransactionState, (index, items) -> {
-            result[0] = resolveConflict(thisTransactionState, item, conflictingTx, true);
+            Pair<Optional<RemoveParticipantsFromIndex>, MppIndexResultActions> pair = resolveConflict(thisTransactionState, item, conflictingTx, true);
+            result[0] = pair.right;
+            rollbackAction[0] = pair.left;
+        });
+        doRemoveParticipantsFromIndex(rollbackAction[0]);
+        return result[0];
+    }
+
+    // TODO [MPP] this timestamp is not yet used, but I have feeling that it is needed.
+    public void acquireAndMarkAsCommitted(TransactionState transactionState, long timestampOfCommit)
+    {
+        final Optional<RemoveParticipantsFromIndex>[] result = new Optional[1];
+        // acquire
+        acquireIndex(transactionState, (index, items) -> {
+            result[0] = markAsCommitted(transactionState, items, timestampOfCommit);
+        });
+        // released
+        Optional<RemoveParticipantsFromIndex> removeParticipantsFromIndexOpt = result[0];
+        doRemoveParticipantsFromIndex(removeParticipantsFromIndexOpt);
+    }
+
+    public MppIndexResultActions acquireAndReCheck(TransactionState transactionState)
+    {
+        final MppIndexResultActions[] result = new MppIndexResultActions[1];
+        acquireIndex(transactionState, (index, items) -> {
+            result[0] = reCheckTransaction(transactionState, items);
         });
         return result[0];
     }
 
-    private MppIndexResultActions resolveConflict(TransactionState thisTransactionState, TransactionItem itemOfConflict, TransactionState checkedTx, boolean isConflict)
+    private MppIndexResultActions reCheckTransaction(TransactionState transactionState, List<TransactionItem> items)
+    {
+        Optional<MpPaxosParticipant> participant = findParticipant(items.iterator().next(), transactionState);
+        if(!participant.isPresent()) {
+            return CheckForRollbackResult.result;
+        }
+        else
+        {
+            return reCheckTransactionParticipant(participant.get());
+        }
+    }
+
+    private void doRemoveParticipantsFromIndex(Optional<RemoveParticipantsFromIndex> removeParticipantsFromIndexOpt)
+    {
+        removeParticipantsFromIndexOpt.ifPresent(removeParticipants -> {
+            List<TransactionItem> itemsToAcquire = removeParticipants.getSortedItemsToAcquire();
+
+            // optionally acquire again, all that are going to be modified
+            acquireIndexForItems(null, (index, items) -> {
+                // items are the same as itemsToAcquire
+                removeParticipants.getParticipants().forEach(this::removeParticipantFromIndex);
+            }, itemsToAcquire);
+        });
+    }
+
+    private static class RemoveParticipantsFromIndex {
+        Stream<MpPaxosParticipant> participants;
+
+        Stream<TransactionItem> items;
+
+        public RemoveParticipantsFromIndex(Stream<MpPaxosParticipant> participants, Stream<TransactionItem> items)
+        {
+            this.participants = participants;
+            this.items = items;
+        }
+
+        public static RemoveParticipantsFromIndex reduce(RemoveParticipantsFromIndex first, RemoveParticipantsFromIndex second) {
+            return new RemoveParticipantsFromIndex(Stream.concat(first.participants, second.participants), Stream.concat(first.items, second.items));
+        }
+
+        public Collection<MpPaxosParticipant> getParticipants()
+        {
+            return participants.collect(Collectors.toList());
+        }
+
+        public List<TransactionItem> getSortedItemsToAcquire()
+        {
+            return items.sorted().distinct().collect(Collectors.toList());
+        }
+
+        public static BinaryOperator<RemoveParticipantsFromIndex> reducer = (r1, r2) -> reduce(r1,r2);
+    }
+
+    /**
+     *
+     * @param transactionState
+     * @param items
+     * @param timestampOfCommit
+     * @return
+     */
+    private Optional<RemoveParticipantsFromIndex> markAsCommitted(TransactionState transactionState, List<TransactionItem> items, long timestampOfCommit)
+    {
+        final Optional<MpPaxosParticipant> participant = findParticipant(items.iterator().next(), transactionState);
+
+        // Add to all participants, that are not participating in paxos round that this TX has committed.
+        tellNonParticipatingThatThisTransactionHasCommitted(transactionState, items, timestampOfCommit);
+
+        if(!participant.isPresent()) {
+            // This in principle should not happen, unless this node receives commit after it was down.
+            // Then other transactions will rollback anyway, because rollback will be noticed on other nodes.
+            logger.warn("markAsCommited could not find participant for committed transaction: {}", transactionState);
+            return Optional.empty();
+        }
+        else {
+            final MpPaxosParticipant paxosParticipant = participant.get();
+            Stream<MpPaxosParticipant> participantsToRollbackStream = paxosParticipant.getParticipantsToRollback().stream();
+            final Optional<RemoveParticipantsFromIndex> participantsToRemove = rollbackParticipantsDueToTx(transactionState, participantsToRollbackStream);
+            return participantsToRemove;
+        }
+
+    }
+
+    /**
+     * Other transactions maybe are currently resolving conflicts and if they did they would participate in same round as just commited transaction.
+     * If that is the case, then next time they do something, they will notice that they should rollback themselfs.
+     *
+     */
+    private void tellNonParticipatingThatThisTransactionHasCommitted(TransactionState transactionState, List<TransactionItem> items, long timestampOfCommit)
+    {
+        getIndexForItems(items).entrySet().stream().forEach(entry -> {
+            entry.getValue().ifPresent(pointers -> {
+                pointers.getParticipantsUnsafe().stream().filter(par -> !transactionState.equals(par.getTransactionState()))
+                .filter(par -> !par.isParticipatingInPaxosRound())
+                .forEach(par -> {
+                    par.transactionHasCommitted(transactionState.getTransactionId(), timestampOfCommit);
+                });
+            });
+        });
+    }
+
+    private Optional<RemoveParticipantsFromIndex> rollbackParticipantsDueToTx(TransactionState transactionStateThatCausedRollbackOf, Stream<MpPaxosParticipant> participantsToRollback) {
+        return rollbackParticipantsDueToTx(transactionStateThatCausedRollbackOf, participantsToRollback, false);
+    }
+
+    private Optional<RemoveParticipantsFromIndex> rollbackParticipantsDueToTx(TransactionState transactionStateThatCausedRollbackOf, Stream<MpPaxosParticipant> participantsToRollback, boolean allLocksForParticipantsToRollbackWereAcquired)
+    {
+        return participantsToRollback.map(par -> {
+                    par.markThatItHasToRollback();
+                    getDeleteTransactionsDataService().deleteAllPrivateTransactionData(par.getTransactionState().id());
+                    par.markItWasRolledBack();
+
+                    final TransactionState txStateOfRolledback = par.getTransactionState();
+                    if (transactionStateThatCausedRollbackOf.hasExactlySameItems(txStateOfRolledback) || allLocksForParticipantsToRollbackWereAcquired)
+                    {
+                        // then all locks are acquired, and it it can be removed from index
+                        removeParticipantFromIndex(par);
+
+                        // after remopval, participants that were blocked by articipant "par" could retry and maybe have green light to begin execution.
+                        // How to notify them?
+                        return Optional.<MpPaxosParticipant>empty();
+                    }
+                    else
+                    {
+                        // not all locks were acquired therefore it has to:
+                        // 1. release current locks
+                        // 2. acquire new locks which are sorted concatentation of all rolled back transactions
+                        // 3. remove these participants from index
+                        return Optional.of(par);
+                    }
+                }).filter(Optional::isPresent)
+                                                                                                   .map(Optional::get)
+                                                                                                   .map(par -> new RemoveParticipantsFromIndex(Stream.of(par), getTransactionItemsOwnedByThisNodeSorted(par.getTransactionState()).stream()))
+                                                                                                   .reduce(RemoveParticipantsFromIndex.reducer);
+    }
+
+    /**
+     * This method assumes that all locks for given participant were acquired.
+     * @param mpPaxosParticipant
+     */
+    private void removeParticipantFromIndex(MpPaxosParticipant mpPaxosParticipant)
+    {
+        final TransactionState transactionState = mpPaxosParticipant.getTransactionState();
+        final List<TransactionItem> itsItems = getTransactionItemsOwnedByThisNodeSorted(transactionState);
+        itsItems.forEach(item -> {
+            final MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe().get(item);
+            if (mppPaxosRoundPointers != null)
+            {
+                mppPaxosRoundPointers.removeParticipant(mpPaxosParticipant);
+                if (mppPaxosRoundPointers.isEmpty())
+                {
+                    getIndexUnsafe().remove(item);
+                }
+            }
+        });
+    }
+
+    private Pair<Optional<RemoveParticipantsFromIndex>, MppIndexResultActions> resolveConflict(TransactionState thisTransactionState, TransactionItem itemOfConflict, TransactionState checkedTx, boolean isConflict)
     {
         final Optional<MpPaxosParticipant> checkedPaxosParticipant = findParticipant(itemOfConflict, checkedTx);
         final Optional<MpPaxosParticipant> participant = findParticipant(itemOfConflict, thisTransactionState);
@@ -294,7 +497,7 @@ public class MpPaxosIndex
         if(!participant.isPresent()) {
             // That means that other conflict was resolved before, which allowed this transaction to proceed, but other transaction has won and rollbacked this one.
             // If this is correct then, there should be no transaction data.
-            return CheckForRollbackResult.result;
+            return Pair.create(Optional.empty(), CheckForRollbackResult.result);
         }
 
         final MpPaxosParticipant paxosParticipant = participant.get();
@@ -303,19 +506,31 @@ public class MpPaxosIndex
         if (checkedPaxosParticipant.isPresent() && isConflict)
         {
             // add them to their rollback lists and recheck
-            checkedPaxosParticipant.get().addToRollbackParticipants(paxosParticipant);
-            paxosParticipant.addToRollbackParticipants(checkedPaxosParticipant.get());
+            if(checkedPaxosParticipant.get().addToRollbackParticipants(paxosParticipant)) {
+                // rollback checkedPaxosParticipant
+                Optional<RemoveParticipantsFromIndex> removeParticipantsFromIndex = rollbackParticipantsDueToTx(paxosParticipant.getTransactionState(), Stream.of(checkedPaxosParticipant.get()));
+                return Pair.create(removeParticipantsFromIndex, reCheckTransactionParticipant(paxosParticipant));
+            }
+            if(paxosParticipant.addToRollbackParticipants(checkedPaxosParticipant.get()))
+            {
+                // if has to rollback self, then it will be possible and no futher action will be required
+                Optional<RemoveParticipantsFromIndex> nextAction = rollbackParticipantsDueToTx(checkedPaxosParticipant.get().getTransactionState(), Stream.of(paxosParticipant), true);
+                Preconditions.checkState(!nextAction.isPresent());
+                return Pair.create(Optional.empty(), CheckForRollbackResult.result);
+            }
+
+            return Pair.create(Optional.empty(), reCheckTransactionParticipant(paxosParticipant));
         }
         else if(checkedPaxosParticipant.isPresent())
         {
             paxosParticipant.addAsNonConflicting(checkedPaxosParticipant.get().getTransactionState().getTransactionId());
+            return Pair.create(Optional.empty(), reCheckTransactionParticipant(paxosParticipant));
         }
         else {
             // if there is no conflict (isConflict = false) or checkedPaxosParticipant does not exist any more - because it could get rolled back
             // then there is nothing else to do.
+            return Pair.create(Optional.empty(), reCheckTransactionParticipant(paxosParticipant));
         }
-
-        return reCheckTransactionParticipant(paxosParticipant);
     }
 
     private Optional<MpPaxosParticipant> findParticipant(TransactionItem item, TransactionState tx)
@@ -323,9 +538,9 @@ public class MpPaxosIndex
         return getIndexUnsafe().get(item).getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst();
     }
 
-    private MppIndexResultActions createIndexResult(UUID paxosId)
+    private MppIndexResultActions createIndexResult(UUID paxosId, MpPaxosParticipant paxosParticipant)
     {
-        return new MppIndexResultActions(Sets.newHashSet(paxosId), Collections.emptyMap());
+        return new MppIndexResultActions(Sets.newHashSet(paxosId), Collections.emptyMap(), paxosParticipant);
     }
 
     private Map<TransactionItem, List<TransactionState>> participantsToTransactionStates(Map<TransactionItem, List<MpPaxosParticipant>> participants)
@@ -357,6 +572,45 @@ public class MpPaxosIndex
 
 
 
+    public static class CommittedParticipant {
+        private final UUID transactionId;
+        private final long timeOfCommit;
+
+
+        public CommittedParticipant(UUID transactionId, long timeOfCommit)
+        {
+            this.transactionId = transactionId;
+            this.timeOfCommit = timeOfCommit;
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            CommittedParticipant that = (CommittedParticipant) o;
+
+            if (!transactionId.equals(that.transactionId)) return false;
+
+            return true;
+        }
+
+        public int hashCode()
+        {
+            return transactionId.hashCode();
+        }
+    }
+
+    public static class HasToRollbackMpPaxosParticipantException extends RuntimeException {
+
+        private final MpPaxosParticipant paxosParticipantToRollback;
+
+        public HasToRollbackMpPaxosParticipantException(MpPaxosParticipant paxosParticipantToRollback)
+        {
+            this.paxosParticipantToRollback = paxosParticipantToRollback;
+        }
+    }
+
     public static class MpPaxosParticipant {
         private Optional<UUID> paxosId;
 
@@ -367,6 +621,11 @@ public class MpPaxosIndex
         private int conflictsToResolve;
 
         private Set<UUID> nonConflictingTransactionIds;
+
+        private Set<CommittedParticipant> committedParticipants;
+
+        private volatile boolean hasToRollback = false;
+        private volatile boolean wasRolledBack = false;
 
         public MpPaxosParticipant(Optional<UUID> paxosId, TransactionState transactionState, int conflictsToResolve)
         {
@@ -381,8 +640,30 @@ public class MpPaxosIndex
             return new MpPaxosParticipant(paxosId, otherTransaction, 0);
         }
 
-        public synchronized void addToRollbackParticipants(MpPaxosParticipant paxosParticipant) {
+        /**
+         *
+         * @param paxosParticipant
+         * @return {@code true} if has to rollback this participant, false otherwise
+         */
+        public synchronized boolean addToRollbackParticipants(MpPaxosParticipant paxosParticipant) {
+            if(hasThatParticipantAlreadyCommitted(paxosParticipant)) {
+                markThatItHasToRollback();
+                return true;
+            }
+
             addToRollbackParticipantsInternal(paxosParticipant);
+            return false;
+        }
+
+        private boolean hasThatParticipantAlreadyCommitted(MpPaxosParticipant paxosParticipant)
+        {
+            UUID transactionId = paxosParticipant.getTransactionState().getTransactionId();
+            return hasThatTransactionAlreadyCommitted(transactionId);
+        }
+
+        private boolean hasThatTransactionAlreadyCommitted(UUID transactionId)
+        {
+            return committedParticipants != null && committedParticipants.contains(new CommittedParticipant(transactionId, 0L));
         }
 
         public synchronized Collection<MpPaxosParticipant> getParticipantsToRollback()
@@ -412,7 +693,7 @@ public class MpPaxosIndex
 
         boolean isParticipatingInPaxosRound()
         {
-            return paxosId.isPresent();
+            return paxosId.isPresent() && !wasRolledBack && !hasToRollback;
         }
 
         public Optional<UUID> getPaxosId()
@@ -477,12 +758,26 @@ public class MpPaxosIndex
 
         public void addAsNonConflicting(UUID transactionId)
         {
+            if(hasThatTransactionAlreadyCommitted(transactionId)) {
+                removeThatTransactionFromAlreadyCommitted(transactionId);
+            }
             if(nonConflictingTransactionIds == null)
             {
                 nonConflictingTransactionIds = new HashSet<>();
             }
 
             nonConflictingTransactionIds.add(transactionId);
+        }
+
+        /**
+         * It can be removed to save memory if it is non conflicting anyway
+         * @param transactionId
+         */
+        private void removeThatTransactionFromAlreadyCommitted(UUID transactionId)
+        {
+            if(committedParticipants != null) {
+                committedParticipants.remove(new CommittedParticipant(transactionId, 0L));
+            }
         }
 
         public Set<UUID> getNonConflictingUnsafe() {
@@ -492,6 +787,43 @@ public class MpPaxosIndex
         public void joinRound(UUID paxosId)
         {
             this.paxosId = Optional.of(paxosId);
+        }
+
+
+        public boolean hasToRollback() {
+            return this.hasToRollback;
+        }
+
+        public void markThatItHasToRollback()
+        {
+            hasToRollback = true;
+        }
+
+        public void markItWasRolledBack()
+        {
+            wasRolledBack = true;
+        }
+
+        public boolean wasItRolledBack() {
+            return wasRolledBack;
+        }
+
+        private synchronized void transactionHasCommittedInternal(UUID transactionId, long timestampOfCommit) {
+            if(containsNonConflicting(transactionId)) {
+                return;
+            }
+            else {
+                if(committedParticipants == null)
+                {
+                    committedParticipants = new HashSet<>();
+                }
+                committedParticipants.add(new CommittedParticipant(transactionId, timestampOfCommit));
+            }
+        }
+
+        public void transactionHasCommitted(UUID transactionId, long timestampOfCommit)
+        {
+            transactionHasCommittedInternal(transactionId, timestampOfCommit);
         }
     }
 
@@ -577,6 +909,8 @@ public class MpPaxosIndex
     public static class MppIndexResultActions
     {
 
+        private final MpPaxosParticipant paxosParticipant;
+
         private Set<UUID> potentialPaxosRounds;
 
 //        private int numberOfRoundsItBelongs;
@@ -585,15 +919,19 @@ public class MpPaxosIndex
 
         private Map<TransactionItem, List<TransactionState>> conflictsToBeChecked;
 
+
 //        public MppIndexResultActions(int numberOfRoundsItBelongs, Map<TransactionItem, MppIndexForItemResult> results)
 //        {
 //            this.numberOfRoundsItBelongs = numberOfRoundsItBelongs;
 //            this.results = results;
 //        }
 
-        public MppIndexResultActions(Set<UUID> potentialPaxosRounds, Map<TransactionItem, List<TransactionState>> conflictsToBeChecked) {
+        public MppIndexResultActions(Set<UUID> potentialPaxosRounds, Map<TransactionItem,
+                                                                        List<TransactionState>> conflictsToBeChecked,
+                                     MpPaxosParticipant paxosParticipant) {
             this.conflictsToBeChecked = copy(conflictsToBeChecked);
             this.potentialPaxosRounds = potentialPaxosRounds;
+            this.paxosParticipant = paxosParticipant;
         }
 
         private Map<TransactionItem, List<TransactionState>> copy(Map<TransactionItem, List<TransactionState>> conflictsToBeChecked)
@@ -639,6 +977,11 @@ public class MpPaxosIndex
         {
             return potentialPaxosRounds;
         }
+
+        public MpPaxosParticipant getPaxosParticipant()
+        {
+            return paxosParticipant;
+        }
     }
 
     /**
@@ -650,7 +993,7 @@ public class MpPaxosIndex
 
         public CheckForRollbackResult()
         {
-            super(Collections.emptySet(), Collections.emptyMap());
+            super(Collections.emptySet(), Collections.emptyMap(), null);
         }
 
         public boolean needsToCheckForRollback()
@@ -671,6 +1014,11 @@ public class MpPaxosIndex
     {
         final List<TransactionItem> ownedByThisNode = getTransactionItemsOwnedByThisNodeSorted(transactionState);
 
+        acquireIndexForItems(transactionState, mpPaxosIndex, ownedByThisNode);
+    }
+
+    private void acquireIndexForItems(TransactionState transactionState, BiConsumer<MpPaxosIndex, List<TransactionItem>> mpPaxosIndex, List<TransactionItem> ownedByThisNode)
+    {
         final List<Lock> locks = ownedByThisNode.stream()
                                                 .map(toLockKey)
                                                 .map(LOCKS::get)
@@ -909,6 +1257,16 @@ public class MpPaxosIndex
         public Set<MpPaxosParticipant> getParticipantsUnsafe()
         {
             return participants;
+        }
+
+        public void removeParticipant(MpPaxosParticipant mpPaxosParticipant)
+        {
+            participants.remove(mpPaxosParticipant);
+        }
+
+        public boolean isEmpty()
+        {
+            return participants.isEmpty();
         }
     }
 

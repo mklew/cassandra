@@ -118,4 +118,9 @@ public class TransactionState implements Serializable
                                                       && ti.getCfName().equals(cfName)
                                                       && ti.getToken().equals(token)).findFirst();
     }
+
+    public boolean hasExactlySameItems(TransactionState otherTxState)
+    {
+        return transactionItems.equals(otherTxState);
+    }
 }

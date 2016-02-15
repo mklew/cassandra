@@ -18,10 +18,13 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -30,11 +33,15 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.SystemClock;
+import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
+import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.newTransactionItem;
-import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.newTransactionState;
+
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -56,6 +63,8 @@ public class MpPaxosIndexTest
     final TransactionItem ti3 = newTransactionItem(ksName, cfName, token3);
     final TransactionItem ti4 = newTransactionItem(ksName, cfName, token4);
 
+    private DeleteTransactionsDataServiceStub deleteTransactionsDataService;
+
 
     @Before
     public void setUp()
@@ -67,6 +76,8 @@ public class MpPaxosIndexTest
                 return txState -> txState.getTransactionItems().stream();
             }
         };
+        deleteTransactionsDataService = new DeleteTransactionsDataServiceStub();
+        mpPaxosIndex.setDeleteTransactionsDataService(deleteTransactionsDataService);
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -249,6 +260,138 @@ public class MpPaxosIndexTest
         // Tx2 cannot proceed
         Assert.assertFalse(r2AfterConflict.canProceed());
     }
+
+    @Test
+    public void testThatTransactionKnowsItHasToRollbackIfItFindsThatConflictingTransactionHasAlreadyCommitted() {
+        // given
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+
+        mpPaxosIndex.acquireIndexAndAdd(tx1);
+        MpPaxosIndex.MppIndexResultActions r2Results = mpPaxosIndex.acquireIndexAndAdd(tx2);
+        MpPaxosIndex.MpPaxosParticipant tx2Participant = r2Results.getPaxosParticipant();
+
+        // when
+        mpPaxosIndex.acquireAndMarkAsCommitted(tx1, System.currentTimeMillis());
+        final MpPaxosIndex.MppIndexResultActions r2ResolvedConflict = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx2, ti2, tx1);
+
+        // then
+        Assert.assertTrue("Was rolledback", tx2Participant.wasItRolledBack());
+        Assert.assertTrue("It can check that it should rollback", tx2Participant.hasToRollback());
+
+        assertTransactionDataDeleted(tx2.id());
+
+    }
+
+    private void assertTransactionDataDeleted(TransactionId id)
+    {
+        Assert.assertTrue("Transaction " + id + " should be deleted", deleteTransactionsDataService.deletedTransactions.contains(id));
+    }
+
+    private void assertTransactionDataNotDeleted(TransactionId id)
+    {
+        Assert.assertTrue("Transaction " + id + " should NOT be deleted", !deleteTransactionsDataService.deletedTransactions.contains(id));
+    }
+
+    private static class DeleteTransactionsDataServiceStub implements DeleteTransactionsDataService {
+
+        List<TransactionId> deletedTransactions = new ArrayList<>();
+
+        public void deleteAllPrivateTransactionData(TransactionId transactionId)
+        {
+            deletedTransactions.add(transactionId);
+        }
+    }
+
+    @Test
+    public void testThatTransactionIsRolledbackIfItIsConflictingAndOtherTxHasCommitted() {
+        // given
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+
+        mpPaxosIndex.acquireIndexAndAdd(tx1);
+        mpPaxosIndex.acquireIndexAndAdd(tx2);
+
+        // given it registers conflict and joins round
+        final MpPaxosIndex.MppIndexResultActions r2ResolvedConflict = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx2, ti2, tx1);
+        Assert.assertTrue(r2ResolvedConflict.canProceed());
+
+        // when
+        mpPaxosIndex.acquireAndMarkAsCommitted(tx1, System.currentTimeMillis());
+
+        // then paxos participant is checked if rollback happened
+        final MpPaxosIndex.MpPaxosParticipant paxosParticipant = r2ResolvedConflict.getPaxosParticipant();
+        // this will be true if conflict was registered and then other tx committed.
+        Assert.assertTrue(paxosParticipant.wasItRolledBack());
+
+        // this will be true if conflict was registered after other tx committed.
+        Assert.assertTrue(paxosParticipant.hasToRollback());
+
+        final MpPaxosIndex.MppIndexResultActions tx2AfterRecheck = mpPaxosIndex.acquireAndReCheck(tx2);
+
+        Assert.assertEquals(MpPaxosIndex.CheckForRollbackResult.result, tx2AfterRecheck);
+        Assert.assertTrue("Should check for rollback", tx2AfterRecheck.needsToCheckForRollback());
+    }
+
+    private final AtomicLong txStateCount = new AtomicLong(0);
+    private final long startingTime = SystemClock.getCurrentTimeMillis();
+    private TransactionState newTransactionState(TransactionItem ... items) {
+        long timestampForThatTx = txStateCount.incrementAndGet() + startingTime;
+
+        TransactionState transactionState = new TransactionState(UUIDGen.getTimeUUID(timestampForThatTx), Collections.emptyList());
+        for (TransactionItem item : items)
+        {
+            transactionState.addTxItem(item);
+        }
+        return transactionState;
+    }
+
+    @Test
+    public void testThatTxCanProceedIfOtherGetsRolledBack() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        final TransactionState tx3 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx4 = newTransactionState(ti4);
+
+        final MpPaxosIndex.MppIndexResultActions r1 = mpPaxosIndex.acquireIndexAndAdd(tx1);
+        final MpPaxosIndex.MppIndexResultActions r2 = mpPaxosIndex.acquireIndexAndAdd(tx2);
+        final MpPaxosIndex.MppIndexResultActions r3 = mpPaxosIndex.acquireIndexAndAdd(tx3);
+        final MpPaxosIndex.MppIndexResultActions r4 = mpPaxosIndex.acquireIndexAndAdd(tx4);
+
+
+        // Order: 1, 4, 3, 2
+        // 2 cannot proceed
+
+        // tx4 resolved conflict and started round of its own
+        final MpPaxosIndex.MppIndexResultActions r4after = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx4, ti4, tx2);
+
+        // tx3 resolved conflicts and joined round of tx1
+        mpPaxosIndex.acquireAndMarkTxAsConflicting(tx3, ti1, tx1);
+        mpPaxosIndex.acquireAndMarkTxAsConflicting(tx3, ti2, tx1);
+        mpPaxosIndex.acquireAndMarkTxAsConflicting(tx3, ti3, tx1);
+
+        mpPaxosIndex.acquireAndMarkTxAsConflicting(tx2, ti2, tx1);
+        mpPaxosIndex.acquireAndMarkTxAndNonConflicting(tx2, ti2, tx3);
+        MpPaxosIndex.MppIndexResultActions tx2CannotProceed = mpPaxosIndex.acquireAndMarkTxAsConflicting(tx2, ti4, tx4);
+
+        // Tx2 cannot proceed
+        Assert.assertFalse(tx2CannotProceed.canProceed());
+
+        // when TX3 is committed, TX1 is rolledback, and TX2 should be able to proceed. TX2 does not conflict with TX3
+        mpPaxosIndex.acquireAndMarkAsCommitted(tx3, System.currentTimeMillis());
+        assertTransactionDataDeleted(tx1.id());
+        assertTransactionDataNotDeleted(tx2.id());
+        MpPaxosIndex.MppIndexResultActions tx2ShouldProceed = mpPaxosIndex.acquireAndReCheck(tx2);
+
+        Assert.assertTrue(tx2ShouldProceed.canProceed());
+    }
+
+    // TODO [MPP]:
+        // TODO actually check for conflict
+        // TODO:    check for same cells.
+       // TODO:     quorum read data
+
+
 
     @Test
     @Ignore

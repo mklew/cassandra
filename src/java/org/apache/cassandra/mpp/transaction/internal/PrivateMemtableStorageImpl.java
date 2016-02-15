@@ -110,4 +110,9 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
     {
         return Schema.instance.getId(item.getKsName(), item.getCfName());
     }
+
+    public void deleteAllPrivateTransactionData(TransactionId transactionId)
+    {
+        removePrivateData(transactionId);
+    }
 }

@@ -148,6 +148,11 @@ public class InsertTransactionalTest extends CQLTester
         {
             return Collections.emptyList();
         }
+
+        public void deleteAllPrivateTransactionData(TransactionId transactionId)
+        {
+
+        }
     }
 
 }
