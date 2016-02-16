@@ -46,7 +46,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
-import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.utils.Pair;
@@ -103,31 +102,12 @@ public class MpPaxosIndex
             gotIndex.forEach((entry, nullPointer) -> {
                 MppPaxosRoundPointers pointers = createEmptyPaxosPointers();
                 pointers.addParticipant(paxosParticipant);
-
-
-//                MpPaxosRoundPointer pointer = createNewPaxosRoundPointer(paxosId, transactionState);
-//                pointers.addPointer(pointer);
-
                 getIndexUnsafe().put(entry, pointers);
             });
-
-
-//            MppIndexForItemResult sameResultForAll = createIndexForItemResultWithCreatedPointer();
-
-//            final Map<TransactionItem, MppIndexForItemResult> resultForItem = gotIndex.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toMap(Function.identity(), ti -> sameResultForAll));
-
             return createIndexResult(paxosId, paxosParticipant);
         }
         else
         {
-
-//            MppPaxosRoundPointers pointers = null;
-//            final List<UUID> transactionIdsToCheckForConflict = collectTransactionIdsFromParticipants(pointers);
-
-
-//            final Map<TransactionItem, Set<MpPaxosParticipant>> participants = gotIndex.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
-//                                                                                                                                v -> v.getValue().map(p -> p.getParticipantsUnsafe()).orElse(Collections.emptySet())));
-
             // Register itself in each
             MpPaxosParticipant paxosParticipant = MpPaxosParticipant.createAwaitingForConflictResolution(transactionState);
             gotIndex.forEach((entry, optionalPointers) -> {
@@ -138,45 +118,6 @@ public class MpPaxosIndex
             });
 
             return reCheckTransactionParticipant(paxosParticipant);
-
-//            final Map<TransactionItem, List<MpPaxosParticipant>> participantsUntilThisOne = getParticipantsUntil(gotIndex, paxosParticipant);
-//
-//
-//            final Set<MpPaxosParticipant> allOtherPotentiallyConflictingParticipants = participantsUntilThisOne.entrySet().stream().map(Map.Entry::getValue).flatMap(Collection::stream).collect(Collectors.toSet());
-//
-//
-//            paxosParticipant.setConflictsToResolve(allOtherPotentiallyConflictingParticipants.size());
-//
-//
-//            // Could be 0, 1 or more
-//            final Set<UUID> potentialNumberOfPaxosRounds = getAllPaxosRounds(participantsUntilThisOne);
-//
-//            final Map<TransactionItem, List<TransactionState>> participantsToTransactionStates = participantsToTransactionStates(participantsUntilThisOne);
-//
-//            MppIndexResultActions result = new MppIndexResultActions(potentialNumberOfPaxosRounds, participantsToTransactionStates);
-//
-//            return result;
-
-
-            // These pointers are not defined, but some others are. Need to add itself to awaiting candidates and to "check for conflict" for all other present
-//            final Stream<Map.Entry<TransactionItem, Optional<MppPaxosRoundPointers>>> pointersToAddForAwaiting = gotIndex.entrySet().stream().filter(p -> !p.getValue().isPresent());
-
-            // Pointers are defined. They can be either:
-            // 1) Just awaiting and no rounds
-            // 2) Just rounds (at least 1 round)
-
-            // IF transaction can start it's own round, and moves transactions from awaiting
-
-//            final Stream<Map.Entry<TransactionItem, Optional<MppPaxosRoundPointers>>> definedPointersToAddToCheckForConflicts = gotIndex.entrySet().stream().filter(p -> p.getValue().isPresent());
-//
-//            definedPointersToAddToCheckForConflicts.map(entry -> {
-//                final TransactionItem ti = entry.getKey();
-//                final MppPaxosRoundPointers pointers = entry.getValue().get();
-//
-//                Preconditions.checkState(pointers.areEmpty(), "Pointers should not be totally");
-//
-//                return 5;
-//            });
         }
     }
 
@@ -266,7 +207,7 @@ public class MpPaxosIndex
         return new MppIndexResultActions(paxosRoundsFromConflictingTransactions, needToResolveConflictWithThese, paxosParticipant);
     }
 
-    private Map<TransactionItem, List<MpPaxosParticipant>> filterParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate)
+    private static Map<TransactionItem, List<MpPaxosParticipant>> filterParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate)
     {
         return filterAndMapParticipants(participantsMap, predicate, Function.identity());
     }
@@ -363,7 +304,7 @@ public class MpPaxosIndex
 
         Stream<TransactionItem> items;
 
-        public RemoveParticipantsFromIndex(Stream<MpPaxosParticipant> participants, Stream<TransactionItem> items)
+        private RemoveParticipantsFromIndex(Stream<MpPaxosParticipant> participants, Stream<TransactionItem> items)
         {
             this.participants = participants;
             this.items = items;
@@ -501,7 +442,6 @@ public class MpPaxosIndex
         }
 
         final MpPaxosParticipant paxosParticipant = participant.get();
-        paxosParticipant.resolveConflict();
 
         if (checkedPaxosParticipant.isPresent() && isConflict)
         {
@@ -538,7 +478,7 @@ public class MpPaxosIndex
         return getIndexUnsafe().get(item).getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst();
     }
 
-    private MppIndexResultActions createIndexResult(UUID paxosId, MpPaxosParticipant paxosParticipant)
+    private static MppIndexResultActions createIndexResult(UUID paxosId, MpPaxosParticipant paxosParticipant)
     {
         return new MppIndexResultActions(Sets.newHashSet(paxosId), Collections.emptyMap(), paxosParticipant);
     }
@@ -601,24 +541,12 @@ public class MpPaxosIndex
         }
     }
 
-    public static class HasToRollbackMpPaxosParticipantException extends RuntimeException {
-
-        private final MpPaxosParticipant paxosParticipantToRollback;
-
-        public HasToRollbackMpPaxosParticipantException(MpPaxosParticipant paxosParticipantToRollback)
-        {
-            this.paxosParticipantToRollback = paxosParticipantToRollback;
-        }
-    }
-
     public static class MpPaxosParticipant {
         private Optional<UUID> paxosId;
 
         private final TransactionState transactionState;
 
         private Set<MpPaxosParticipant> rollbackTheseParticipantsOnCommit;
-
-        private int conflictsToResolve;
 
         private Set<UUID> nonConflictingTransactionIds;
 
@@ -631,13 +559,6 @@ public class MpPaxosIndex
         {
             this.paxosId = paxosId;
             this.transactionState = transactionState;
-            this.conflictsToResolve = conflictsToResolve;
-        }
-
-        public MpPaxosParticipant createInheritor(TransactionState otherTransaction) {
-            Preconditions.checkState(paxosId.isPresent(), "It can create inheritor if this one participates in paxos");
-
-            return new MpPaxosParticipant(paxosId, otherTransaction, 0);
         }
 
         /**
@@ -728,21 +649,6 @@ public class MpPaxosIndex
             return new MpPaxosParticipant(Optional.<UUID>empty(), transactionState, 0);
         }
 
-        public synchronized boolean conflictsAreResolved() {
-            return conflictsToResolve == 0;
-        }
-
-        public synchronized void resolveConflict()
-        {
-            conflictsToResolve -= 1;
-        }
-
-        public void setConflictsToResolve(int conflictsToResolve)
-        {
-            Preconditions.checkState(this.conflictsToResolve == 0, "only after initialization");
-            this.conflictsToResolve = conflictsToResolve;
-        }
-
         /**
          * Is conflict either resolved as non conflicting or as actual conflict.
          */
@@ -827,21 +733,6 @@ public class MpPaxosIndex
         }
     }
 
-//    private MppIndexResultActions createIndexResult(int numberOfPossiblePaxosRounds, Map<TransactionItem, MppIndexForItemResult> perItemResults)
-//    {
-//        return new MppIndexResultActions(numberOfPossiblePaxosRounds, perItemResults);
-//    }
-
-    private MppIndexForItemResult createIndexForItemResultWithCreatedPointer()
-    {
-        return new MppIndexForItemResult(IndexResultType.CREATED_ROUND_POINTER, Collections.emptyList());
-    }
-
-    private static MpPaxosRoundPointer createNewPaxosRoundPointer(UUID paxosId, TransactionState transactionState)
-    {
-        return new MpPaxosRoundPointerImpl(paxosId, transactionState);
-    }
-
 
     private static MppPaxosRoundPointers createEmptyPaxosPointers()
     {
@@ -863,49 +754,6 @@ public class MpPaxosIndex
         return getIndex.entrySet().stream().allMatch(e -> !e.getValue().isPresent());
     }
 
-
-//    private static Stream<TransactionItem> filterTransactionItemsOnlyOwnedByThisNode(Collection<TransactionItem> transactionItems)
-//    {
-//        final InetAddress broadcastAddress = FBUtilities.getBroadcastAddress();
-//
-//        return transactionItems.stream().filter(ti -> {
-//            final Keyspace keyspace = Keyspace.open(ti.getKsName());
-//            List<InetAddress> allReplicas = StorageProxy.getLiveSortedEndpoints(keyspace, ti.getToken());
-//            return allReplicas.contains(broadcastAddress);
-//        });
-//    }
-
-
-    enum IndexResultType
-    {
-        CREATED_ROUND_POINTER, ADDED_TO_AWAITING, ADDED_TO_CONFLICTING, ADDED_TO_CHECK_FOR_CONFLICTS;
-
-
-    }
-
-    public static class MppIndexForItemResult
-    {
-        private final IndexResultType resultType;
-
-        private final Collection<TransactionState> transactionsToCheckForConflict;
-
-        public MppIndexForItemResult(IndexResultType resultType, Collection<TransactionState> transactionsToCheckForConflict)
-        {
-            this.resultType = resultType;
-            this.transactionsToCheckForConflict = transactionsToCheckForConflict;
-        }
-
-        public IndexResultType getResultType()
-        {
-            return resultType;
-        }
-
-        public Collection<TransactionState> getTransactionsToCheckForConflict()
-        {
-            return transactionsToCheckForConflict;
-        }
-    }
-
     public static class MppIndexResultActions
     {
 
@@ -913,18 +761,7 @@ public class MpPaxosIndex
 
         private Set<UUID> potentialPaxosRounds;
 
-//        private int numberOfRoundsItBelongs;
-
-//        private Map<TransactionItem, MppIndexForItemResult> results;
-
         private Map<TransactionItem, List<TransactionState>> conflictsToBeChecked;
-
-
-//        public MppIndexResultActions(int numberOfRoundsItBelongs, Map<TransactionItem, MppIndexForItemResult> results)
-//        {
-//            this.numberOfRoundsItBelongs = numberOfRoundsItBelongs;
-//            this.results = results;
-//        }
 
         public MppIndexResultActions(Set<UUID> potentialPaxosRounds, Map<TransactionItem,
                                                                         List<TransactionState>> conflictsToBeChecked,
@@ -934,7 +771,7 @@ public class MpPaxosIndex
             this.paxosParticipant = paxosParticipant;
         }
 
-        private Map<TransactionItem, List<TransactionState>> copy(Map<TransactionItem, List<TransactionState>> conflictsToBeChecked)
+        private static Map<TransactionItem, List<TransactionState>> copy(Map<TransactionItem, List<TransactionState>> conflictsToBeChecked)
         {
             Map<TransactionItem, List<TransactionState>> copied = new HashMap<>();
             conflictsToBeChecked.entrySet().forEach(e -> {
@@ -948,11 +785,6 @@ public class MpPaxosIndex
         {
             return potentialPaxosRounds.size() == 1;
         }
-
-//        public Map<TransactionItem, MppIndexForItemResult> getResults()
-//        {
-//            return results;
-//        }
 
         public boolean needsToCheckForRollback() {
             return false;
@@ -1064,18 +896,11 @@ public class MpPaxosIndex
         return TRANSACTION_ITEMS_OWNED_BY_THIS_NODE;
     }
 
-    private static Function<TransactionItem, LockKey> toLockKey = txItem -> new LockKey(txItem.getKsName(), txItem.getCfName(), (Long) txItem.getToken().getTokenValue());
-
-    public boolean canInitPaxosRoundIfAdded(TransactionState transactionState)
-    {
-
-
-        return false;
-    }
+    private static final Function<TransactionItem, LockKey> toLockKey = txItem -> new LockKey(txItem.getKsName(), txItem.getCfName(), (Long) txItem.getToken().getTokenValue());
 
     private static class LockKey
     {
-        public LockKey(String keyspace, String cf, Long token)
+        private LockKey(String keyspace, String cf, Long token)
         {
             this.keyspace = keyspace;
             this.cf = cf;
@@ -1114,134 +939,17 @@ public class MpPaxosIndex
 
     public interface MpPaxosState
     {
-        // TODO Need to think whether TransactionState of owner is required here.
-        // TODO I need a way of finding all conflictingTransactions from doing commit
         // TODO Proposal is TransactionState
-        // MppPaxosInstance can be queried to find pointers to other transactions.
-        // For each transaction item
-        //    find MppPaxosRoundPointer that has transaction id from proposed TransactionState.transactionId
-        //    mark as rolled back every other transaction
-    }
-
-    /**
-     * Handler used to find mpp paxos state.
-     * <p>
-     * <p>
-     * Pointer can be created only IF
-     * <p>
-     * 1) locks are acquired
-     * 2) It would maintain unique identification of paxos round
-     * so if there are tx items 1,2,3
-     * and Tx1 uses TI1
-     * and Tx2 uses TI1,TI2,TI3 then Tx2 cannot create round pointer at tx item 2 and tx item 3 because it would
-     * result in having two paxos instances, one identified by tx1 and other by tx2
-     * <p>
-     * |
-     * tx item 1  |  tx 1
-     * tx item 2  |
-     * tx item 3  |
-     * <p>
-     * After:
-     * tx item 1  |  tx 1 [ tx 2]
-     * tx item 2  |  awaiting: tx2
-     * tx item 3  |  awaiting: tx2
-     */
-    public interface MpPaxosRoundPointer
-    {
-        /**
-         * @return id of transaction that initiated this paxos round
-         */
-        TransactionId getRoundInitiatorId();
-
-        /**
-         * @return transaction state of transaction that initiated paxos round
-         */
-        TransactionState getRoundInitiator();
-
-        /**
-         * @return id to lookup in MppPaxosStorage
-         */
-        UUID getPaxosRoundId();
-
-        /**
-         * If MppPaxosRoundPointer exists then transaction #3 is added to each pointer
-         * to its "to be checked for conflicts"
-         * <p>
-         * If next transaction #4 comes then it sees #3 with which it can check conflict
-         * <p>
-         * If #3 returns before #4 and has some conflict then it is added conflicting list
-         * If #3 returns before #4 and has no conflict then maybe new pointer is created or more conflict checking is required
-         * If #4 returns before #3 and has conflict then it can already move Tx3 to conflicting and also itself.
-         * Then there is guarantee that #3 won't have to check for conflicts again, transactions that come after it have to do it once.
-         */
-        Collection<TransactionState> getCandidatesToBeCheckedForConflicts();
-
-        /**
-         * Other participating transactions
-         *
-         * @return ids of transactions that have been checked against conflict and are indeed conflicting
-         * <p>
-         * TODO Tradeoff between checking new transaction vs all participating OR only vs initiator
-         */
-        Collection<TransactionId> getConflictingTransactionIds();
-
-        /**
-         * @return all conflicting transactions and initiator
-         */
-        default Stream<TransactionId> getAllParticipatingTransactions()
-        {
-            return Stream.concat(Stream.of(getRoundInitiatorId()), getConflictingTransactionIds().stream());
-        }
-    }
-
-    private static class MpPaxosRoundPointerImpl implements MpPaxosRoundPointer
-    {
-
-        private final UUID paxosId;
-
-        private final TransactionState initiator;
-
-        private final Set<TransactionState> candidatesToBeCheckedForConflict;
-
-        private final Set<TransactionId> conflictingTransactionIds;
-
-        public MpPaxosRoundPointerImpl(UUID paxosId, TransactionState initiator)
-        {
-            this.paxosId = paxosId;
-            this.initiator = initiator;
-            this.candidatesToBeCheckedForConflict = new HashSet<>();
-            this.conflictingTransactionIds = new HashSet<>();
-        }
-
-        public TransactionId getRoundInitiatorId()
-        {
-            return initiator.id();
-        }
-
-        public TransactionState getRoundInitiator()
-        {
-            return initiator;
-        }
-
-        public UUID getPaxosRoundId()
-        {
-            return paxosId;
-        }
-
-        public Collection<TransactionState> getCandidatesToBeCheckedForConflicts()
-        {
-            return Collections.unmodifiableCollection(candidatesToBeCheckedForConflict);
-        }
-
-        public Collection<TransactionId> getConflictingTransactionIds()
-        {
-            return Collections.unmodifiableCollection(conflictingTransactionIds);
-        }
     }
 
     // TODO [MPP] rename it later
     public static class MppPaxosRoundPointers
     {
+        /**
+         * It has to be LinkedHashSet, or at least Linked smth because assumption is
+         * that if new participant is added then it is responsible to check for conflicts with all before him.
+         * Insertion order is important.
+         */
         private final LinkedHashSet<MpPaxosParticipant> participants;
 
         public MppPaxosRoundPointers(LinkedHashSet<MpPaxosParticipant> participants)
@@ -1267,57 +975,6 @@ public class MpPaxosIndex
         public boolean isEmpty()
         {
             return participants.isEmpty();
-        }
-    }
-
-    public static class MppPaxosRoundPointersOld
-    {
-
-        /**
-         * Here are transactions that need to wait for other
-         * transactions to complete before they can start paxos round on their own.
-         */
-        private final Collection<TransactionState> awaitingCandidates;
-
-        private final Collection<MpPaxosRoundPointer> paxosRounds;
-
-        public MppPaxosRoundPointersOld(Collection<TransactionState> awaitingCandidates, Collection<MpPaxosRoundPointer> paxosRounds)
-        {
-            this.awaitingCandidates = awaitingCandidates;
-            this.paxosRounds = paxosRounds;
-        }
-
-        public Collection<TransactionState> getAwaitingCandidates()
-        {
-            return awaitingCandidates;
-        }
-
-        public boolean hasValidState() {
-            return (roundsSize() > 0 && awaitingCandidates.isEmpty()) || areEmpty();
-        }
-
-        public Collection<MpPaxosRoundPointer> getPaxosRounds()
-        {
-            return paxosRounds;
-        }
-
-        public int roundsSize()
-        {
-            return paxosRounds.size();
-        }
-
-        public void addPointer(MpPaxosRoundPointer pointer)
-        {
-            Preconditions.checkState(paxosRounds.stream()
-                                                .noneMatch(p -> p.getPaxosRoundId().equals(pointer.getPaxosRoundId())),
-                                     "Round pointers already have pointer to same paxos round, something is wrong: PaxosId %s",
-                                     pointer.getPaxosRoundId());
-            paxosRounds.add(pointer);
-        }
-
-        public boolean areEmpty()
-        {
-            return awaitingCandidates.isEmpty() && paxosRounds.isEmpty();
         }
     }
 }

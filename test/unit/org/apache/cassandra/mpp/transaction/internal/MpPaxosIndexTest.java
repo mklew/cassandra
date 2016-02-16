@@ -29,7 +29,6 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import junit.framework.Assert;
@@ -187,7 +186,7 @@ public class MpPaxosIndexTest
     }
 
 
-    private void assertHasNonConflicting(MpPaxosIndex.MpPaxosParticipant participant, TransactionState tx1)
+    private static void assertHasNonConflicting(MpPaxosIndex.MpPaxosParticipant participant, TransactionState tx1)
     {
         Assert.assertTrue(participant.getNonConflictingUnsafe().contains(tx1.getTransactionId()));
     }
@@ -390,62 +389,4 @@ public class MpPaxosIndexTest
         // TODO actually check for conflict
         // TODO:    check for same cells.
        // TODO:     quorum read data
-
-
-
-    @Test
-    @Ignore
-    public void testShouldHoldInvariants()
-    {
-        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
-        final TransactionState tx2 = newTransactionState(ti2, ti4);
-        final TransactionState tx3 = newTransactionState(ti1, ti2, ti3);
-        final TransactionState tx4 = newTransactionState(ti4);
-
-        // Order 2, 4, 3, 1
-
-        mpPaxosIndex.acquireIndex(tx2, (index, items) -> {
-            final MpPaxosIndex.MppIndexResultActions result = index.addItToIndex(tx2, items);
-            Assert.assertTrue("There should be single paxos instance for tx2", result.hasSingleLogicalPaxosInstanceAtThisNode());
-        });
-
-        mpPaxosIndex.acquireIndex(tx4, (index, items) -> {
-            final MpPaxosIndex.MppIndexResultActions result = index.addItToIndex(tx4, items);
-
-            Assert.assertFalse("There cannot be paxos instance for tx4 yet because it needs to be checked against conflict with tx2", result.hasSingleLogicalPaxosInstanceAtThisNode());
-
-//            Assert.assertEquals(1, result.getResults().size());
-//            result.getResults().forEach((ti, tiResult) -> {
-//                Assert result
-//                Assert.assertEquals(MpPaxosIndex.IndexResultType.ADDED_TO_CHECK_FOR_CONFLICTS, tiResult.getResultType());
-//
-//                Assert.assertEquals(1, tiResult.getTransactionsToCheckForConflict().size());
-//                Assert.assertTrue("Have to check for conflict with transaction tx2", tiResult.getTransactionsToCheckForConflict().contains(tx2));
-//            });
-
-
-            // Assert index internal state
-            final MpPaxosIndex.MppPaxosRoundPointers pointers = index.getIndexUnsafe().get(ti4);
-//            Assert.assertEquals(1, pointers.roundsSize());
-//            final MpPaxosIndex.MpPaxosRoundPointer roundPointer = findPointerByInitiator(tx2, pointers);
-
-//            Assert.assertEquals("Has only tx4 in awaiting", 1, roundPointer.getCandidatesToBeCheckedForConflicts().size());
-//            Assert.assertTrue("Has tx4 in awaiting", roundPointer.getCandidatesToBeCheckedForConflicts().contains(tx4));
-        });
-
-        mpPaxosIndex.acquireIndex(tx1, (index, items) -> {
-            final MpPaxosIndex.MppIndexResultActions actions = index.addItToIndex(tx1, items);
-            Assert.assertTrue("There should be single paxos instance for tx1", actions.hasSingleLogicalPaxosInstanceAtThisNode());
-
-
-            index.canInitPaxosRoundIfAdded(tx1);
-
-//            index.addToIndex(tx1);
-        });
-    }
-
-//    private MpPaxosIndex.MpPaxosRoundPointer findPointerByInitiator(TransactionState initiator, MpPaxosIndex.MppPaxosRoundPointers pointers)
-//    {
-//        return pointers.getPaxosRounds().stream().filter(piRound -> piRound.getRoundInitiatorId().equals(initiator.id())).findFirst().get();
-//    }
 }
