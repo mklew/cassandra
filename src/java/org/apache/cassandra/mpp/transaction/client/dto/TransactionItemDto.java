@@ -20,6 +20,8 @@ package org.apache.cassandra.mpp.transaction.client.dto;
 
 import java.io.Serializable;
 
+import org.apache.cassandra.mpp.transaction.client.TransactionItem;
+
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 27/01/16
@@ -31,6 +33,17 @@ public class TransactionItemDto implements Serializable
     String ksName;
 
     String cfName;
+
+    public static TransactionItemDto fromTransactionItem(TransactionItem ti)
+    {
+        final TransactionItemDto transactionItemDto = new TransactionItemDto();
+
+        transactionItemDto.setToken((Long) ti.getToken().getTokenValue());
+        transactionItemDto.setCfName(ti.getCfName());
+        transactionItemDto.setKsName(ti.getKsName());
+
+        return transactionItemDto;
+    }
 
     public Long getToken()
     {

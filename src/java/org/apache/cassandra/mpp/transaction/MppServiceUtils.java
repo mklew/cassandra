@@ -47,6 +47,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.Pair;
@@ -161,6 +162,14 @@ public class MppServiceUtils
         final List<ColumnSpecification> columnSpecifications = Arrays.asList(jsonColumn);
         final ResultSet resultSet = new ResultSet(columnSpecifications);
 
+        final String json = getTransactionStateAsJson(transactionState);
+
+        resultSet.addColumnValue(UTF8Type.instance.decompose(json));
+        return resultSet;
+    }
+
+    public static String getTransactionStateAsJson(TransactionState transactionState)
+    {
         final String json;
         try
         {
@@ -170,9 +179,21 @@ public class MppServiceUtils
         {
             throw new RuntimeException("Cannot write TransactionState as json", e);
         }
+        return json;
+    }
 
-        resultSet.addColumnValue(UTF8Type.instance.decompose(json));
-        return resultSet;
+    public static String getTransactionItemAsJson(TransactionItem transactionItem)
+    {
+        final String json;
+        try
+        {
+            json = Json.JSON_OBJECT_MAPPER.writeValueAsString(TransactionItemDto.fromTransactionItem(transactionItem));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Cannot write TransactionState as json", e);
+        }
+        return json;
     }
 
     public static ResultSet executeFnOverTransactionalMutations(Collection<? extends IMutation> mutations, Function<TransactionalMutation, TransactionState> getTransactionItemFn)

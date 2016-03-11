@@ -19,8 +19,6 @@
 package org.apache.cassandra.mpp.transaction;
 
 import java.util.Collection;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -33,13 +31,16 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.service.MppServiceMXBean;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 20/01/16
  */
-public interface MppService
+public interface MppService extends MppServiceMXBean
 {
+    String MBEAN_NAME = "org.apache.cassandra.mpp.transaction:type=MppService";
+
     /**
      * CQL: START TRANSACTION
      *
@@ -104,4 +105,6 @@ public interface MppService
     void readQuorumByColumnFamilyAndToken(TransactionState transactionState, String ksName, String cfNameColumnFamily, Token token, ConsistencyLevel consistency, Consumer<PartitionIterator> consumer);
 
     void flushTransactionLocally(TransactionId transactionId);
+
+    void makeTransactionDataConsistent(TransactionState transactionState);
 }

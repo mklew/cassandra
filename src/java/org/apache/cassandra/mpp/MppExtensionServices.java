@@ -18,10 +18,15 @@
 
 package org.apache.cassandra.mpp;
 
+import java.lang.management.ManagementFactory;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.internal.MppMessageHandlerImpl;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkServiceImpl;
@@ -72,6 +77,8 @@ public class MppExtensionServices
 
         initializeMppModule(mppNetworkService);
 
+        registerMppServiceAsMBean(mppModule);
+
         messageHandler.setMppService(mppModule.getMppService());
 //        messageHandler.setPrivateMemtableStorage(privateMemtableStorage);
 //        messageHandler.setReadTransactionDataService(readTransactionDataService);
@@ -80,6 +87,19 @@ public class MppExtensionServices
         // TODO [MPP] Maybe move it to yaml config.
         mppNetworkService.setListeningPort(nativePort + 1);
         mppNetworkService.setMessageHandler(messageHandler);
+    }
+
+    private static void registerMppServiceAsMBean(MppModule mppModule)
+    {
+        MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
+        try
+        {
+            mbs.registerMBean(mppModule.getMppService(), new ObjectName(MppService.MBEAN_NAME));
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     private void initializeMppModule(MppNetworkService mppNetworkService)

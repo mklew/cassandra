@@ -61,15 +61,7 @@ public class TransactionStateDto implements Serializable
         final TransactionStateDto transactionStateDto = new TransactionStateDto();
         transactionStateDto.setTransactionId(transactionState.getTransactionId());
 
-        final List<TransactionItemDto> items = transactionState.getTransactionItems().stream().map(ti -> {
-            final TransactionItemDto transactionItemDto = new TransactionItemDto();
-
-            transactionItemDto.setToken((Long) ti.getToken().getTokenValue());
-            transactionItemDto.setCfName(ti.getCfName());
-            transactionItemDto.setKsName(ti.getKsName());
-
-            return transactionItemDto;
-        }).collect(Collectors.toList());
+        final List<TransactionItemDto> items = transactionState.getTransactionItems().stream().map(TransactionItemDto::fromTransactionItem).collect(Collectors.toList());
 
         transactionStateDto.setTransactionItems(items);
 

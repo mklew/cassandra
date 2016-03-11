@@ -73,9 +73,20 @@ public abstract class MppCQLTester extends CQLTester
 
     protected String cf1Name;
 
+    protected String cf2Name;
 
     protected void createMppTestCf1() {
         cf1Name = createTable("CREATE TABLE %s (pk int, ck text, description text, number int, PRIMARY KEY(pk, ck))");
+    }
+
+    protected void createMppTestCf2() {
+        cf2Name = createTable("CREATE TABLE %s (pk int, ck text, price int, PRIMARY KEY(pk, ck))");
+    }
+
+    protected TransactionState txInsertToCf2(TransactionState transactionState, int pk, String ck, int price) throws Throwable {
+        final String cql = "INSERT INTO " + keyspace() +"." + cf2Name + " (pk, ck, description, price) values (?, ?, ?) USING TRANSACTION " + transactionState.getTransactionId();
+        final UntypedResultSet encodedTxState = execute(cql, pk, ck, price);
+        return mapResultToTransactionState(encodedTxState);
     }
 
     protected TransactionState txInsertToCf1(TransactionState transactionState, int pk, String ck, String description, int number) throws Throwable {

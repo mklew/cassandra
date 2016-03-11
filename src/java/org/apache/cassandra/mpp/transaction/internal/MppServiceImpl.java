@@ -304,4 +304,23 @@ public class MppServiceImpl implements MppService
         final UUID cfId = columnFamilyIds.iterator().next();
         return Keyspace.open(transactionalMutation.getKeyspaceName()).getColumnFamilyStore(cfId).getTableName();
     }
+
+
+    @Override
+    public void makeTransactionDataConsistent(TransactionState transactionState)
+    {
+
+    }
+
+    @Override
+    public void makeTransactionDataConsistent(String transactionStateAsJson)
+    {
+        // TODO [MPP] Implement it
+    }
+
+    public void deleteSingleItem(String transactionStateAsJson, String transactionItemAsJson)
+    {
+        // TODO [MPP] Implement it
+        logger.info("deleteSingleItem tx {} ti {}", transactionStateAsJson, transactionItemAsJson);
+    }
 }
