@@ -341,13 +341,12 @@ public class MppServiceImpl implements MppService
 
     private boolean transactionNotFrozenAlready(TransactionState transactionState)
     {
-        return privateMemtableStorage.readTransactionData(transactionState.id()).isFrozen();
+        return !privateMemtableStorage.readTransactionData(transactionState.id()).isFrozen();
     }
 
     @Override
     public void makeTransactionDataConsistent(String transactionStateAsJson)
     {
-        // TODO [MPP] Implement it
         TransactionState transactionState = readTransactionStateFromJson(transactionStateAsJson);
         makeTransactionDataConsistent(transactionState);
     }

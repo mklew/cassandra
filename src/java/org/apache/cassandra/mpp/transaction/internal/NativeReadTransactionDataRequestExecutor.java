@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
@@ -84,7 +85,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
 
         private final ReentrantLock lock = new ReentrantLock();
 
-        private final Collection<PartitionUpdate> partitionUpdates = new ArrayList<>();
+        private final Collection<Optional<PartitionUpdate>> partitionUpdates = new ArrayList<>();
 
         private final long start;
 
@@ -150,6 +151,9 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
         {
             boolean signaled = await(getTimeout(), TimeUnit.MILLISECONDS);
             boolean failed = blockfor + failures > endpoints.size();
+
+            logger.info("awaitResults, signaled {} failed {}", signaled, failed);
+
             if (signaled && !failed)
                 return;
 
@@ -182,28 +186,26 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
 
         public void response(MessageIn<PrivateMemtableReadResponse> message)
         {
-            logger.debug("PrivateMemtableReadCallback response arrived");
+            logger.debug("PrivateMemtableReadCallback response arrived from {}", message.from);
             final Optional<PartitionUpdate> partitionUpdateOpt = message.payload.getPartitionUpdateOpt();
 
             logger.debug("PrivateMemtableReadCallback response isPartitionUpdatePresent {}", partitionUpdateOpt.isPresent());
 
-            if(partitionUpdateOpt.isPresent()) {
-                lock.lock();  // block until condition holds
-                try {
-                    partitionUpdates.add(partitionUpdateOpt.get());
-                } finally {
-                    lock.unlock();
-                }
-            }
-            else {
-                // TODO maybe do more requests...
+            lock.lock();  // block until condition holds
+            try {
+                partitionUpdates.add(partitionUpdateOpt);
+            } finally {
+                lock.unlock();
             }
 
             int n = waitingFor(message.from)
                     ? recievedUpdater.incrementAndGet(this)
                     : received;
 
+            logger.info("n is {} block for is {} readRequestRecipe.isQuorum(partitionUpdates): {} v2", n, blockfor, readRequestRecipe.isQuorum(partitionUpdates));
+
             if (n >= blockfor && readRequestRecipe.isQuorum(partitionUpdates)) {
+                logger.info("condition.signalAll() called");
                 condition.signalAll();
             }
         }
@@ -217,7 +219,7 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
         {
             awaitResults();
 
-            return Lists.newArrayList(partitionUpdates);
+            return partitionUpdates.stream().filter(Optional::isPresent).map(Optional::get).collect(Collectors.toList());
         }
     }
 
@@ -299,10 +301,17 @@ public class NativeReadTransactionDataRequestExecutor implements ReadTransaction
          */
         public static ReadTransactionDataExecutor getReadExecutor(SingleReadRequestRecipe recipe, ConsistencyLevel consistencyLevel) throws UnavailableException
         {
+
             Keyspace keyspace = Keyspace.open(recipe.getTransactionItem().getKsName());
 
 //            ReadRepairDecision repairDecision = command.metadata().newReadRepairDecision();
             List<InetAddress> targetReplicas = consistencyLevel.filterForQuery(keyspace, recipe.getReceipients(), ReadRepairDecision.NONE);
+
+            logger.info("NativeReadTransactionDataRequestExecutor.getReadExecutor. keyspace: {} recipe.receipients are: {} target replicas are: {}",
+                        recipe.getTransactionItem().getKsName(),
+                        recipe.getReceipients(),
+                        targetReplicas);
+
 
             // Throw UAE early if we don't have enough replicas.
             consistencyLevel.assureSufficientLiveNodes(keyspace, targetReplicas);

@@ -23,7 +23,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
@@ -76,7 +75,7 @@ public class SingleReadRequestRecipe
         return (replicationFactor / 2 ) + 1;
     }
 
-    public boolean isQuorum(Collection<PartitionUpdate> partitionUpdates)
+    public <T> boolean isQuorum(Collection<T> partitionUpdates)
     {
         return partitionUpdates.size() >= quorumFor(replicationFactor);
     }

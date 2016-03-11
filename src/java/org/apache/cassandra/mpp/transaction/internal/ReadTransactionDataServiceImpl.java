@@ -92,8 +92,6 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
     private Pair<TransactionItem, List<PartitionUpdate>> executeSingleReadRequestRecipe(SingleReadRequestRecipe singleReadRequestRecipe, ConsistencyLevel consistencyLevel) {
         final List<PartitionUpdate> partitionUpdates = executor.executeRecipe(singleReadRequestRecipe, consistencyLevel);
 
-        Preconditions.checkState(singleReadRequestRecipe.isQuorum(partitionUpdates), "Quorum should be met");
-
         return Pair.create(singleReadRequestRecipe.getTransactionItem(), partitionUpdates);
     }
 
@@ -449,6 +447,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
             final Keyspace keyspace = Keyspace.open(ti.getKsName());
             List<InetAddress> allReplicas = StorageProxy.getLiveSortedEndpoints(keyspace, ti.getToken());
             final AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
+            logger.info("ReadTransactionDataService transaction items to replicas. All replicas are {}", allReplicas);
             // TODO [MPP] I noticed that Write goes for natural + pending while reads are done just against natural using getLiveSortedEndpoints method in AbstractReadExecutor
 //            final ArrayList<InetAddress> naturalEndpoints = replicationStrategy.getNaturalEndpoints(ti.getToken());
 //            final Collection<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(ti.getToken(), ti.getKsName());
