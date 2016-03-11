@@ -48,6 +48,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosIdImpl;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -378,6 +380,13 @@ public class MpPaxosIndex
         return rollbackParticipantsDueToTx(transactionStateThatCausedRollbackOf, participantsToRollback, false);
     }
 
+    /**
+     *
+     * @param transactionStateThatCausedRollbackOf can be {@code null} iff allLocksForParticipantsToRollbackWereAcquired is {@code true}
+     * @param participantsToRollback
+     * @param allLocksForParticipantsToRollbackWereAcquired
+     * @return
+     */
     private Optional<RemoveParticipantsFromIndex> rollbackParticipantsDueToTx(TransactionState transactionStateThatCausedRollbackOf, Stream<MpPaxosParticipant> participantsToRollback, boolean allLocksForParticipantsToRollbackWereAcquired)
     {
         return participantsToRollback.map(par -> {
@@ -386,12 +395,12 @@ public class MpPaxosIndex
                     par.markItWasRolledBack();
 
                     final TransactionState txStateOfRolledback = par.getTransactionState();
-                    if (transactionStateThatCausedRollbackOf.hasExactlySameItems(txStateOfRolledback) || allLocksForParticipantsToRollbackWereAcquired)
+                    if (allLocksForParticipantsToRollbackWereAcquired || transactionStateThatCausedRollbackOf.hasExactlySameItems(txStateOfRolledback))
                     {
                         // then all locks are acquired, and it it can be removed from index
                         removeParticipantFromIndex(par);
 
-                        // after remopval, participants that were blocked by articipant "par" could retry and maybe have green light to begin execution.
+                        // after removal, participants that were blocked by articipant "par" could retry and maybe have green light to begin execution.
                         // How to notify them?
                         return Optional.<MpPaxosParticipant>empty();
                     }
@@ -814,6 +823,12 @@ public class MpPaxosIndex
         {
             return paxosParticipant;
         }
+
+        public UUID getPaxosInstanceId()
+        {
+            Preconditions.checkState(canProceed());
+            return potentialPaxosRounds.iterator().next();
+        }
     }
 
     /**
@@ -889,6 +904,54 @@ public class MpPaxosIndex
             result[0] = index.addItToIndex(transactionState, items);
         });
         return result[0];
+    }
+
+    /**
+     * Returns optional {@link MpPaxosId}. If empty, then transaction was rolled back (due to conflict or concurrent execution).
+     *
+     * Simplest scenario possible.
+     * If there are participants for same transaction item -> then mark them as conflicting.
+     * So this means that conflicts are per whole partitions.
+     * If after these conflicts there is more than 1 round => return with rollback
+     * @param transactionState
+     */
+    public Optional<MpPaxosId> acquireForMppPaxos(TransactionState transactionState) {
+        final Optional<MpPaxosId>[] maybeMpPaxosId = new Optional[1];
+        acquireIndex(transactionState, (index, items) -> {
+            // 1. Register in index.
+            MppIndexResultActions actions = null;
+            actions = index.addItToIndex(transactionState, items);
+            // 2. If there are possible conflicts, mark all of them as conflicting
+            Map<TransactionItem, List<TransactionState>> conflictsToBeChecked = actions.getConflictsToBeChecked();
+            if(actions.hasToCheckForConflicts()) {
+                conflictsToBeChecked.forEach((item, txs) -> {
+                    txs.forEach(conflictingTx -> {
+                        resolveConflict(transactionState, item, conflictingTx, true);
+                    });
+                });
+                // re check transaction after all conflicts have been registered
+                actions = reCheckTransaction(transactionState, items);
+            }
+            // 3. Look at actions
+            //      there should not be any conflicts.
+            Preconditions.checkState(!actions.hasToCheckForConflicts(), "All conflicts should have been resolved");
+            //      if there is single round, then it is fine to proceed
+            if(actions.canProceed()) {
+                // Can proceed with mpp paxos
+                UUID paxosInstanceId = actions.getPaxosInstanceId();
+                MpPaxosId mpPaxosId = new MpPaxosIdImpl(paxosInstanceId);
+                maybeMpPaxosId[0] = Optional.of(mpPaxosId);
+            }
+            else {
+                // Rollback, but it might already be rolled back.
+                if(actions.getPaxosParticipant() != null) {
+                    rollbackParticipantsDueToTx(null, Stream.of(actions.getPaxosParticipant()), true);
+                }
+                // TODO, However it can also mean, that this transaction might proceed on other nodes and quorum still might be satisifed.
+                maybeMpPaxosId[0] = Optional.empty();
+            }
+        });
+        return maybeMpPaxosId[0];
     }
 
     protected Function<TransactionState, Stream<TransactionItem>> getTransactionItemsOwnedByThisNode()

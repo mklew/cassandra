@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -37,6 +38,7 @@ import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.newTransactionItem;
@@ -383,6 +385,52 @@ public class MpPaxosIndexTest
         MpPaxosIndex.MppIndexResultActions tx2ShouldProceed = mpPaxosIndex.acquireAndReCheck(tx2);
 
         Assert.assertTrue(tx2ShouldProceed.canProceed());
+    }
+
+    @Test
+    public void testSimpleAcquireForMppPaxosScenario1() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        final TransactionState tx3 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx4 = newTransactionState(ti4);
+
+
+        final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
+        Assert.assertTrue("Tx1 starts its own round", r1.isPresent());
+
+        final Optional<MpPaxosId> r2 = mpPaxosIndex.acquireForMppPaxos(tx2);
+        Assert.assertTrue("Tx2 joins Tx1", r2.isPresent());
+        Assert.assertEquals("Tx2, tx1 are in same round", r1, r2);
+
+        final Optional<MpPaxosId> r3 = mpPaxosIndex.acquireForMppPaxos(tx3);
+        Assert.assertTrue("Tx3 joins Tx1, Tx2", r3.isPresent());
+        Assert.assertEquals(r1, r3);
+
+        final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
+        Assert.assertTrue("Tx4 joins Tx1, Tx2, Tx3 in same round", r4.isPresent());
+        Assert.assertEquals(r4, r1);
+    }
+
+    @Test
+    public void testSimpleAcquireForMppPaxosScenario2() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        final TransactionState tx3 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx4 = newTransactionState(ti4);
+
+
+        final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
+        Assert.assertTrue("Tx4 starts its own round", r4.isPresent());
+
+        final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
+        Assert.assertTrue("Tx1 starts its own round", r1.isPresent());
+
+        final Optional<MpPaxosId> r2 = mpPaxosIndex.acquireForMppPaxos(tx2);
+        Assert.assertFalse("Tx2 has to rollback because Tx1 and Tx4 have different rounds", r2.isPresent());
+
+        final Optional<MpPaxosId> r3 = mpPaxosIndex.acquireForMppPaxos(tx3);
+        Assert.assertTrue("Tx3 joins Tx1", r3.isPresent());
+        Assert.assertEquals(r1, r3);
     }
 
     // TODO [MPP]:
