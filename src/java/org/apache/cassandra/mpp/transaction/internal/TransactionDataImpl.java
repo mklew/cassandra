@@ -51,7 +51,7 @@ public class TransactionDataImpl implements TransactionData
     private final long creationNano = System.nanoTime();
 
     private volatile boolean hasBeenApplied = false;
-    private volatile boolean frozen = true;
+    private volatile boolean frozen = false;
 
     // TODO [MPP] this will be changed to actual private memtables, or maybe not.
     private final Map<String, Map<DecoratedKey, Mutation>> ksToKeyToMutation = new HashMap<>();
@@ -90,6 +90,7 @@ public class TransactionDataImpl implements TransactionData
     public void addMutation(Mutation mutation)
     {
         Preconditions.checkState(!hasBeenApplied, "Cannot add mutation to already applied transaction's data. There could be some race condition");
+        Preconditions.checkState(!frozen, "Cannot add mutation to frozen transaction's data. ");
         final String ksName = mutation.getKeyspaceName();
 
         final Map<DecoratedKey, Mutation> keyToMutation = ksToKeyToMutation.get(ksName);
