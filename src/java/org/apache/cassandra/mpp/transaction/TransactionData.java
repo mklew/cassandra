@@ -24,6 +24,7 @@ import java.util.stream.Stream;
 
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
 /**
@@ -51,4 +52,17 @@ public interface TransactionData extends ReadableTransactionData
     Stream<PartitionUpdate> partitionUpdatesStream(String ksName, UUID cfId);
 
     void applyAllMutations(long applyTimestamp);
+
+    void freeze();
+
+    boolean isFrozen();
+
+    /**
+     * Removes data for ksName, column family and token
+     * @param ksName
+     * @param cfId
+     * @param token
+     */
+    void purge(String ksName, UUID cfId, Token token);
+
 }

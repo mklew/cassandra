@@ -121,7 +121,7 @@ public class TransationDataImplTest
     }
 
     @Test
-    public void testOperationsScenario() {
+    public void testPurging() {
         CFMetaData cf1MetaData = makeCfMetaData("ks1", "cf1");
         CFMetaData cf2MetaData = makeCfMetaData("ks1", "cf2");
 
@@ -135,9 +135,39 @@ public class TransationDataImplTest
         Mutation m1 = new Mutation("ks1", cf1.partitionKey()).add(cf1);
         Mutation m2 = new Mutation("ks1", cf2.partitionKey()).add(cf2);
 
+        final TransactionId transactionId = TransactionStateUtils.newTransactionState().id();
+        final TransactionDataImpl privateData = new TransactionDataImpl(transactionId);
+        privateData.addMutation(m1);
+        privateData.addMutation(m2);
 
-//        PartitionUpdate cf2 = makeCf(cf1MetaData, "k2", "k2v1", null);
+        final Optional<PartitionUpdate> dataForCf1 = privateData.readData("ks1", cf1MetaData.cfId, Util.token(partitionKey));
+        Assert.assertTrue(dataForCf1.isPresent());
+        final Optional<PartitionUpdate> dataForCf2 = privateData.readData("ks1", cf2MetaData.cfId, Util.token(partitionKey));
+        Assert.assertTrue(dataForCf2.isPresent());
 
+        // when purge cf2
+        privateData.purge("ks1", cf2MetaData.cfId, cf2.partitionKey().getToken());
+        final Optional<PartitionUpdate> dataForCf2AfterPurge = privateData.readData("ks1", cf2MetaData.cfId, Util.token(partitionKey));
+        Assert.assertFalse("data should be purged", dataForCf2AfterPurge.isPresent());
+
+        final Optional<PartitionUpdate> dataForCf1AfterPurge = privateData.readData("ks1", cf1MetaData.cfId, Util.token(partitionKey));
+        Assert.assertTrue("cf1 should remain untouched", dataForCf1AfterPurge.isPresent());
+    }
+
+    @Test
+    public void testOperationsScenario() {
+        CFMetaData cf1MetaData = makeCfMetaData("ks1", "cf1");
+        CFMetaData cf2MetaData = makeCfMetaData("ks1", "cf2");
+
+        // For same partition key
+        String partitionKey = "k";
+        final String ck1 = "ck1";
+        PartitionUpdate cf1 = makeCf(cf1MetaData, partitionKey, ck1, "k1v1", null);
+        PartitionUpdate cf2 = makeCf(cf2MetaData, partitionKey, "ck2", "k2v1", null);
+
+        // Create two mutations for different column familites
+        Mutation m1 = new Mutation("ks1", cf1.partitionKey()).add(cf1);
+        Mutation m2 = new Mutation("ks1", cf2.partitionKey()).add(cf2);
 
 
         final TransactionId transactionId = TransactionStateUtils.newTransactionState().id();

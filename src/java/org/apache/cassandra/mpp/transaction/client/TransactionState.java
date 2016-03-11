@@ -123,4 +123,9 @@ public class TransactionState implements Serializable
     {
         return transactionItems.equals(otherTxState);
     }
+
+    public boolean hasItem(TransactionItem transactionItem)
+    {
+        return transactionItems.contains(transactionItem);
+    }
 }

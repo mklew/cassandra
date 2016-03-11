@@ -51,6 +51,7 @@ public class TransactionDataImpl implements TransactionData
     private final long creationNano = System.nanoTime();
 
     private volatile boolean hasBeenApplied = false;
+    private volatile boolean frozen = true;
 
     // TODO [MPP] this will be changed to actual private memtables, or maybe not.
     private final Map<String, Map<DecoratedKey, Mutation>> ksToKeyToMutation = new HashMap<>();
@@ -69,6 +70,21 @@ public class TransactionDataImpl implements TransactionData
     public boolean isExpired(int ttl)
     {
         return ttl > 0 && (System.nanoTime() - creationNano >= TimeUnit.MILLISECONDS.toNanos(ttl));
+    }
+
+    public void purge(String ksName, UUID cfId, Token token) {
+        Map<DecoratedKey, Mutation> forKeyspace = ksToKeyToMutation.get(ksName);
+        Map<DecoratedKey, Mutation> withoutModificationsOfCfForToken = forKeyspace.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, v -> {
+            if (v.getValue().key().getToken().equals(token))
+            {
+                return v.getValue().without(cfId);
+            }
+            else
+            {
+                return v.getValue();
+            }
+        }));
+        ksToKeyToMutation.put(ksName, withoutModificationsOfCfForToken);
     }
 
     public void addMutation(Mutation mutation)
@@ -149,6 +165,16 @@ public class TransactionDataImpl implements TransactionData
         // Mutations happen in different thread so this method returns before actually doing mutations.
         // It is done same way for paxos and others therefore it should be enough and should not fail.
         hasBeenApplied = true;
+    }
+
+    public void freeze()
+    {
+        frozen = true;
+    }
+
+    public boolean isFrozen()
+    {
+        return frozen;
     }
 
     @Override

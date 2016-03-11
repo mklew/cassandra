@@ -69,4 +69,11 @@ public interface PrivateMemtableStorage extends DeleteTransactionsDataService
     void removePrivateData(TransactionId id);
 
     Collection<TransactionId> getInProgressTransactions();
+
+    /**
+     * Marks it as frozen. It means that, data is consistent, no futher modifications are allowed.
+     *
+     * @param id
+     */
+    void freezeTransaction(TransactionId id);
 }

@@ -80,6 +80,21 @@ public class EmptyTransactionData implements TransactionData
 
     }
 
+    public void freeze()
+    {
+        throw new IllegalStateException("Empty transaction data cannot be frozen. Something is wrong");
+    }
+
+    public boolean isFrozen()
+    {
+        return false;
+    }
+
+    public void purge(String ksName, UUID cfId, Token token)
+    {
+
+    }
+
     public Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
     {
         return Optional.empty();

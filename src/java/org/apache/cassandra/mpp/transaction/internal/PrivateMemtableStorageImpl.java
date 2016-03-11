@@ -96,6 +96,11 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
         return Collections.unmodifiableSet(txIdToData.keySet());
     }
 
+    public void freezeTransaction(TransactionId id)
+    {
+        readTransactionData(id).freeze();
+    }
+
     private static Function<TransactionItem, Pair<TransactionItem, Optional<PartitionUpdate>>> readTransaction(TransactionData transactionData)
     {
         return item -> {

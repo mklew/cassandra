@@ -22,12 +22,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.SystemClock;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -69,11 +71,21 @@ public class TransactionStateUtils
 
         final List<TransactionItem> transactionItems = dto.getTransactionItems()
                                                           .stream()
-                                                          .map(ti -> new TransactionItem(new Murmur3Partitioner.LongToken(ti.getToken()),
-                                                                                         ti.getKsName(),
-                                                                                         ti.getCfName()))
+                                                          .map(composeItem())
                                                           .collect(Collectors.toList());
 
         return recreateTransactionState(transactionId, transactionItems);
+    }
+
+    public static TransactionItem composeItem(TransactionItemDto transactionItemDto)
+    {
+        return composeItem().apply(transactionItemDto);
+    }
+
+    private static Function<TransactionItemDto, TransactionItem> composeItem()
+    {
+        return ti -> new TransactionItem(new Murmur3Partitioner.LongToken(ti.getToken()),
+                                       ti.getKsName(),
+                                       ti.getCfName());
     }
 }

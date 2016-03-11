@@ -18,9 +18,11 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BiFunction;
@@ -34,10 +36,12 @@ import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
@@ -53,6 +57,8 @@ import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.utils.FBUtilities;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
@@ -191,7 +197,7 @@ public class MppServiceImpl implements MppService
 
         final TransactionData transactionData = getTransactionData(id);
         final String ksName = transactionItem.getKsName();
-        final UUID cfId = Schema.instance.getId(ksName, transactionItem.getCfName());
+        final UUID cfId = getCfId(transactionItem);
 
         final Optional<PartitionUpdate> partitionUpdateOpt = transactionData.readData(ksName, cfId, transactionItem.getToken());
 
@@ -199,6 +205,11 @@ public class MppServiceImpl implements MppService
                     (partitionUpdateOpt.isPresent() ? " partition update" : " not found partition update"), transactionState);
 
         return partitionUpdateOpt;
+    }
+
+    private static UUID getCfId(TransactionItem transactionItem)
+    {
+        return Schema.instance.getId(transactionItem.getKsName(), transactionItem.getCfName());
     }
 
 
@@ -309,18 +320,86 @@ public class MppServiceImpl implements MppService
     @Override
     public void makeTransactionDataConsistent(TransactionState transactionState)
     {
+        if(transactionNotFrozenAlready(transactionState)) {
+            Map<TransactionItem, List<PartitionUpdate>> itemWithPartitionUpdates = readTransactionDataService.readRelevantForThisNode(transactionState,
+                                                                                                                                      ConsistencyLevel.LOCAL_TRANSACTIONAL);
+            Preconditions.checkState(!itemWithPartitionUpdates.isEmpty(), "should have at least 1 item, otherwise this node wound't be contacted");
 
+            Stream<Mutation> mutationsStream = itemWithPartitionUpdates.entrySet().stream().map(itemAndPartitionUpdates -> {
+                List<PartitionUpdate> partitionUpdates = itemAndPartitionUpdates.getValue();
+                PartitionUpdate consistentUpdate = PartitionUpdate.merge(partitionUpdates);
+                return new Mutation(consistentUpdate);
+            });
+
+            mutationsStream.forEach(mutation -> {
+                privateMemtableStorage.storeMutation(transactionState.id(), mutation);
+            });
+
+            privateMemtableStorage.freezeTransaction(transactionState.id());
+        }
+    }
+
+    private boolean transactionNotFrozenAlready(TransactionState transactionState)
+    {
+        return privateMemtableStorage.readTransactionData(transactionState.id()).isFrozen();
     }
 
     @Override
     public void makeTransactionDataConsistent(String transactionStateAsJson)
     {
         // TODO [MPP] Implement it
+        TransactionState transactionState = readTransactionStateFromJson(transactionStateAsJson);
+        makeTransactionDataConsistent(transactionState);
+    }
+
+    private static TransactionState readTransactionStateFromJson(String transactionStateAsJson)
+    {
+        TransactionStateDto transactionStateDto = null;
+        try
+        {
+            transactionStateDto = Json.JSON_OBJECT_MAPPER.readValue(transactionStateAsJson, TransactionStateDto.class);
+        }
+        catch (IOException e)
+        {
+            logger.error("Cannot create TransactionStateDto from json", e);
+            throw new RuntimeException(e);
+        }
+        return TransactionStateUtils.compose(transactionStateDto);
+    }
+
+    private static TransactionItem readTransactionItemFromJson(String transactionItemAsJson)
+    {
+        TransactionItemDto transactionItemDto = null;
+        try
+        {
+            transactionItemDto = Json.JSON_OBJECT_MAPPER.readValue(transactionItemAsJson, TransactionItemDto.class);
+        }
+        catch (IOException e)
+        {
+            logger.error("Cannot create TransactionItemDto from json", e);
+            throw new RuntimeException(e);
+        }
+        return TransactionStateUtils.composeItem(transactionItemDto);
     }
 
     public void deleteSingleItem(String transactionStateAsJson, String transactionItemAsJson)
     {
-        // TODO [MPP] Implement it
         logger.info("deleteSingleItem tx {} ti {}", transactionStateAsJson, transactionItemAsJson);
+        TransactionState transactionState = readTransactionStateFromJson(transactionStateAsJson);
+        TransactionItem transactionItem = readTransactionItemFromJson(transactionItemAsJson);
+
+        Preconditions.checkArgument(transactionState.hasItem(transactionItem),
+                                    "Cannot delete transaction item that does not belong to transaction. TransactionState is: " +
+                                    transactionState + " and item: " + transactionItem);
+
+        purgeTransactionItem(transactionState, transactionItem);
+
+        logger.info("DONE: deleted single transaction item tx {} ti {}", transactionStateAsJson, transactionItemAsJson);
+    }
+
+    private void purgeTransactionItem(TransactionState transactionState, TransactionItem transactionItem)
+    {
+        privateMemtableStorage.readTransactionData(transactionState.id())
+                              .purge(transactionItem.getKsName(), getCfId(transactionItem), transactionItem.getToken());
     }
 }
