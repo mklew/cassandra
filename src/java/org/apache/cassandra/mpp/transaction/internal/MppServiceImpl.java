@@ -112,7 +112,7 @@ public class MppServiceImpl implements MppService
         logger.info("Commit transaction called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
 
         // TODO [MPP] Implement it
-        throw new NotImplementedException();
+//        throw new NotImplementedException();
     }
 
     public void rollbackTransaction(TransactionState transactionState)

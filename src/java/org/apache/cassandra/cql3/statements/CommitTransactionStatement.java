@@ -29,6 +29,7 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.mpp.MppServicesLocator;
+import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -75,10 +76,14 @@ public class CommitTransactionStatement implements CQLStatement
     private ResultMessage executeCommitTransactionStatement(QueryOptions options)
     {
         TransactionState transactionState = MppStatementUtils.getTransactionState(options, transactionStateAsJson);
+
+
         System.out.println("CommitTransactionStatement transactionState is " + transactionState);
 
         MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency());
-        return null;
+        // TODO [MPP]  Maybe return some result
+        return MppServiceUtils.transformResultSetToResultMessage(MppServiceUtils.mapTransactionStateToResultSet(transactionState, false));
+
     }
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
