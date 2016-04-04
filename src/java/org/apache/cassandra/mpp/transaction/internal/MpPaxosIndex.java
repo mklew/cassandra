@@ -53,7 +53,7 @@ import org.apache.cassandra.mpp.transaction.paxos.MpPaxosIdImpl;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
-import static org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl.TRANSACTION_ITEMS_OWNED_BY_THIS_NODE;
+import static org.apache.cassandra.mpp.transaction.internal.ForEachReplicaGroupOperations.TRANSACTION_ITEMS_OWNED_BY_THIS_NODE;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>

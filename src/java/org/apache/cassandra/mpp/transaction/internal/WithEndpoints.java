@@ -18,32 +18,14 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
-import org.junit.Test;
-
-import org.apache.cassandra.tools.NodeProbe;
+import java.net.InetAddress;
+import java.util.List;
 
 /**
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 17/02/16
- */
-public class NodeProbeTest
+* @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+* @since 04/04/16
+*/
+interface WithEndpoints
 {
-    @Test
-    public void testThatNodeProbeCanConnectToNodesInCcmCluster() throws Throwable {
-        // given ccm cluster is started.
-
-        NodeProbe node1 = new NodeProbe("127.0.0.1", 7100);
-        NodeProbe node2 = new NodeProbe("127.0.0.1", 7200);
-        NodeProbe node3 = new NodeProbe("127.0.0.1", 7300);
-        System.out.println(node1.getLocalHostId());
-
-
-
-
-        System.out.println(node3.getLocalHostId());
-        Thread.sleep(500);
-
-        System.out.println(node2.getLocalHostId());
-
-    }
+    List<InetAddress> getEndPoints();
 }

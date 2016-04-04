@@ -67,15 +67,15 @@ public class ReadTransactiondataServiceImplTest extends MppCQLTester
         final ReadTransactionDataServiceImpl service = mppExtensionServices.getMppModule().getReadTransactionDataServiceImpl();
 
 
-        final Stream<ReadTransactionDataServiceImpl.TransactionItemWithAddresses> r = ReadTransactionDataServiceImpl.identifyTransactionItemsOwnedByThisNode(transactionState);
-        final List<ReadTransactionDataServiceImpl.TransactionItemWithAddresses> collect = r.collect(Collectors.toList());
+        final Stream<TransactionItemWithAddresses> r = ForEachReplicaGroupOperations.identifyTransactionItemsOwnedByThisNode(transactionState);
+        final List<TransactionItemWithAddresses> collect = r.collect(Collectors.toList());
 
         Assert.assertEquals(1, collect.size());
 
 
-        Assert.assertEquals(1, service.countNumberOfRequestsRequired(transactionState));
+        Assert.assertEquals(1, ForEachReplicaGroupOperations.countNumberOfRequestsRequired(transactionState));
 
-        final Collection<ReadTransactionDataServiceImpl.ReadRequestRecipe> readRequestRecipes = service.prepareRequests(transactionState);
+        final Collection<ReadTransactionDataServiceImpl.ReadRequestRecipe> readRequestRecipes = ReadTransactionDataServiceImpl.prepareRequests(transactionState);
         Assert.assertEquals(1, readRequestRecipes.size());
         System.out.println(readRequestRecipes.iterator().next());
     }
