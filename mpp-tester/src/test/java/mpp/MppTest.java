@@ -69,8 +69,6 @@ public class MppTest extends BaseClusterTest
         transactionState = transactionState.merge(Item.persistItem(sessionN1, itemWithJustId, transactionState));
 
         final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
-
-
         final String txStateJson = getJson(transactionStateDto);
 
         final String stmt = "READ TRANSACTIONAL TRANSACTION AS JSON '" + txStateJson + "' FROM " + "mpptest.items TOKEN " + pricelessToken.getTokenValue();
@@ -101,7 +99,7 @@ public class MppTest extends BaseClusterTest
         Assert.assertEquals(1, allItems.stream().filter(i -> i.equals(itemWithJustId)).count());
     }
 
-    private String getJson(TransactionStateDto transactionStateDto)
+    public static String getJson(TransactionStateDto transactionStateDto)
     {
         final ObjectMapper objectMapper = new ObjectMapper();
         try

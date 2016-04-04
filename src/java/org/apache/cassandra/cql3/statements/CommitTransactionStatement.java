@@ -35,8 +35,6 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 31/01/16
@@ -65,7 +63,7 @@ public class CommitTransactionStatement implements CQLStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        checkFalse(transactionStateAsJson == null, "Transaction state should be present");
+//        checkFalse(transactionStateAsJson == null, "Transaction state should be present");
     }
 
     public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
