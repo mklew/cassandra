@@ -15,18 +15,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.cassandra.service.mppaxos;
 
-package org.apache.cassandra.mpp.transaction.paxos;
+import org.apache.cassandra.db.WriteResponse;
+import org.apache.cassandra.net.IVerbHandler;
+import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.tracing.Tracing;
 
-import java.util.UUID;
-
-/**
- * Marker
- *
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 11/03/16
- */
-public interface MpPaxosId
+public class MpCommitVerbHandler implements IVerbHandler<MpCommit>
 {
-    UUID getPaxosId();
+    public void doVerb(MessageIn<MpCommit> message, int id)
+    {
+        MpPaxosState.commit(message.payload);
+
+        Tracing.trace("Enqueuing acknowledge to {}", message.from);
+        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, message.from);
+    }
 }

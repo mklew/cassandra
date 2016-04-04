@@ -31,7 +31,9 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.service.MppServiceMXBean;
+import org.apache.cassandra.service.mppaxos.MpPrePrepare;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -107,4 +109,6 @@ public interface MppService extends MppServiceMXBean
     void flushTransactionLocally(TransactionId transactionId);
 
     void makeTransactionDataConsistent(TransactionState transactionState);
+
+    Optional<MpPaxosId> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare);
 }

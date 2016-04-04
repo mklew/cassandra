@@ -17,18 +17,33 @@
  */
 package org.apache.cassandra.net;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.IOError;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.net.*;
+import java.net.BindException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
@@ -36,18 +51,27 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TracingAwareExecutorService;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.batchlog.Batch;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.SnapshotCommand;
+import org.apache.cassandra.db.TransactionalMutation;
+import org.apache.cassandra.db.TruncateResponse;
+import org.apache.cassandra.db.Truncation;
+import org.apache.cassandra.db.WriteResponse;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.IPartitioner;
@@ -69,12 +93,24 @@ import org.apache.cassandra.mpp.transaction.network.messages.PrivateMemtableRead
 import org.apache.cassandra.mpp.transaction.network.messages.PrivateMemtableReadResponse;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.security.SSLFactory;
-import org.apache.cassandra.service.*;
+import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.mppaxos.MpCommit;
+import org.apache.cassandra.service.mppaxos.MpPrePrepare;
+import org.apache.cassandra.service.mppaxos.MpPrePrepareResponse;
+import org.apache.cassandra.service.mppaxos.MpPrepareResponse;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.BooleanSerializer;
+import org.apache.cassandra.utils.ExpiringMap;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.StatusLogger;
+import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 public final class MessagingService implements MessagingServiceMBean
@@ -144,6 +180,10 @@ public final class MessagingService implements MessagingServiceMBean
         // remember to add new verbs at the end, since we serialize by ordinal
         PRIVATE_MEMTABLE_WRITE,
         PRIVATE_MEMTABLE_READ,
+        MP_PAXOS_PREPARE,
+        MP_PAXOS_PROPOSE,
+        MP_PAXOS_COMMIT,
+        MP_PAXOS_PRE_PREARE,
         UNUSED_1,
         UNUSED_2,
         UNUSED_3,
@@ -164,6 +204,10 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.PAXOS_COMMIT, Stage.MUTATION);
         put(Verb.BATCH_STORE, Stage.MUTATION);
         put(Verb.BATCH_REMOVE, Stage.MUTATION);
+        put(Verb.MP_PAXOS_PREPARE, Stage.MUTATION);
+        put(Verb.MP_PAXOS_PROPOSE, Stage.MUTATION);
+        put(Verb.MP_PAXOS_COMMIT, Stage.MUTATION);
+        put(Verb.MP_PAXOS_PRE_PREARE, Stage.MUTATION);
 
         put(Verb.READ, Stage.READ);
         put(Verb.PRIVATE_MEMTABLE_READ, Stage.PRIVATE_MEMTABLES_WRITE); // TODO [MPP] Maybe another stage for reads? Guess not
@@ -238,6 +282,10 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.PAXOS_PREPARE, Commit.serializer);
         put(Verb.PAXOS_PROPOSE, Commit.serializer);
         put(Verb.PAXOS_COMMIT, Commit.serializer);
+        put(Verb.MP_PAXOS_PREPARE, MpCommit.serializer);
+        put(Verb.MP_PAXOS_PROPOSE, MpCommit.serializer);
+        put(Verb.MP_PAXOS_COMMIT, MpCommit.serializer);
+        put(Verb.MP_PAXOS_PRE_PREARE, MpPrePrepare.serializer);
         put(Verb.HINT, HintMessage.serializer);
         put(Verb.BATCH_STORE, Batch.serializer);
         put(Verb.BATCH_REMOVE, UUIDSerializer.serializer);
@@ -267,6 +315,10 @@ public final class MessagingService implements MessagingServiceMBean
 
         put(Verb.PAXOS_PREPARE, PrepareResponse.serializer);
         put(Verb.PAXOS_PROPOSE, BooleanSerializer.serializer);
+
+        put(Verb.MP_PAXOS_PREPARE, MpPrepareResponse.serializer);
+        put(Verb.MP_PAXOS_PROPOSE, BooleanSerializer.serializer);
+        put(Verb.MP_PAXOS_PRE_PREARE, MpPrePrepareResponse.serializer);
 
         put(Verb.BATCH_STORE, WriteResponse.serializer);
         put(Verb.BATCH_REMOVE, WriteResponse.serializer);
@@ -651,7 +703,8 @@ public final class MessagingService implements MessagingServiceMBean
         assert message.verb == Verb.MUTATION
             || message.verb == Verb.PRIVATE_MEMTABLE_WRITE
             || message.verb == Verb.COUNTER_MUTATION
-            || message.verb == Verb.PAXOS_COMMIT;
+            || message.verb == Verb.PAXOS_COMMIT
+            || message.verb == Verb.MP_PAXOS_COMMIT;
         int messageId = nextId();
 
         CallbackInfo previous = callbacks.put(messageId,

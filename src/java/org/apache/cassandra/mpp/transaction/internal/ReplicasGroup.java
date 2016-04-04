@@ -16,17 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction.paxos;
+package org.apache.cassandra.mpp.transaction.internal;
 
-import java.util.UUID;
+import java.net.InetAddress;
+import java.util.List;
 
 /**
- * Marker
- *
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 11/03/16
- */
-public interface MpPaxosId
+* @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+* @since 04/04/16
+*/
+public class ReplicasGroup
 {
-    UUID getPaxosId();
+    private final List<InetAddress> replicas;
+
+    ReplicasGroup(List<InetAddress> replicas)
+    {
+        this.replicas = replicas;
+    }
+
+    public List<InetAddress> getReplicas()
+    {
+        return replicas;
+    }
 }

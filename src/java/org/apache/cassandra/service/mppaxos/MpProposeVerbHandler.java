@@ -16,17 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp.transaction.paxos;
+package org.apache.cassandra.service.mppaxos;
 
-import java.util.UUID;
 
-/**
- * Marker
- *
- * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 11/03/16
- */
-public interface MpPaxosId
+import org.apache.cassandra.net.IVerbHandler;
+import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.BooleanSerializer;
+
+public class MpProposeVerbHandler implements IVerbHandler<MpCommit>
 {
-    UUID getPaxosId();
+    public void doVerb(MessageIn<MpCommit> message, int id)
+    {
+        Boolean response = MpPaxosState.propose(message.payload);
+        MessageOut<Boolean> reply = new MessageOut<Boolean>(MessagingService.Verb.REQUEST_RESPONSE, response, BooleanSerializer.serializer);
+        MessagingService.instance().sendReply(reply, id, message.from);
+    }
 }

@@ -156,6 +156,10 @@ import org.apache.cassandra.repair.RepairRunnable;
 import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.service.mppaxos.MpCommitVerbHandler;
+import org.apache.cassandra.service.mppaxos.MpPrePrepareVerbHandler;
+import org.apache.cassandra.service.mppaxos.MpPrepareVerbHandler;
+import org.apache.cassandra.service.mppaxos.MpProposeVerbHandler;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
 import org.apache.cassandra.service.paxos.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.ProposeVerbHandler;
@@ -330,6 +334,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.PAXOS_PROPOSE, new ProposeVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.PAXOS_COMMIT, new CommitVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.HINT, new HintVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PREPARE, new MpPrepareVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PROPOSE, new MpProposeVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_COMMIT, new MpCommitVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PRE_PREARE, new MpPrePrepareVerbHandler());
+
 
         // see BootStrapper for a summary of how the bootstrap verbs interact
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.REPLICATION_FINISHED, new ReplicationFinishedVerbHandler());

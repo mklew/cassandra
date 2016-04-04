@@ -1119,6 +1119,10 @@ public class DatabaseDescriptor
             case PAXOS_COMMIT:
             case PAXOS_PREPARE:
             case PAXOS_PROPOSE:
+            case MP_PAXOS_COMMIT:
+            case MP_PAXOS_PREPARE:
+            case MP_PAXOS_PROPOSE:
+            case MP_PAXOS_PRE_PREARE:
             case HINT:
             case BATCH_STORE:
             case BATCH_REMOVE:

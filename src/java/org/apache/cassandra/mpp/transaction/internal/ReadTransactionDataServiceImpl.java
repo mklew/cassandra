@@ -181,6 +181,7 @@ public class ReadTransactionDataServiceImpl implements ReadTransactionDataServic
 
         final Stream<TransactionItemWithAddresses> withAddresses = ForEachReplicaGroupOperations.mapTransactionItemsToTheirEndpoints(transactionState);
 
+
         final Map<List<InetAddress>, Map<Integer, List<TransactionItemWithAddresses>>> groupedByReplicasAndByReplicatonFactor = withAddresses.collect(Collectors.groupingBy(x -> x.getEndPoints(), Collectors.groupingBy(x -> x.getReplicationFactor())));
 
         int totalNumberOfRequests = groupedByReplicasAndByReplicatonFactor.entrySet().stream().map(e -> e.getValue().keySet().size()).reduce(0, (a, b) -> a + b);

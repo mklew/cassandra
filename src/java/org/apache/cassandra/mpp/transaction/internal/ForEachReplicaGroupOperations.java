@@ -50,6 +50,27 @@ public class ForEachReplicaGroupOperations
 {
     private static final Logger logger = LoggerFactory.getLogger(ForEachReplicaGroupOperations.class);
 
+    // TODO [MPP] Assumption is that replication factor = 3
+    public static List<ReplicasGroupAndOwnedItems> groupItemsByReplicas(TransactionState transactionState) {
+        final Stream<TransactionItemWithAddresses> withAddresses = ForEachReplicaGroupOperations.mapTransactionItemsToTheirEndpoints(transactionState);
+
+        // addresses -> replication factor -> transaction items
+
+        // group transaction items by common replication factor and by common replicas
+        Map<List<InetAddress>, List<TransactionItemWithAddresses>> itemsGroupedByReplicasGroup = withAddresses.collect(Collectors.groupingBy(x -> x.getEndPoints(), Collectors.toList()));
+
+        List<ReplicasGroupAndOwnedItems> groupingByReplicas = itemsGroupedByReplicasGroup.entrySet().stream().map(v -> {
+            List<InetAddress> replicas = v.getKey();
+            List<TransactionItem> itemsOwnedByReplicasGroup = v.getValue().stream().map(TransactionItemWithAddresses::getTxItem).collect(Collectors.toList());
+
+
+            ReplicasGroup replicasGroup = new ReplicasGroup(replicas);
+            ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems = new ReplicasGroupAndOwnedItems(replicasGroup, itemsOwnedByReplicasGroup);
+            return replicasGroupAndOwnedItems;
+        }).collect(Collectors.toList());
+        return groupingByReplicas;
+    }
+
     public static int countNumberOfRequestsRequired(TransactionState transactionState) {
         final Stream<TransactionItemWithAddresses> ownedByThisNode = identifyTransactionItemsOwnedByThisNode(transactionState);
 

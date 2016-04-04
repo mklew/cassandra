@@ -59,6 +59,12 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
+import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.mppaxos.MpPrePrepare;
+import org.apache.cassandra.service.mppaxos.MpPrePrepareMpPaxosCallback;
+import org.apache.cassandra.service.mppaxos.ReplicasGroupsOperationCallback;
 import org.apache.cassandra.utils.FBUtilities;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
@@ -73,6 +79,30 @@ public class MppServiceImpl implements MppService
     private PrivateMemtableStorage privateMemtableStorage;
 
     private ReadTransactionDataService readTransactionDataService;
+
+    private MpPaxosIndex mpPaxosIndex;
+
+    private MessagingService messagingService;
+
+    public MessagingService getMessagingService()
+    {
+        return messagingService;
+    }
+
+    public void setMessagingService(MessagingService messagingService)
+    {
+        this.messagingService = messagingService;
+    }
+
+    public MpPaxosIndex getMpPaxosIndex()
+    {
+        return mpPaxosIndex;
+    }
+
+    public void setMpPaxosIndex(MpPaxosIndex mpPaxosIndex)
+    {
+        this.mpPaxosIndex = mpPaxosIndex;
+    }
 
     public ReadTransactionDataService getReadTransactionDataService()
     {
@@ -101,6 +131,8 @@ public class MppServiceImpl implements MppService
         return new TransactionState(txId, Collections.emptyList());
     }
 
+    public static ConsistencyLevel MPP_HARDCODED_CONSISTENCY_LEVEL = ConsistencyLevel.LOCAL_TRANSACTIONAL;
+
     /**
      * It should block until end of transaction, and then return.
      *
@@ -110,9 +142,40 @@ public class MppServiceImpl implements MppService
     public void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel)
     {
         logger.info("Commit transaction called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
+        List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
 
-        // TODO [MPP] Implement it
-//        throw new NotImplementedException();
+        ReplicasGroupsOperationCallback replicasOperationsCallback = new ReplicasGroupsOperationCallback(replicasAndOwnedItems);
+        replicasAndOwnedItems.stream().parallel().forEach(replicaGroupWithItems -> {
+
+            int targetReplicas = replicaGroupWithItems.getReplicasGroup().getReplicas().size();
+            MpPrePrepareMpPaxosCallback callbackForPrePrepare = new MpPrePrepareMpPaxosCallback(targetReplicas, MPP_HARDCODED_CONSISTENCY_LEVEL, replicasOperationsCallback);
+            MpPrePrepare mpPrePrepare = new MpPrePrepare(transactionState);
+            MessageOut<MpPrePrepare> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_PRE_PREARE, mpPrePrepare, MpPrePrepare.serializer);
+
+            replicaGroupWithItems.getReplicasGroup().getReplicas().stream().parallel().forEach(replica -> {
+                messagingService.sendRR(message, replica, callbackForPrePrepare);
+            });
+
+            callbackForPrePrepare.await();
+
+            callbackForPrePrepare.getResponsesByReplica().entrySet().stream().forEach(kv -> {
+                logger.debug("Replica {} has pre preared paxos id {}", kv.getKey(), kv.getValue().map(id -> id.getPaxosId().toString()).orElse("undefined"));
+            });
+        });
+
+        replicasOperationsCallback.await();
+
+        logger.info("Commit transaction has successfully pre prepared all replicas groups");
+
+        // For each replica group
+            // 1. MppPrePrepareRequest - successfully register in MpPaxosIndex.
+                // 1.1 each quorum of replicas should respond with paxos id
+                // 1.2 each replica should make their transaction state consistent using MppService#makeTransactionDataConsistent ( this could happen later)
+            // 2. MppPrepareRequest
+                // send: (generated ballot + transaction state)
+                // given transaction state, paxos id should be found in index. Else transaction was rolled back
+                // access mp index -> find paxos id -> access MP Paxos State in system keyspace and find mp paxos state
+
     }
 
     public void rollbackTransaction(TransactionState transactionState)
@@ -337,6 +400,15 @@ public class MppServiceImpl implements MppService
 
             privateMemtableStorage.freezeTransaction(transactionState.id());
         }
+    }
+
+    public Optional<MpPaxosId> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare)
+    {
+        logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}", prePrepare.getTransactionState().getTransactionId());
+        Optional<MpPaxosId> mpPaxosId = mpPaxosIndex.acquireForMppPaxos(prePrepare.getTransactionState());
+
+        logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}, is paxos round present: {}, paxos id is: ", prePrepare.getTransactionState().getTransactionId(), mpPaxosId.isPresent(), mpPaxosId.map(id -> id.getPaxosId().toString()).orElse("not defined"));
+        return mpPaxosId;
     }
 
     private boolean transactionNotFrozenAlready(TransactionState transactionState)

@@ -52,4 +52,10 @@ public class MpPaxosIdImpl implements MpPaxosId
     {
         return mpPaxosId.hashCode();
     }
+
+    @Override
+    public UUID getPaxosId()
+    {
+        return mpPaxosId;
+    }
 }
