@@ -98,6 +98,7 @@ import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.mppaxos.MpCommit;
+import org.apache.cassandra.service.mppaxos.MpCommitWithHints;
 import org.apache.cassandra.service.mppaxos.MpPrePrepare;
 import org.apache.cassandra.service.mppaxos.MpPrePrepareResponse;
 import org.apache.cassandra.service.mppaxos.MpPrepareResponse;
@@ -183,6 +184,7 @@ public final class MessagingService implements MessagingServiceMBean
         MP_PAXOS_PREPARE,
         MP_PAXOS_PROPOSE,
         MP_PAXOS_COMMIT,
+        MP_PAXOS_COMMIT_WITH_HINTS,
         MP_PAXOS_PRE_PREARE,
         UNUSED_1,
         UNUSED_2,
@@ -208,6 +210,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.MP_PAXOS_PROPOSE, Stage.MUTATION);
         put(Verb.MP_PAXOS_COMMIT, Stage.MUTATION);
         put(Verb.MP_PAXOS_PRE_PREARE, Stage.MUTATION);
+        put(Verb.MP_PAXOS_COMMIT_WITH_HINTS, Stage.MUTATION);
 
         put(Verb.READ, Stage.READ);
         put(Verb.PRIVATE_MEMTABLE_READ, Stage.PRIVATE_MEMTABLES_WRITE); // TODO [MPP] Maybe another stage for reads? Guess not
@@ -286,6 +289,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.MP_PAXOS_PROPOSE, MpCommit.serializer);
         put(Verb.MP_PAXOS_COMMIT, MpCommit.serializer);
         put(Verb.MP_PAXOS_PRE_PREARE, MpPrePrepare.serializer);
+        put(Verb.MP_PAXOS_COMMIT_WITH_HINTS, MpCommitWithHints.serializer);
         put(Verb.HINT, HintMessage.serializer);
         put(Verb.BATCH_STORE, Batch.serializer);
         put(Verb.BATCH_REMOVE, UUIDSerializer.serializer);
@@ -704,7 +708,8 @@ public final class MessagingService implements MessagingServiceMBean
             || message.verb == Verb.PRIVATE_MEMTABLE_WRITE
             || message.verb == Verb.COUNTER_MUTATION
             || message.verb == Verb.PAXOS_COMMIT
-            || message.verb == Verb.MP_PAXOS_COMMIT;
+            || message.verb == Verb.MP_PAXOS_COMMIT
+            || message.verb == Verb.MP_PAXOS_COMMIT_WITH_HINTS;
         int messageId = nextId();
 
         CallbackInfo previous = callbacks.put(messageId,

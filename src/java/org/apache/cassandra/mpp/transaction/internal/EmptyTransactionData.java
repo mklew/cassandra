@@ -20,6 +20,7 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -98,6 +99,11 @@ public class EmptyTransactionData implements TransactionData
     public void purge(String ksName, UUID cfId, Token token)
     {
 
+    }
+
+    public List<Mutation> createMutationsForItems(List<TransactionItem> items, long timestamp)
+    {
+        return null;
     }
 
     public Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token)

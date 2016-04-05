@@ -48,6 +48,7 @@ import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.mpp.transaction.HintsService;
 import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
@@ -83,6 +84,13 @@ public class MppServiceImpl implements MppService
     private MpPaxosIndex mpPaxosIndex;
 
     private MessagingService messagingService;
+
+    private HintsService hintsService;
+
+    public void setHintsService(HintsService hintsService)
+    {
+        this.hintsService = hintsService;
+    }
 
     public MessagingService getMessagingService()
     {
@@ -368,7 +376,24 @@ public class MppServiceImpl implements MppService
         transactionData.applyAllMutationsIfNotTruncated(timestamp);
         mpPaxosIndex.acquireAndMarkAsCommitted(transactionState, timestamp);
         mpPaxosIndex.acquireAndRemoveSelf(transactionState);
+        // TODO [MPP] Private data should also have a retension, probably of same length as paxos state.
+        // It can be deleted if none of replicas miss Most Recent Commit
+        // It can be deleted on next paxos round
         privateMemtableStorage.removePrivateData(transactionState.id());
+    }
+
+    public void submitHints(List<MppHint> hints)
+    {
+        for( MppHint hint: hints) {
+            TransactionData transactionData = privateMemtableStorage.readTransactionData(hint.getId());
+            Preconditions.checkState(transactionData.isFrozen(), "Transaction data of tx id: " + hint.getId().unwrap() + " should be frozen in order to make hint");
+            List<Mutation> mutations = transactionData.createMutationsForItems(hint.getItemsToHint(), hint.getTimestamp());
+            for (Mutation mutation : mutations)
+            {
+                hintsService.submitHint(mutation, hint.getDestination());
+            }
+            logger.info("Hints [{}] about transaction {} submitted to destination {}", mutations.size(), hint.getId().unwrap(), hint.getDestination());
+        }
     }
 
     public void flushTransactionLocally(TransactionId transactionId)

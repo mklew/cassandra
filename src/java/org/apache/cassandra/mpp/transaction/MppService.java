@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -31,6 +32,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.internal.MppHint;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.service.MppServiceMXBean;
 import org.apache.cassandra.service.mppaxos.MpPrePrepare;
@@ -113,4 +115,6 @@ public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex
     Optional<MpPaxosId> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare);
 
     void multiPartitionPaxosCommitPhase(TransactionState transactionState, long ballot);
+
+    void submitHints(List<MppHint> hints);
 }

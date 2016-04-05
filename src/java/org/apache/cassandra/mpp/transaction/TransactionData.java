@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -67,4 +68,5 @@ public interface TransactionData extends ReadableTransactionData
      */
     void purge(String ksName, UUID cfId, Token token);
 
+    List<Mutation> createMutationsForItems(List<TransactionItem> items, long timestamp);
 }

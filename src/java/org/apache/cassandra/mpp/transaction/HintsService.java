@@ -15,28 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.service.mppaxos;
+
+package org.apache.cassandra.mpp.transaction;
 
 import java.net.InetAddress;
 
-import org.apache.cassandra.db.WriteResponse;
-import org.apache.cassandra.net.IVerbHandler;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.db.Mutation;
 
-public class MpCommitVerbHandler implements IVerbHandler<MpCommit>
+/**
+ * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+ * @since 05/04/16
+ */
+public interface HintsService
 {
-    public void doVerb(MessageIn<MpCommit> message, int id)
-    {
-        handleMessage(id, message.payload, message.from);
-    }
-
-    public static void handleMessage(int id, MpCommit commit, InetAddress from)
-    {
-        MpPaxosState.commit(commit);
-
-        Tracing.trace("Enqueuing acknowledge to {}", from);
-        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, from);
-    }
+    void submitHint(Mutation mutation, InetAddress destination);
 }

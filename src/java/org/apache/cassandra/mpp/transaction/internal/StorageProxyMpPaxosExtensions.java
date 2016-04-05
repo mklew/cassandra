@@ -20,11 +20,16 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Uninterruptibles;
 
@@ -49,6 +54,7 @@ import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.mppaxos.MpCommit;
+import org.apache.cassandra.service.mppaxos.MpCommitWithHints;
 import org.apache.cassandra.service.mppaxos.MpPrepareCallback;
 import org.apache.cassandra.service.mppaxos.MpProposeCallback;
 import org.apache.cassandra.service.mppaxos.ReplicasGroupsOperationCallback;
@@ -66,7 +72,6 @@ public class StorageProxyMpPaxosExtensions
     private static final CASClientRequestMetrics casWriteMetrics = new CASClientRequestMetrics("MPPCASWrite");
 
     private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("MPPCASRead");
-
 
     public void multiPartitionPaxos(TransactionState transactionState, ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems,
                                  ReplicasGroupsOperationCallback replicasGroupsOperationCallback, ClientState state) {
@@ -212,7 +217,7 @@ public class StorageProxyMpPaxosExtensions
             Iterable<InetAddress> missingMRC = summary.replicasMissingMostRecentCommit();
             if (Iterables.size(missingMRC) > 0)
             {
-                Tracing.trace("Repairing replicas that missed the most recent commit");
+//                Tracing.trace("Repairing replicas that missed the most recent commit");
                 sendCommit(mostRecent, missingMRC);
                 // TODO: provided commits don't invalid the prepare we just did above (which they don't), we could just wait
                 // for all the missingMRC to acknowledge this commit and then move on with proposing our value. But that means
@@ -316,7 +321,7 @@ public class StorageProxyMpPaxosExtensions
         List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspace.getName(), tk);
         Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace.getName());
 
-        AbstractWriteResponseHandler<Commit> responseHandler = null;
+        AbstractWriteResponseHandler<MpCommit> responseHandler = null;
         if (shouldBlock)
         {
             AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
@@ -324,19 +329,61 @@ public class StorageProxyMpPaxosExtensions
         }
 
         MessageOut<MpCommit> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_COMMIT, proposal, MpCommit.serializer);
-        for (InetAddress destination : Iterables.concat(naturalEndpoints, pendingEndpoints))
-        {
-            if (FailureDetector.instance.isAlive(destination))
+        List<InetAddress> allEndpoints = ImmutableList.copyOf(Iterables.concat(naturalEndpoints, pendingEndpoints));
+
+        Map<InetAddress, List<MppHint>> replicaToHints = new HashMap<>();
+
+        // If should hint then send commit wrapped in hint.
+        if(shouldHint) {
+            List<TransactionItemWithAddresses> transactionItemsAndAllTheirEndpoints = ForEachReplicaGroupOperations.mapTransactionItemsToAllEndpoints(proposal.update).collect(Collectors.toList());
+            Set<InetAddress> deadReplicas = allEndpoints.stream().filter(destination -> !FailureDetector.instance.isAlive(destination)).collect(Collectors.toSet());
+            List<InetAddress> aliveReplicas = allEndpoints.stream().filter(destination -> FailureDetector.instance.isAlive(destination)).collect(Collectors.toList());
+
+            replicaToHints = aliveReplicas.stream().map(aliveReplica -> {
+                List<MppHint> hints = deadReplicas.stream().map(deadReplica -> {
+                    List<TransactionItem> itemsToHintDeadReplica = transactionItemsAndAllTheirEndpoints
+                                                    .stream()
+                                                    .filter(ti -> ti.getEndPoints().contains(deadReplica))
+                                                    .filter(ti -> ti.getEndPoints().contains(aliveReplica))
+                                                    .map(ti -> ti.getTxItem()).collect(Collectors.toList());
+
+                    return new MppHint(deadReplica, UUIDGen.unixTimestamp(proposal.ballot), proposal.update.id(), itemsToHintDeadReplica);
+                }).collect(Collectors.toList());
+
+                return Pair.create(aliveReplica, hints);
+            }).filter(p -> !p.right.isEmpty()).collect(Collectors.toMap(p -> p.left, p -> p.right));
+
+            for (InetAddress destination : aliveReplicas)
             {
-                if (shouldBlock)
-                    MessagingService.instance().sendRR(message, destination, responseHandler, shouldHint);
-                else
-                    MessagingService.instance().sendOneWay(message, destination);
+                if(replicaToHints.containsKey(destination)) {
+                    // replica has hints for dead replicas so send commit with hints.
+                    List<MppHint> hints = replicaToHints.get(destination);
+                    MessageOut<MpCommitWithHints> messageWithHints = new MessageOut<>(MessagingService.Verb.MP_PAXOS_COMMIT_WITH_HINTS, new MpCommitWithHints(proposal, hints), MpCommitWithHints.serializer);
+                    if (shouldBlock)
+                        MessagingService.instance().sendRR(messageWithHints, destination, responseHandler, shouldHint);
+                    else
+                        MessagingService.instance().sendOneWay(messageWithHints, destination);
+                }
+                else {
+                    // send commit without hints.
+                    if (shouldBlock)
+                        MessagingService.instance().sendRR(message, destination, responseHandler, shouldHint);
+                    else
+                        MessagingService.instance().sendOneWay(message, destination);
+                }
             }
-            else if (shouldHint)
+        }
+        else {
+            // Then send commits only
+            for (InetAddress destination : allEndpoints)
             {
-                // TODO [MPP] No hints support in multi partition paxos.
-//                submitHint(proposal.makeMutation(), destination, null);
+                if (FailureDetector.instance.isAlive(destination))
+                {
+                    if (shouldBlock)
+                        MessagingService.instance().sendRR(message, destination, responseHandler, shouldHint);
+                    else
+                        MessagingService.instance().sendOneWay(message, destination);
+                }
             }
         }
 

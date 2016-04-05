@@ -30,6 +30,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +42,7 @@ import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -85,6 +88,30 @@ public class ForEachReplicaGroupOperations
     static Stream<TransactionItemWithAddresses> mapTransactionItemsToTheirEndpoints(TransactionState transactionState)
     {
         return transactionState.getTransactionItems().stream().map(mapTransactionItemToEndpoints());
+    }
+
+    static Stream<TransactionItemWithAddresses> mapTransactionItemsToAllEndpoints(TransactionState transactionState)
+    {
+        return transactionState.getTransactionItems().stream().map(mapTransactionItemToAliveOrDeadEndpoints());
+    }
+
+    static Function<TransactionItem, TransactionItemWithAddresses> mapTransactionItemToAliveOrDeadEndpoints()
+    {
+        return ti -> {
+            final Keyspace keyspace = Keyspace.open(ti.getKsName());
+            List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspace.getName(), ti.getToken());
+            Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(ti.getToken(), keyspace.getName());
+            ImmutableList<InetAddress> allEndpoints = ImmutableList.copyOf(Iterables.concat(naturalEndpoints, pendingEndpoints));
+
+//            List<InetAddress> allReplicas = StorageProxy.ge(keyspace, ti.getToken());
+            final AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
+//            logger.info("ReadTransactionDataService transaction items to replicas. All replicas are {}", allReplicas);
+            // TODO [MPP] I noticed that Write goes for natural + pending while reads are done just against natural using getLiveSortedEndpoints method in AbstractReadExecutor
+//            final ArrayList<InetAddress> naturalEndpoints = replicationStrategy.getNaturalEndpoints(ti.getToken());
+//            final Collection<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(ti.getToken(), ti.getKsName());
+//            final Iterable<InetAddress> addresses = Iterables.concat(naturalEndpoints, pending);
+            return new TransactionItemWithAddresses(ti, allEndpoints, replicationStrategy.getReplicationFactor());
+        };
     }
 
     static Function<TransactionItem, TransactionItemWithAddresses> mapTransactionItemToEndpoints()

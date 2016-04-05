@@ -15,28 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.service.mppaxos;
 
-import java.net.InetAddress;
+import java.io.IOException;
 
-import org.apache.cassandra.db.WriteResponse;
+import org.apache.cassandra.mpp.MppServicesLocator;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.tracing.Tracing;
 
-public class MpCommitVerbHandler implements IVerbHandler<MpCommit>
+/**
+ * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+ * @since 05/04/16
+ */
+public class MpCommitWithHintsVerbHandler implements IVerbHandler<MpCommitWithHints>
 {
-    public void doVerb(MessageIn<MpCommit> message, int id)
+    public void doVerb(MessageIn<MpCommitWithHints> message, int id) throws IOException
     {
-        handleMessage(id, message.payload, message.from);
-    }
-
-    public static void handleMessage(int id, MpCommit commit, InetAddress from)
-    {
-        MpPaxosState.commit(commit);
-
-        Tracing.trace("Enqueuing acknowledge to {}", from);
-        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, from);
+        MppServicesLocator.getInstance().submitHints(message.payload.getHints());
+        MpCommitVerbHandler.handleMessage(id, message.payload.getCommit(), message.from);
     }
 }

@@ -157,6 +157,7 @@ import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.mppaxos.MpCommitVerbHandler;
+import org.apache.cassandra.service.mppaxos.MpCommitWithHintsVerbHandler;
 import org.apache.cassandra.service.mppaxos.MpPrePrepareVerbHandler;
 import org.apache.cassandra.service.mppaxos.MpPrepareVerbHandler;
 import org.apache.cassandra.service.mppaxos.MpProposeVerbHandler;
@@ -337,6 +338,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PREPARE, new MpPrepareVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PROPOSE, new MpProposeVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_COMMIT, new MpCommitVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_COMMIT_WITH_HINTS, new MpCommitWithHintsVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PRE_PREARE, new MpPrePrepareVerbHandler());
 
 

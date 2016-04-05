@@ -30,6 +30,7 @@ import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
 import org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl;
 import org.apache.cassandra.mpp.transaction.network.MppNetworkService;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.StorageProxy;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -66,6 +67,7 @@ public class MppModule
         service.setReadTransactionDataService(readTransactionDataService);
         service.setMpPaxosIndex(mpPaxosIndex);
         service.setMessagingService(MessagingService.instance());
+        service.setHintsService((mutation, destination) -> StorageProxy.submitHint(mutation, destination, null));
 
         return new MppModule(service, readTransactionDataService);
     }

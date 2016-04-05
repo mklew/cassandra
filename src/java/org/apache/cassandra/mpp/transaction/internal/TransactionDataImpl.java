@@ -34,6 +34,7 @@ import java.util.stream.Stream;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -88,6 +89,23 @@ public class TransactionDataImpl implements TransactionData
             }
         }));
         ksToKeyToMutation.put(ksName, withoutModificationsOfCfForToken);
+    }
+
+    public List<Mutation> createMutationsForItems(List<TransactionItem> items, long timestamp)
+    {
+        return items.stream().map(ti -> {
+            return this.readData(ti.getKsName(), getCfId(ti), ti.getToken());
+        }).filter(Optional::isPresent)
+           .map(Optional::get).map(pu -> {
+                pu.updateAllTimestamp(timestamp);
+                return pu;
+        }).map(Mutation::new)
+           .collect(Collectors.toList());
+    }
+
+    private static UUID getCfId(TransactionItem transactionItem)
+    {
+        return Schema.instance.getId(transactionItem.getKsName(), transactionItem.getCfName());
     }
 
     public void addMutation(Mutation mutation)
