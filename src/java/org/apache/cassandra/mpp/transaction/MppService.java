@@ -25,6 +25,7 @@ import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -34,6 +35,7 @@ import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.internal.MppHint;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MppServiceMXBean;
 import org.apache.cassandra.service.mppaxos.MpPrePrepare;
 
@@ -60,8 +62,10 @@ public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex
      * TODO [MPP] Test it via my networking
      * @param transactionState
      * @param consistencyLevel
+     * @param options
+     * @param clientState
      */
-    void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel);
+    void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState);
 
     /**
      * This has to message all nodes that took part in transaction and tell them to get rid of private memtables

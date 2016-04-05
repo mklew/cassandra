@@ -38,4 +38,9 @@ public class ReplicasGroup
     {
         return replicas;
     }
+
+    public String toString()
+    {
+        return "ReplicaGroup[" + replicas + ']';
+    }
 }

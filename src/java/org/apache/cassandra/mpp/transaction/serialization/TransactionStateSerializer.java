@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.UUID;
 
 import org.apache.cassandra.db.TypeSizes;
@@ -55,7 +56,7 @@ public class TransactionStateSerializer implements IVersionedSerializer<Transact
         int size = transactionState.getTransactionItems().size();
         out.writeInt(size);
 
-        assert size > 0;
+//        assert size > 0;
         for (TransactionItem transactionItem : transactionState.getTransactionItems())
         {
             TransactionItemSerializer.instance.serialize(transactionItem, out, version);
@@ -68,16 +69,19 @@ public class TransactionStateSerializer implements IVersionedSerializer<Transact
         final UUID id = UUIDSerializer.instance.deserialize(ByteBufferUtil.read(in, SIZE_OF_UUID));
         final int size = in.readInt();
 
-        assert size > 0;
-
-        Collection<TransactionItem> transactionItems = new ArrayList<>(size);
-
-        for (int i = 0; i < size; ++i) {
-            final TransactionItem transactionItem = TransactionItemSerializer.instance.deserialize(in, version);
-            transactionItems.add(transactionItem);
+//        assert size > 0;
+        if(size == 0 ) {
+            return TransactionStateUtils.recreateTransactionState(id, Collections.emptyList());
         }
+        else {
+            Collection<TransactionItem> transactionItems = new ArrayList<>(size);
 
-        return TransactionStateUtils.recreateTransactionState(id, transactionItems);
+            for (int i = 0; i < size; ++i) {
+                final TransactionItem transactionItem = TransactionItemSerializer.instance.deserialize(in, version);
+                transactionItems.add(transactionItem);
+            }
+            return TransactionStateUtils.recreateTransactionState(id, transactionItems);
+        }
     }
 
     public static TransactionState fromBytes(ByteBuffer bytes, int version)

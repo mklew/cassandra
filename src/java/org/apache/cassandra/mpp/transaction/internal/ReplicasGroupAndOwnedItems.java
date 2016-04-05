@@ -47,4 +47,12 @@ public class ReplicasGroupAndOwnedItems
     {
         return ownedItems;
     }
+
+    public String toString()
+    {
+        return "ReplicasGroupAndOwnedItems{" +
+               "replicasGroup=" + replicasGroup +
+               ", ownedItems=" + ownedItems +
+               '}';
+    }
 }

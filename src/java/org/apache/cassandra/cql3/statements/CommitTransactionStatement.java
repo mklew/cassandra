@@ -68,17 +68,17 @@ public class CommitTransactionStatement implements CQLStatement
 
     public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        return executeCommitTransactionStatement(options);
+        return executeCommitTransactionStatement(options, state.getClientState());
     }
 
-    private ResultMessage executeCommitTransactionStatement(QueryOptions options)
+    private ResultMessage executeCommitTransactionStatement(QueryOptions options, ClientState clientState)
     {
         TransactionState transactionState = MppStatementUtils.getTransactionState(options, transactionStateAsJson);
 
 
         System.out.println("CommitTransactionStatement transactionState is " + transactionState);
 
-        MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency());
+        MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency(), options, clientState);
         // TODO [MPP]  Maybe return some result
         return MppServiceUtils.transformResultSetToResultMessage(MppServiceUtils.mapTransactionStateToResultSet(transactionState, false));
 
@@ -86,7 +86,7 @@ public class CommitTransactionStatement implements CQLStatement
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        return executeCommitTransactionStatement(options);
+        return executeCommitTransactionStatement(options, state.getClientState());
     }
 
     public Iterable<Function> getFunctions()

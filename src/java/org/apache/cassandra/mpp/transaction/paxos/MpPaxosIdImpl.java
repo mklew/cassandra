@@ -58,4 +58,9 @@ public class MpPaxosIdImpl implements MpPaxosId
     {
         return mpPaxosId;
     }
+
+    public String toString()
+    {
+        return "MpPaxosId[" + mpPaxosId + ']';
+    }
 }

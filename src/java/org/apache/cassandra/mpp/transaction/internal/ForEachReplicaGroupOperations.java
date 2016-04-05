@@ -44,6 +44,7 @@ import org.apache.cassandra.mpp.transaction.network.MppResponseMessage;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -60,7 +61,21 @@ public class ForEachReplicaGroupOperations
         // addresses -> replication factor -> transaction items
 
         // group transaction items by common replication factor and by common replicas
-        Map<List<InetAddress>, List<TransactionItemWithAddresses>> itemsGroupedByReplicasGroup = withAddresses.collect(Collectors.groupingBy(x -> x.getEndPoints(), Collectors.toList()));
+//        Map<List<InetAddress>, List<TransactionItemWithAddresses>> itemsGroupedByReplicasGroup = withAddresses.collect(Collectors.groupingBy(x -> {
+//            x.getEndPoints()
+//            return eImmutableList()
+//        }, Collectors.toList()));
+
+        Map<List<String>, List<TransactionItemWithAddresses>> groupedBySameReplicas = withAddresses.map(txItemWithAddress -> {
+            List<String> grouping = txItemWithAddress.getEndPoints().stream().map(InetAddress::getHostAddress).sorted().collect(Collectors.toList());
+
+            return Pair.create(txItemWithAddress, grouping);
+        }).collect(Collectors.groupingBy(x -> x.right, Collectors.mapping(x -> x.left, Collectors.toList())));
+
+        Map<List<InetAddress>, List<TransactionItemWithAddresses>> itemsGroupedByReplicasGroup = groupedBySameReplicas.entrySet().stream().collect(Collectors.toMap(entry -> {
+            return entry.getValue().iterator().next().getEndPoints();
+        }, entry -> entry.getValue()));
+
 
         List<ReplicasGroupAndOwnedItems> groupingByReplicas = itemsGroupedByReplicasGroup.entrySet().stream().map(v -> {
             List<InetAddress> replicas = v.getKey();

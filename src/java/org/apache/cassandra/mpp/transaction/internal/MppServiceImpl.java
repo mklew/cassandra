@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.Json;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.EmptyIterators;
@@ -63,6 +64,7 @@ import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.mppaxos.MpPrePrepare;
 import org.apache.cassandra.service.mppaxos.MpPrePrepareMpPaxosCallback;
 import org.apache.cassandra.service.mppaxos.ReplicasGroupsOperationCallback;
@@ -143,40 +145,36 @@ public class MppServiceImpl implements MppService
 
     /**
      * It should block until end of transaction, and then return.
-     *
-     * @param transactionState
+     *  @param transactionState
      * @param consistencyLevel
+     * @param options
+     * @param clientState
      */
-    public void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel)
+    public void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState)
     {
         logger.info("Commit transaction called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
+
         List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
+        StorageProxyMpPaxosExtensions.ReplicaGroupsPhaseExecutor multiPartitionPaxosPhaseExecutor = StorageProxyMpPaxosExtensions.createMultiPartitionPaxosPhaseExecutor(replicasAndOwnedItems, transactionState, clientState);
 
-        ReplicasGroupsOperationCallback replicasOperationsCallback = new ReplicasGroupsOperationCallback(replicasAndOwnedItems);
-        List<MpPrePrepareMpPaxosCallback> callbacksForPhase1 = replicasAndOwnedItems.stream().parallel().map(replicaGroupWithItems -> {
+        multiPartitionPaxosPhaseExecutor.tryToExecute();
 
-            int targetReplicas = replicaGroupWithItems.getReplicasGroup().getReplicas().size();
-            MpPrePrepareMpPaxosCallback callbackForPrePrepare = new MpPrePrepareMpPaxosCallback(targetReplicas, MPP_HARDCODED_CONSISTENCY_LEVEL, replicasOperationsCallback);
-            MpPrePrepare mpPrePrepare = new MpPrePrepare(transactionState);
-            MessageOut<MpPrePrepare> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_PRE_PREARE, mpPrePrepare, MpPrePrepare.serializer);
-
-            replicaGroupWithItems.getReplicasGroup().getReplicas().stream().parallel().forEach(replica -> {
-                messagingService.sendRR(message, replica, callbackForPrePrepare);
-            });
-
-            return callbackForPrePrepare;
-        }).collect(Collectors.toList());
-
-        callbacksForPhase1.forEach(callbackForPrePrepare -> {
-            callbackForPrePrepare.await();
-
-            callbackForPrePrepare.getResponsesByReplica().entrySet().stream().forEach(kv -> {
-                logger.debug("Replica {} has pre preared paxos id {}", kv.getKey(), kv.getValue().map(id -> id.getPaxosId().toString()).orElse("undefined"));
-            });
-        });
-
-        replicasOperationsCallback.await(); // await for phase 1
-        logger.info("Commit transaction has successfully pre prepared all replicas groups");
+//        ReplicasGroupsOperationCallback replicasOperationsCallback = new ReplicasGroupsOperationCallback(replicasAndOwnedItems);
+//        List<MpPrePrepareMpPaxosCallback> callbacksForPhase1 = replicasAndOwnedItems.stream().parallel().map(replicaGroupWithItems -> {
+//
+//            return prePrepareReplicaGroup(transactionState, replicaGroupWithItems, replicasOperationsCallback);
+//        }).collect(Collectors.toList());
+//
+//        callbacksForPhase1.forEach(callbackForPrePrepare -> {
+//            callbackForPrePrepare.await();
+//
+//            callbackForPrePrepare.getResponsesByReplica().entrySet().stream().forEach(kv -> {
+//                logger.debug("Replica {} has pre preared paxos id {}", kv.getKey(), kv.getValue().map(id -> id.getPaxosId().toString()).orElse("undefined"));
+//            });
+//        });
+//
+//        replicasOperationsCallback.await(); // await for phase 1
+//        logger.info("Commit transaction has successfully pre prepared all replicas groups");
         // we continue when we have all quorums
 //        callbacksForPhase1.stre
 
@@ -189,6 +187,20 @@ public class MppServiceImpl implements MppService
                 // given transaction state, paxos id should be found in index. Else transaction was rolled back
                 // access mp index -> find paxos id -> access MP Paxos State in system keyspace and find mp paxos state
 
+    }
+
+    public MpPrePrepareMpPaxosCallback prePrepareReplicaGroup(TransactionState transactionState, ReplicasGroupAndOwnedItems replicaGroupWithItems, ReplicasGroupsOperationCallback replicasOperationsCallback)
+    {
+        int targetReplicas = replicaGroupWithItems.getReplicasGroup().getReplicas().size();
+        MpPrePrepareMpPaxosCallback callbackForPrePrepare = new MpPrePrepareMpPaxosCallback(targetReplicas, MPP_HARDCODED_CONSISTENCY_LEVEL, replicasOperationsCallback);
+        MpPrePrepare mpPrePrepare = new MpPrePrepare(transactionState);
+        MessageOut<MpPrePrepare> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_PRE_PREARE, mpPrePrepare, MpPrePrepare.serializer);
+
+        replicaGroupWithItems.getReplicasGroup().getReplicas().stream().parallel().forEach(replica -> {
+            messagingService.sendRR(message, replica, callbackForPrePrepare);
+        });
+
+        return callbackForPrePrepare;
     }
 
     public void rollbackTransaction(TransactionState transactionState)
@@ -454,7 +466,7 @@ public class MppServiceImpl implements MppService
         logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}", prePrepare.getTransactionState().getTransactionId());
         Optional<MpPaxosId> mpPaxosId = mpPaxosIndex.acquireForMppPaxos(prePrepare.getTransactionState());
 
-        logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}, is paxos round present: {}, paxos id is: ", prePrepare.getTransactionState().getTransactionId(), mpPaxosId.isPresent(), mpPaxosId.map(id -> id.getPaxosId().toString()).orElse("not defined"));
+        logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}, is paxos round present: {}, paxos id is: {}", prePrepare.getTransactionState().getTransactionId(), mpPaxosId.isPresent(), mpPaxosId.map(id -> id.getPaxosId().toString()).orElse("not defined"));
         return mpPaxosId;
     }
 

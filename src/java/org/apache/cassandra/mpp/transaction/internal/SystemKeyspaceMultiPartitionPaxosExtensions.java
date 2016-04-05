@@ -100,6 +100,6 @@ public class SystemKeyspaceMultiPartitionPaxosExtensions
                         commit.ballot,
                         TransactionStateSerializer.toBytes(commit.update, MessagingService.current_version),
                         MessagingService.current_version,
-                        paxosId);
+                        paxosId.getPaxosId());
     }
 }

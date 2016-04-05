@@ -62,7 +62,9 @@ public abstract class AbstractMpPaxosCallback<T> implements IAsyncCallback<T>
                 throw new WriteTimeoutException(WriteType.CAS, consistency, getResponseCount(), targets);
 
             // Inform that replicas group is done.
-            replicasGroupOperationCallback.replicaGroupIsDone();
+            if(replicasGroupOperationCallback != null) {
+                replicasGroupOperationCallback.replicaGroupIsDone();
+            }
         }
         catch (InterruptedException ex)
         {

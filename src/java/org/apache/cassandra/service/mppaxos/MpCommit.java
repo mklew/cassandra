@@ -44,7 +44,7 @@ public class MpCommit
     public MpCommit(UUID ballot, TransactionState transactionState)
     {
         assert ballot != null;
-        assert update != null;
+        assert transactionState != null;
 //        assert update != null;
 
         this.ballot = ballot;
