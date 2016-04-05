@@ -128,4 +128,8 @@ public class TransactionState implements Serializable
     {
         return transactionItems.contains(transactionItem);
     }
+
+    public boolean isEmpty() {
+        return transactionItems.isEmpty();
+    }
 }

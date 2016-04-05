@@ -28,9 +28,8 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.net.MessageIn;
 
 public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse>
@@ -42,15 +41,15 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
     public MpCommit mostRecentInProgressCommit;
     public MpCommit mostRecentInProgressCommitWithUpdate;
 
-    private final Map<InetAddress, MpCommit> commitsByReplica = new ConcurrentHashMap<InetAddress, MpCommit>();
+    private final Map<InetAddress, MpCommit> commitsByReplica = new ConcurrentHashMap<>();
 
-    public MpPrepareCallback(DecoratedKey key, CFMetaData metadata, int targets, ConsistencyLevel consistency, ReplicasGroupsOperationCallback replicasGroupOperationCallback)
+    public MpPrepareCallback(TransactionState transactionState, int targets, ConsistencyLevel consistency, ReplicasGroupsOperationCallback replicasGroupOperationCallback)
     {
         super(targets, consistency, replicasGroupOperationCallback);
         // need to inject the right key in the empty commit so comparing with empty commits in the reply works as expected
-        mostRecentCommit = MpCommit.emptyCommit(key, metadata);
-        mostRecentInProgressCommit = MpCommit.emptyCommit(key, metadata);
-        mostRecentInProgressCommitWithUpdate = MpCommit.emptyCommit(key, metadata);
+        mostRecentCommit = MpCommit.emptyCommit(transactionState);
+        mostRecentInProgressCommit = MpCommit.emptyCommit(transactionState);
+        mostRecentInProgressCommitWithUpdate = MpCommit.emptyCommit(transactionState);
     }
 
     public synchronized void response(MessageIn<MpPrepareResponse> message)

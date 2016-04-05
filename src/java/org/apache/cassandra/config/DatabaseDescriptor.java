@@ -1081,9 +1081,19 @@ public class DatabaseDescriptor
         return conf.cas_contention_timeout_in_ms;
     }
 
+    public static long getMppContentionTimeout()
+    {
+        return conf.mpp_contention_timeout_in_ms;
+    }
+
     public static void setCasContentionTimeout(Long timeOutInMillis)
     {
         conf.cas_contention_timeout_in_ms = timeOutInMillis;
+    }
+
+    public static void setMppContentionTimeout(Long timeOutInMillis)
+    {
+        conf.mpp_contention_timeout_in_ms = timeOutInMillis;
     }
 
     public static long getTruncateRpcTimeout()

@@ -145,7 +145,7 @@ public class MppServiceImpl implements MppService
         List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
 
         ReplicasGroupsOperationCallback replicasOperationsCallback = new ReplicasGroupsOperationCallback(replicasAndOwnedItems);
-        replicasAndOwnedItems.stream().parallel().forEach(replicaGroupWithItems -> {
+        List<MpPrePrepareMpPaxosCallback> callbacksForPhase1 = replicasAndOwnedItems.stream().parallel().map(replicaGroupWithItems -> {
 
             int targetReplicas = replicaGroupWithItems.getReplicasGroup().getReplicas().size();
             MpPrePrepareMpPaxosCallback callbackForPrePrepare = new MpPrePrepareMpPaxosCallback(targetReplicas, MPP_HARDCODED_CONSISTENCY_LEVEL, replicasOperationsCallback);
@@ -156,6 +156,10 @@ public class MppServiceImpl implements MppService
                 messagingService.sendRR(message, replica, callbackForPrePrepare);
             });
 
+            return callbackForPrePrepare;
+        }).collect(Collectors.toList());
+
+        callbacksForPhase1.forEach(callbackForPrePrepare -> {
             callbackForPrePrepare.await();
 
             callbackForPrePrepare.getResponsesByReplica().entrySet().stream().forEach(kv -> {
@@ -163,9 +167,10 @@ public class MppServiceImpl implements MppService
             });
         });
 
-        replicasOperationsCallback.await();
-
+        replicasOperationsCallback.await(); // await for phase 1
         logger.info("Commit transaction has successfully pre prepared all replicas groups");
+        // we continue when we have all quorums
+//        callbacksForPhase1.stre
 
         // For each replica group
             // 1. MppPrePrepareRequest - successfully register in MpPaxosIndex.
@@ -349,6 +354,23 @@ public class MppServiceImpl implements MppService
         processPartitionStream(consumer, Stream.of(partitionUpdate));
     }
 
+    /**
+     * Flushes only those transaction items which are after last truncated date
+     * @param transactionState
+     * @param timestamp
+     */
+    @Override
+    public void multiPartitionPaxosCommitPhase(TransactionState transactionState, long timestamp) {
+        logger.info("flushTransaction executes for transaction id {}", transactionState.getTransactionId());
+        Preconditions.checkState(privateMemtableStorage.transactionExistsInStorage(transactionState.id()), "TransactionData not found for transaction id %s", transactionState.getTransactionId());
+        final TransactionData transactionData = getTransactionData(transactionState.id());
+
+        transactionData.applyAllMutationsIfNotTruncated(timestamp);
+        mpPaxosIndex.acquireAndMarkAsCommitted(transactionState, timestamp);
+        mpPaxosIndex.acquireAndRemoveSelf(transactionState);
+        privateMemtableStorage.removePrivateData(transactionState.id());
+    }
+
     public void flushTransactionLocally(TransactionId transactionId)
     {
         logger.info("flushTransactionLocally executes for transaction id {}", transactionId);
@@ -472,5 +494,15 @@ public class MppServiceImpl implements MppService
     {
         privateMemtableStorage.readTransactionData(transactionState.id())
                               .purge(transactionItem.getKsName(), getCfId(transactionItem), transactionItem.getToken());
+    }
+
+    public Optional<MpPaxosId> acquireForMppPaxos(TransactionState transactionState)
+    {
+        return mpPaxosIndex.acquireForMppPaxos(transactionState);
+    }
+
+    public Optional<MpPaxosId> acquireAndFindPaxosId(TransactionState transactionState)
+    {
+        return mpPaxosIndex.acquireAndFindPaxosId(transactionState);
     }
 }

@@ -19,13 +19,16 @@
 package org.apache.cassandra.mpp.transaction.serialization;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.UUID;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -75,6 +78,34 @@ public class TransactionStateSerializer implements IVersionedSerializer<Transact
         }
 
         return TransactionStateUtils.recreateTransactionState(id, transactionItems);
+    }
+
+    public static TransactionState fromBytes(ByteBuffer bytes, int version)
+    {
+        if (bytes == null)
+            return null;
+
+        try
+        {
+            return TransactionStateSerializer.instance.deserialize(new DataInputBuffer(bytes, true), version);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static ByteBuffer toBytes(TransactionState transactionState, int version)
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            TransactionStateSerializer.instance.serialize(transactionState, out, version);
+            return ByteBuffer.wrap(out.getData(), 0, out.getLength());
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public long serializedSize(TransactionState transactionState, int version)

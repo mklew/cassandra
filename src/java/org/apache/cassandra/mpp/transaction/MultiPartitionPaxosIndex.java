@@ -16,38 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.mpp;
+package org.apache.cassandra.mpp.transaction;
 
-import com.google.common.base.Preconditions;
+import java.util.Optional;
 
-import org.apache.cassandra.mpp.transaction.MppService;
-import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
- * @since 21/01/16
+ * @since 04/04/16
  */
-public class MppServicesLocator
+public interface MultiPartitionPaxosIndex
 {
-    private static MppService mppService;
+    Optional<MpPaxosId> acquireForMppPaxos(TransactionState transactionState);
 
-    private MppServicesLocator()
-    {
-    }
-
-    public static MppService getInstance()
-    {
-        Preconditions.checkNotNull(mppService, "MppServiceLocator has not been initialized");
-        return mppService;
-    }
-
-    public static MultiPartitionPaxosIndex getIndexInstance()
-    {
-        return getInstance();
-    }
-
-    public static void setInstance(MppService mppService)
-    {
-        MppServicesLocator.mppService = mppService;
-    }
+    Optional<MpPaxosId> acquireAndFindPaxosId(TransactionState transactionState);
 }

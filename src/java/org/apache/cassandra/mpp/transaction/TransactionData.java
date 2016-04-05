@@ -53,6 +53,8 @@ public interface TransactionData extends ReadableTransactionData
 
     void applyAllMutations(long applyTimestamp);
 
+    void applyAllMutationsIfNotTruncated(long applyTimestamp);
+
     void freeze();
 
     boolean isFrozen();

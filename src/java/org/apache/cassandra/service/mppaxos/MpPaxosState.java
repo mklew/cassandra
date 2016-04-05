@@ -17,18 +17,19 @@
  */
 package org.apache.cassandra.service.mppaxos;
 
-import java.util.UUID;
+import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 
 import com.google.common.util.concurrent.Striped;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.mpp.MppServicesLocator;
+import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.internal.SystemKeyspaceMultiPartitionPaxosExtensions;
+import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -36,23 +37,20 @@ public class MpPaxosState
 {
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
 
+    private static final Logger logger = LoggerFactory.getLogger(MpPaxosState.class);
+
     private final MpCommit promised;
     private final MpCommit accepted;
     private final MpCommit mostRecentCommit;
 
-    public MpPaxosState(UUID paxosId) {
-        this(MpCommit.emptyCommit(paxosId), MpCommit.emptyCommit(paxosId), MpCommit.emptyCommit(paxosId));
-    }
-
-    public MpPaxosState(DecoratedKey key, CFMetaData metadata)
-    {
-        this(MpCommit.emptyCommit(key, metadata), MpCommit.emptyCommit(key, metadata), MpCommit.emptyCommit(key, metadata));
+    public MpPaxosState() {
+        this(MpCommit.emptyCommit(), MpCommit.emptyCommit(), MpCommit.emptyCommit());
     }
 
     public MpPaxosState(MpCommit promised, MpCommit accepted, MpCommit mostRecentCommit)
     {
-        assert promised.update.partitionKey().equals(accepted.update.partitionKey()) && accepted.update.partitionKey().equals(mostRecentCommit.update.partitionKey());
-        assert promised.update.metadata() == accepted.update.metadata() && accepted.update.metadata() == mostRecentCommit.update.metadata();
+//        assert promised.update.partitionKey().equals(accepted.update.partitionKey()) && accepted.update.partitionKey().equals(mostRecentCommit.update.partitionKey());
+//        assert promised.update.metadata() == accepted.update.metadata() && accepted.update.metadata() == mostRecentCommit.update.metadata();
 
         this.promised = promised;
         this.accepted = accepted;
@@ -61,72 +59,107 @@ public class MpPaxosState
 
     public static MpPrepareResponse prepare(MpCommit toPrepare)
     {
-        long start = System.nanoTime();
-        try
-        {
-            Lock lock = LOCKS.get(toPrepare.update.partitionKey());
-            lock.lock();
+//        long start = System.nanoTime();
+
+        Optional<MpPaxosId> paxosIdOpt = findPaxosId(toPrepare.update);
+
+        if(paxosIdOpt.isPresent()) {
             try
             {
-//                MpPaxosState state = SystemKeyspaceMultiPartitionPaxosExtensions.loadPaxosState(toPrepare.update.partitionKey(), toPrepare.update.metadata());
-                // TODO [MPP] Implement it
-                MpPaxosState state = null; //SystemKeyspaceMultiPartitionPaxosExtensions.loadPaxosState(toPrepare.update.partitionKey(), toPrepare.update.metadata());
-                if (toPrepare.isAfter(state.promised))
+                MpPaxosId paxosId = paxosIdOpt.get();
+                Lock lock = LOCKS.get(paxosId);
+                lock.lock();
+                try
                 {
-                    Tracing.trace("Promising ballot {}", toPrepare.ballot);
-                    SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosPromise(toPrepare);
-                    return new MpPrepareResponse(true, state.accepted, state.mostRecentCommit);
+                    MpPaxosState state = SystemKeyspaceMultiPartitionPaxosExtensions.loadPaxosState(paxosId);
+                    if (toPrepare.isAfter(state.promised))
+                    {
+                        Tracing.trace("Promising ballot {}", toPrepare.ballot);
+                        SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosPromise(toPrepare, paxosId);
+                        boolean promised = true;
+                        boolean notRolledBack = false;
+                        return new MpPrepareResponse(promised, notRolledBack, state.accepted, state.mostRecentCommit);
+                    }
+                    else
+                    {
+                        Tracing.trace("Promise rejected; {} is not sufficiently newer than {}", toPrepare, state.promised);
+                        // return the currently promised ballot (not the last accepted one) so the coordinator can make sure it uses newer ballot next time (#5667)
+                        boolean notPromised = false;
+                        boolean notRolledBack = false;
+                        return new MpPrepareResponse(notPromised, notRolledBack, state.promised, state.mostRecentCommit);
+                    }
                 }
-                else
+                finally
                 {
-                    Tracing.trace("Promise rejected; {} is not sufficiently newer than {}", toPrepare, state.promised);
-                    // return the currently promised ballot (not the last accepted one) so the coordinator can make sure it uses newer ballot next time (#5667)
-                    return new MpPrepareResponse(false, state.promised, state.mostRecentCommit);
+                    lock.unlock();
                 }
             }
             finally
             {
-                lock.unlock();
+//                Keyspace.open(toPrepare.update.metadata().ksName).getColumnFamilyStore(toPrepare.update.metadata().cfId).metric.casPrepare.addNano(System.nanoTime() - start);
             }
         }
-        finally
-        {
-            Keyspace.open(toPrepare.update.metadata().ksName).getColumnFamilyStore(toPrepare.update.metadata().cfId).metric.casPrepare.addNano(System.nanoTime() - start);
+        else {
+            boolean notPromised = false;
+            boolean wasRolledBack = true;
+            // returning nulls, because paxos instance cannot be found at this node..
+            // It is possible to send with prepare, paxos id that was received in pre prepare response, but probably it won't be necessary.
+            return new MpPrepareResponse(notPromised, wasRolledBack, null, null);
         }
 
     }
 
+    private static Optional<MpPaxosId> findPaxosId(TransactionState transactionState)
+    {
+        MultiPartitionPaxosIndex index = MppServicesLocator.getIndexInstance();
+        return index.acquireAndFindPaxosId(transactionState);
+    }
+
     public static Boolean propose(MpCommit proposal)
     {
-        long start = System.nanoTime();
+//        long start = System.nanoTime();
         try
         {
-            Lock lock = LOCKS.get(proposal.update.partitionKey());
-            lock.lock();
-            try
-            {
-                // TODO [MPP] Implement it
-                MpPaxosState state = null; //SystemKeyspaceMultiPartitionPaxosExtensions.loadPaxosState(proposal.update.partitionKey(), proposal.update.metadata());
-                if (proposal.hasBallot(state.promised.ballot) || proposal.isAfter(state.promised))
+            Optional<MpPaxosId> paxosIdOpt = findPaxosId(proposal.update);
+            if(paxosIdOpt.isPresent()) {
+                MpPaxosId paxosId = paxosIdOpt.get();
+                Lock lock = LOCKS.get(paxosId);
+                lock.lock();
+                try
                 {
-                    Tracing.trace("Accepting proposal {}", proposal);
-                    SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosProposal(proposal);
-                    return true;
+                    MpPaxosState state = SystemKeyspaceMultiPartitionPaxosExtensions.loadPaxosState(paxosId);
+                    if (proposal.hasBallot(state.promised.ballot) || proposal.isAfter(state.promised))
+                    {
+                        logger.info("About to accept proposal, but making data consistent first. Proposal is {}", proposal);
+                        Tracing.trace("Accepting proposal {}", proposal);
+                        // TODO Maybe it should be done outside of lock, just before commit? But then transaction that cannot be made consistent, should not be proposed.
+                        MppServicesLocator.getInstance().makeTransactionDataConsistent(proposal.update);
+                        logger.info("Accepting proposal {}", proposal);
+                        SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosProposal(proposal, paxosId);
+                        return true;
+                    }
+                    else
+                    {
+                        Tracing.trace("Rejecting proposal for {} because inProgress is now {}", proposal, state.promised);
+                        return false;
+                    }
                 }
-                else
+                finally
                 {
-                    Tracing.trace("Rejecting proposal for {} because inProgress is now {}", proposal, state.promised);
-                    return false;
+                    lock.unlock();
                 }
             }
-            finally
-            {
-                lock.unlock();
+            else {
+                // paxos id wasn't present. This should not happen in normal conditions, because proposer has highest ballot so
+                // none of conflicting transactions could commit in the meantime.
+                logger.warn("Uncommon conditions. PaxosId cannot be found in propose. Proposed transaction state is {}", proposal.update);
+                return false;
             }
+
         }
         finally
         {
-            Keyspace.open(proposal.update.metadata().ksName).getColumnFamilyStore(proposal.update.metadata().cfId).metric.casPropose.addNano(System.nanoTime() - start);
+//            Keyspace.open(proposal.update.metadata().ksName).getColumnFamilyStore(proposal.update.metadata().cfId).metric.casPropose.addNano(System.nanoTime() - start);
         }
     }
 
@@ -135,31 +168,32 @@ public class MpPaxosState
         long start = System.nanoTime();
         try
         {
-            // There is no guarantee we will see commits in the right order, because messages
-            // can get delayed, so a proposal can be older than our current most recent ballot/commit.
-            // Committing it is however always safe due to column timestamps, so always do it. However,
-            // if our current in-progress ballot is strictly greater than the proposal one, we shouldn't
-            // erase the in-progress update.
-            // The table may have been truncated since the proposal was initiated. In that case, we
-            // don't want to perform the mutation and potentially resurrect truncated data
-            if (UUIDGen.unixTimestamp(proposal.ballot) >= SystemKeyspace.getTruncatedAt(proposal.update.metadata().cfId))
-            {
-                Tracing.trace("Committing proposal {}", proposal);
-                // TODO [MPP] Use MppService to flush transaction
-                // TODO [MPP] Use MpIndex to tell about committed transaction
-                Mutation mutation = proposal.makeMutation();
-                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true);
+            Optional<MpPaxosId> paxosIdOpt = findPaxosId(proposal.update);
+            if(paxosIdOpt.isPresent()) {
+                MpPaxosId paxosId = paxosIdOpt.get();
+
+                // There is no guarantee we will see commits in the right order, because messages
+                // can get delayed, so a proposal can be older than our current most recent ballot/commit.
+                // Committing it is however always safe due to column timestamps, so always do it. However,
+                // if our current in-progress ballot is strictly greater than the proposal one, we shouldn't
+                // erase the in-progress update.
+                // The table may have been truncated since the proposal was initiated. In that case, we
+                // don't want to perform the mutation and potentially resurrect truncated data
+
+                long timestamp = UUIDGen.unixTimestamp(proposal.ballot);
+                logger.info("Commiting multi partition paxos proposal. Tx ID is: {}", proposal.update.id());
+                MppServicesLocator.getInstance().multiPartitionPaxosCommitPhase(proposal.update, timestamp);
+                // We don't need to lock, we're just blindly updating
+                SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosCommit(proposal, paxosId);
             }
-            else
-            {
-                Tracing.trace("Not committing proposal {} as ballot timestamp predates last truncation time", proposal);
+            else {
+                logger.warn("Uncommon conditions. PaxosId cannot be found when doing paxos commit. Transaction ID is: {}", proposal.update.id());
             }
-            // We don't need to lock, we're just blindly updating
-            SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosCommit(proposal);
+
         }
         finally
         {
-            Keyspace.open(proposal.update.metadata().ksName).getColumnFamilyStore(proposal.update.metadata().cfId).metric.casCommit.addNano(System.nanoTime() - start);
+//            Keyspace.open(proposal.update.metadata().ksName).getColumnFamilyStore(proposal.update.metadata().cfId).metric.casCommit.addNano(System.nanoTime() - start);
         }
     }
 }

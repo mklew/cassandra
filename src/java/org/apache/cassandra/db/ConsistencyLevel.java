@@ -383,12 +383,12 @@ public enum ConsistencyLevel
     public void validateForCas() throws InvalidRequestException
     {
         if (!isSerialConsistency())
-            throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
+            throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL or LOCAL_TRANSACTIONAL");
     }
 
     public boolean isSerialConsistency()
     {
-        return this == SERIAL || this == LOCAL_SERIAL;
+        return this == SERIAL || this == LOCAL_SERIAL || this == LOCAL_TRANSACTIONAL;
     }
 
     public void validateCounterForWrite(CFMetaData metadata) throws InvalidRequestException

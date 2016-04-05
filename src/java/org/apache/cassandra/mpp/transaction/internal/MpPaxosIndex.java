@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
+import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
@@ -59,7 +60,7 @@ import static org.apache.cassandra.mpp.transaction.internal.ForEachReplicaGroupO
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 06/02/16
  */
-public class MpPaxosIndex
+public class MpPaxosIndex implements MultiPartitionPaxosIndex
 {
 
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
@@ -301,6 +302,15 @@ public class MpPaxosIndex
         });
     }
 
+    public void acquireAndRemoveSelf(TransactionState transactionState)
+    {
+        acquireIndex(transactionState, (index, items) -> {
+            Optional<MpPaxosParticipant> participant = findParticipant(items.iterator().next(), transactionState);
+            participant.ifPresent(this::removeParticipantFromIndex);
+        });
+    }
+
+
     private static class RemoveParticipantsFromIndex {
         Stream<MpPaxosParticipant> participants;
 
@@ -413,9 +423,9 @@ public class MpPaxosIndex
                         return Optional.of(par);
                     }
                 }).filter(Optional::isPresent)
-                                                                                                   .map(Optional::get)
-                                                                                                   .map(par -> new RemoveParticipantsFromIndex(Stream.of(par), getTransactionItemsOwnedByThisNodeSorted(par.getTransactionState()).stream()))
-                                                                                                   .reduce(RemoveParticipantsFromIndex.reducer);
+                   .map(Optional::get)
+                   .map(par -> new RemoveParticipantsFromIndex(Stream.of(par), getTransactionItemsOwnedByThisNodeSorted(par.getTransactionState()).stream()))
+                   .reduce(RemoveParticipantsFromIndex.reducer);
     }
 
     /**
@@ -907,6 +917,24 @@ public class MpPaxosIndex
     }
 
     /**
+     * Can be called after {@link MpPaxosIndex#acquireForMppPaxos} succesfully returns paxos round id}.
+     * This can however return Optional.absent which means that transaction was rolled back.
+     *
+     * @param transactionState
+     */
+    @Override
+    public Optional<MpPaxosId> acquireAndFindPaxosId(TransactionState transactionState) {
+        final Optional<MpPaxosId>[] maybeMpPaxosId = new Optional[1];
+        acquireIndex(transactionState, (index, items) -> {
+            Optional<MpPaxosId> optPaxosId = findParticipant(items.iterator().next(), transactionState)
+                                             .flatMap(MpPaxosParticipant::getPaxosId)
+                                             .map(id -> (MpPaxosId) new MpPaxosIdImpl(id));
+            maybeMpPaxosId[0] = optPaxosId;
+        });
+        return maybeMpPaxosId[0];
+    }
+
+    /**
      * Returns optional {@link MpPaxosId}. If empty, then transaction was rolled back (due to conflict or concurrent execution).
      *
      * Simplest scenario possible.
@@ -915,6 +943,7 @@ public class MpPaxosIndex
      * If after these conflicts there is more than 1 round => return with rollback
      * @param transactionState
      */
+    @Override
     public Optional<MpPaxosId> acquireForMppPaxos(TransactionState transactionState) {
         final Optional<MpPaxosId>[] maybeMpPaxosId = new Optional[1];
         acquireIndex(transactionState, (index, items) -> {

@@ -33,7 +33,7 @@ public abstract class AbstractMpPaxosCallback<T> implements IAsyncCallback<T>
     protected final CountDownLatch latch;
     protected final int targets;
     private final ConsistencyLevel consistency;
-    private final ReplicasGroupsOperationCallback replicasGroupOperationCallback;
+    protected final ReplicasGroupsOperationCallback replicasGroupOperationCallback;
 
     protected AbstractMpPaxosCallback(int targets, ConsistencyLevel consistency,
                                       ReplicasGroupsOperationCallback replicasGroupOperationCallback)

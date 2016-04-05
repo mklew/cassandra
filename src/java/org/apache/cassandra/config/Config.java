@@ -82,6 +82,8 @@ public class Config
 
     public volatile Long cas_contention_timeout_in_ms = 1000L;
 
+    public volatile Long mpp_contention_timeout_in_ms = 3000L;
+
     public volatile Long truncate_request_timeout_in_ms = 60000L;
 
     public Integer streaming_socket_timeout_in_ms = 3600000;

@@ -20,22 +20,17 @@ package org.apache.cassandra.service.mppaxos;
 
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.UUID;
 
 import com.google.common.base.Objects;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
+import org.apache.cassandra.mpp.transaction.serialization.TransactionStateSerializer;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.UUIDSerializer;
 
@@ -44,41 +39,39 @@ public class MpCommit
     public static final MpCommitSerializer serializer = new MpCommitSerializer();
 
     public final UUID ballot;
-    public  PartitionUpdate update;
+    public TransactionState update; // TODO this is the update
 
     public MpCommit(UUID ballot, TransactionState transactionState)
     {
         assert ballot != null;
+        assert update != null;
 //        assert update != null;
 
         this.ballot = ballot;
+        this.update = transactionState;
 //        this.update = update;
     }
 
-    public static MpCommit newPrepare(DecoratedKey key, CFMetaData metadata, UUID ballot)
+    public static MpCommit newPrepare(TransactionState transactionState, UUID ballot)
     {
-        return null; // TODO [MPP] Implement it
-//        return new MpCommit(ballot, PartitionUpdate.emptyUpdate(metadata, key));
+        return new MpCommit(ballot, transactionState);
     }
 
-    public static MpCommit newProposal(UUID ballot, PartitionUpdate update)
+    public static MpCommit newProposal(UUID ballot, TransactionState update)
     {
-        update.updateAllTimestamp(UUIDGen.microsTimestamp(ballot));
-        return null; // TODO [MPP] Implement it
-//        return new MpCommit(ballot, update);
+        // This update doesn't have to happen because timestamp will get refreshed during Commit
+//        update.updateAllTimestamp(UUIDGen.microsTimestamp(ballot));
+        return new MpCommit(ballot, update);
     }
 
-    public static MpCommit emptyCommit(DecoratedKey key, CFMetaData metadata)
+    public static MpCommit emptyCommit()
     {
-        return null; // TODO [MPP] Implement it
-//        return new MpCommit(UUIDGen.minTimeUUID(0), PartitionUpdate.emptyUpdate(metadata, key));
+        return new MpCommit(UUIDGen.minTimeUUID(0), TransactionStateUtils.newTransactionState());
     }
 
-    public static MpCommit emptyCommit(UUID paxosId)
+    public static MpCommit emptyCommit(TransactionState transactionState)
     {
-        // TODO [MPP] Implement empty version of MpCommit
-        return null; // TODO [MPP] Implement it
-//        return new MpCommit(UUIDGen.minTimeUUID(0), PartitionUpdate.emptyUpdate(metadata, key));
+        return new MpCommit(UUIDGen.minTimeUUID(0), transactionState);
     }
 
     public boolean isAfter(MpCommit other)
@@ -93,7 +86,9 @@ public class MpCommit
 
     public Mutation makeMutation()
     {
-        return new Mutation(update);
+        // TODO this should not be used because mutations are taken from private memtables
+//        return new Mutation(update);
+        return null;
     }
 
     @Override
@@ -116,41 +111,31 @@ public class MpCommit
     @Override
     public String toString()
     {
-        return String.format("Commit(%s, %s)", ballot, update);
+        return String.format("MpCommit(%s, %s)", ballot, update);
     }
 
     public static class MpCommitSerializer implements IVersionedSerializer<MpCommit>
     {
         public void serialize(MpCommit commit, DataOutputPlus out, int version) throws IOException
         {
-            if (version < MessagingService.VERSION_30)
-                ByteBufferUtil.writeWithShortLength(commit.update.partitionKey().getKey(), out);
-
             UUIDSerializer.serializer.serialize(commit.ballot, out, version);
-            PartitionUpdate.serializer.serialize(commit.update, out, version);
+            TransactionStateSerializer.instance.serialize(commit.update, out, version);
         }
 
         public MpCommit deserialize(DataInputPlus in, int version) throws IOException
         {
-            ByteBuffer key = null;
-            if (version < MessagingService.VERSION_30)
-                key = ByteBufferUtil.readWithShortLength(in);
-
             UUID ballot = UUIDSerializer.serializer.deserialize(in, version);
-            PartitionUpdate update = PartitionUpdate.serializer.deserialize(in, version, SerializationHelper.Flag.LOCAL, key);
-//            return new MpCommit(ballot, update);
-            return null;
+            TransactionState transactionState = TransactionStateSerializer.instance.deserialize(in, version);
+            return new MpCommit(ballot, transactionState);
         }
 
         public long serializedSize(MpCommit commit, int version)
         {
             int size = 0;
-            if (version < MessagingService.VERSION_30)
-                size += ByteBufferUtil.serializedSizeWithShortLength(commit.update.partitionKey().getKey());
 
             return size
                  + UUIDSerializer.serializer.serializedSize(commit.ballot, version)
-                 + PartitionUpdate.serializer.serializedSize(commit.update, version);
+                 + TransactionStateSerializer.instance.serializedSize(commit.update, version);
         }
     }
 }

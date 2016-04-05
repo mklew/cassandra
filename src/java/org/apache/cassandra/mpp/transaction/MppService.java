@@ -39,7 +39,7 @@ import org.apache.cassandra.service.mppaxos.MpPrePrepare;
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 20/01/16
  */
-public interface MppService extends MppServiceMXBean
+public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex
 {
     String MBEAN_NAME = "org.apache.cassandra.mpp.transaction:type=MppService";
 
@@ -111,4 +111,6 @@ public interface MppService extends MppServiceMXBean
     void makeTransactionDataConsistent(TransactionState transactionState);
 
     Optional<MpPaxosId> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare);
+
+    void multiPartitionPaxosCommitPhase(TransactionState transactionState, long ballot);
 }

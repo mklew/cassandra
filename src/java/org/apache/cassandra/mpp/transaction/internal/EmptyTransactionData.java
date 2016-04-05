@@ -80,6 +80,11 @@ public class EmptyTransactionData implements TransactionData
 
     }
 
+    public void applyAllMutationsIfNotTruncated(long applyTimestamp)
+    {
+
+    }
+
     public void freeze()
     {
         throw new IllegalStateException("Empty transaction data cannot be frozen. Something is wrong");

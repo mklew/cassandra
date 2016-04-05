@@ -421,9 +421,11 @@ public class MpPaxosIndexTest
 
         final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
         Assert.assertTrue("Tx4 starts its own round", r4.isPresent());
+        Assert.assertEquals(r4, mpPaxosIndex.acquireAndFindPaxosId(tx4));
 
         final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
         Assert.assertTrue("Tx1 starts its own round", r1.isPresent());
+        Assert.assertEquals(r1, mpPaxosIndex.acquireAndFindPaxosId(tx1));
 
         final Optional<MpPaxosId> r2 = mpPaxosIndex.acquireForMppPaxos(tx2);
         Assert.assertFalse("Tx2 has to rollback because Tx1 and Tx4 have different rounds", r2.isPresent());

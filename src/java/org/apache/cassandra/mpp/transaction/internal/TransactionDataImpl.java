@@ -25,8 +25,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -35,6 +37,7 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionData;
@@ -151,7 +154,24 @@ public class TransactionDataImpl implements TransactionData
                                  .map(v->v.getValue().getPartitionUpdate(cfId));
     }
 
-    public void applyAllMutations(long applyTimestamp)
+    // There is no guarantee we will see commits in the right order, because messages
+    // can get delayed, so a proposal can be older than our current most recent ballot/commit.
+    // Committing it is however always safe due to column timestamps, so always do it. However,
+    // if our current in-progress ballot is strictly greater than the proposal one, we shouldn't
+    // erase the in-progress update.
+    // The table may have been truncated since the proposal was initiated. In that case, we
+    // don't want to perform the mutation and potentially resurrect truncated data
+    public void applyAllMutationsIfNotTruncated(long applyTimestamp) {
+        applyAllMutations(applyTimestamp, pu -> {
+            return applyTimestamp >= SystemKeyspace.getTruncatedAt(pu.metadata().cfId);
+        });
+    }
+
+    public void applyAllMutations(long applyTimestamp) {
+        applyAllMutations(applyTimestamp, pu -> true);
+    }
+
+    public void applyAllMutations(long applyTimestamp, Function<PartitionUpdate, Boolean> predicate)
     {
         Preconditions.checkArgument(!hasBeenApplied, "Cannot apply same transaction data twice");
         ksToKeyToMutation.entrySet().stream().map(Map.Entry::getValue).flatMap(m -> m.entrySet().stream().map(Map.Entry::getValue))
@@ -161,7 +181,18 @@ public class TransactionDataImpl implements TransactionData
                              m.getPartitionUpdates().forEach(pu -> pu.updateAllTimestamp(applyTimestamp));
                              return m;
                          })
-                         .forEach(mutation -> mutation.apply());
+                         .map(m -> {
+                             Set<UUID> cfIds = m.getPartitionUpdates().stream().filter(pu -> !predicate.apply(pu)).map(pu -> pu.metadata().cfId).collect(Collectors.toSet());
+                             if (!cfIds.isEmpty())
+                             {
+                                 return m.without(cfIds);
+                             }
+                             else
+                             {
+                                 return m;
+                             }
+                         })
+                         .forEach(mutation -> Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true));
 
         // Mutations happen in different thread so this method returns before actually doing mutations.
         // It is done same way for paxos and others therefore it should be enough and should not fail.
