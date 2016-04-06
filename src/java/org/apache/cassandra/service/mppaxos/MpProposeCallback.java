@@ -19,6 +19,7 @@
 package org.apache.cassandra.service.mppaxos;
 
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
@@ -40,13 +41,14 @@ import org.apache.cassandra.net.MessageIn;
  * replay its value; in the latter we don't, so we must timeout in case another
  * leader replays it before we can; see CASSANDRA-6013
  */
-public class MpProposeCallback extends AbstractMpPaxosCallback<Boolean>
+public class MpProposeCallback extends AbstractMpPaxosCallback<MpProposeResponse>
 {
     private static final Logger logger = LoggerFactory.getLogger(MpProposeCallback.class);
 
     private final AtomicInteger accepts = new AtomicInteger(0);
     private final int requiredAccepts;
     private final boolean failFast;
+    private final AtomicBoolean rolledBack = new AtomicBoolean(false);
 
     public MpProposeCallback(int totalTargets, int requiredTargets, boolean failFast, ConsistencyLevel consistency, ReplicasGroupsOperationCallback replicasGroupOperationCallback)
     {
@@ -55,16 +57,19 @@ public class MpProposeCallback extends AbstractMpPaxosCallback<Boolean>
         this.failFast = failFast;
     }
 
-    public void response(MessageIn<Boolean> msg)
+    public void response(MessageIn<MpProposeResponse> msg)
     {
         logger.debug("Propose response {} from {}", msg.payload, msg.from);
 
-        if (msg.payload)
+        if (msg.payload.promised)
             accepts.incrementAndGet();
+
+        if(msg.payload.rolledback)
+            rolledBack.compareAndSet(false, msg.payload.rolledback);
 
         latch.countDown();
 
-        if (isSuccessful() || (failFast && (latch.getCount() + accepts.get() < requiredAccepts)))
+        if (isSuccessful() || (failFast && (latch.getCount() + accepts.get() < requiredAccepts)) || wasRolledBack())
         {
             while (latch.getCount() > 0)
                 latch.countDown();
@@ -76,9 +81,13 @@ public class MpProposeCallback extends AbstractMpPaxosCallback<Boolean>
         return accepts.get();
     }
 
+    public boolean wasRolledBack() {
+        return rolledBack.get();
+    }
+
     public boolean isSuccessful()
     {
-        return accepts.get() >= requiredAccepts;
+        return accepts.get() >= requiredAccepts && !rolledBack.get();
     }
 
     // Note: this is only reliable if !failFast

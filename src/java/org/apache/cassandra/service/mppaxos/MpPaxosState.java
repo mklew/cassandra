@@ -115,7 +115,7 @@ public class MpPaxosState
         return index.acquireAndFindPaxosId(transactionState);
     }
 
-    public static Boolean propose(MpCommit proposal)
+    public static MpProposeResponse propose(MpCommit proposal)
     {
 //        long start = System.nanoTime();
         try
@@ -136,12 +136,12 @@ public class MpPaxosState
                         // MppServicesLocator.getInstance().makeTransactionDataConsistent(proposal.update);
                         logger.info("Accepting proposal {}", proposal);
                         SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosProposal(proposal, paxosId);
-                        return true;
+                        return new MpProposeResponse(true, false);
                     }
                     else
                     {
                         Tracing.trace("Rejecting proposal for {} because inProgress is now {}", proposal, state.promised);
-                        return false;
+                        return new MpProposeResponse(false, false);
                     }
                 }
                 finally
@@ -153,7 +153,7 @@ public class MpPaxosState
                 // paxos id wasn't present. This should not happen in normal conditions, because proposer has highest ballot so
                 // none of conflicting transactions could commit in the meantime.
                 logger.warn("Uncommon conditions. PaxosId cannot be found in propose. Proposed transaction state is {}", proposal.update);
-                return false;
+                return new MpProposeResponse(false, true);
             }
 
         }

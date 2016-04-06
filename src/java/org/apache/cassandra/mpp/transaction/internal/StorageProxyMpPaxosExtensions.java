@@ -47,6 +47,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.exceptions.TransactionRolledBackException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
@@ -450,6 +451,11 @@ public class StorageProxyMpPaxosExtensions
         List<InetAddress> liveEndpoints = p.left;
         int requiredParticipants = p.right;
         MpPrepareCallback summary = inPhase.getSummary(); // TODO [MPP] This state needs to be available on "re-tried" transition.
+
+        if(summary != null && summary.wasRolledBack())
+        {
+            throw new TransactionRolledBackException(inPhase.getTransactionState());
+        }
 
         UUID ballot = createBallot(inPhase.getState(), summary);
 
@@ -953,7 +959,9 @@ public class StorageProxyMpPaxosExtensions
         }
         logger.debug("Awaiting MP_PAXOS_PROPOSE callback");
         callback.await();
-
+        if(callback.wasRolledBack()) {
+            throw new TransactionRolledBackException(proposal.update);
+        }
         if (callback.isSuccessful()) {
             logger.debug("MP_PAXOS_PROPOSE callback was successful");
             return true;

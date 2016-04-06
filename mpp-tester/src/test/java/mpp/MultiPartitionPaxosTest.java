@@ -88,8 +88,6 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         return session.executeAsync("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
     }
 
-    // TODO [MPP] Test doesn't work when data is supposed to update already existing data in Cassandra - WTF
-    // Test works
     @Test
     public void shouldRollbackConcurrentTransaction() throws InterruptedException
     {

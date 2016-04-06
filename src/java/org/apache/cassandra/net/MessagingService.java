@@ -102,6 +102,7 @@ import org.apache.cassandra.service.mppaxos.MpCommitWithHints;
 import org.apache.cassandra.service.mppaxos.MpPrePrepare;
 import org.apache.cassandra.service.mppaxos.MpPrePrepareResponse;
 import org.apache.cassandra.service.mppaxos.MpPrepareResponse;
+import org.apache.cassandra.service.mppaxos.MpProposeResponse;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.tracing.TraceState;
@@ -321,7 +322,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.PAXOS_PROPOSE, BooleanSerializer.serializer);
 
         put(Verb.MP_PAXOS_PREPARE, MpPrepareResponse.serializer);
-        put(Verb.MP_PAXOS_PROPOSE, BooleanSerializer.serializer);
+        put(Verb.MP_PAXOS_PROPOSE, MpProposeResponse.serializer);
         put(Verb.MP_PAXOS_PRE_PREARE, MpPrePrepareResponse.serializer);
 
         put(Verb.BATCH_STORE, WriteResponse.serializer);

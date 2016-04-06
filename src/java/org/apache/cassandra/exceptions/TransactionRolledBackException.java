@@ -16,20 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.service.mppaxos;
+package org.apache.cassandra.exceptions;
 
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
 
-import org.apache.cassandra.net.IVerbHandler;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
-
-public class MpProposeVerbHandler implements IVerbHandler<MpCommit>
+/**
+ * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+ * @since 06/04/16
+ */
+public class TransactionRolledBackException extends RuntimeException
 {
-    public void doVerb(MessageIn<MpCommit> message, int id)
+    private final TransactionState rolledBackTransaction;
+
+    public TransactionRolledBackException(TransactionState rolledBackTransaction)
     {
-        MpProposeResponse proposeResponse = MpPaxosState.propose(message.payload);
-        MessageOut<MpProposeResponse> reply = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, proposeResponse, MpProposeResponse.serializer);
-        MessagingService.instance().sendReply(reply, id, message.from);
+        super(String.format("Transaction was ID: %s was rolled back.", rolledBackTransaction.getTransactionId()));
+        this.rolledBackTransaction = rolledBackTransaction;
+    }
+
+    public String toString()
+    {
+        return "TransactionRolledBackException{" +
+               "rolledBackTransaction=" + rolledBackTransaction +
+               '}';
     }
 }

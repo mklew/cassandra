@@ -188,12 +188,14 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
             // TODO start new round or proceed in current? something has happened that all the other transactions were removed
             final UUID paxosId = inititatePaxosState();
             paxosParticipant.joinRound(paxosId);
+            logger.debug("PaxosParticipant TxID {} creates paxos round with ID {}", paxosParticipant.getTransactionState().getTransactionId(), paxosId);
             return new MppIndexResultActions(Sets.newHashSet(paxosId), needToResolveConflictWithThese, paxosParticipant);
         }
         else if(paxosRoundsFromConflictingTransactions.size() == 1 && txToCheckForConflictWith.isEmpty()) {
             // All conflicts were resolved and there is only single paxos round -> This is expected use case
             // Join that paxos round and proceed
             final UUID paxosId = paxosRoundsFromConflictingTransactions.iterator().next();
+            logger.debug("PaxosParticipant TxID {} joins paxos round with ID {}", paxosParticipant.getTransactionState().getTransactionId(), paxosId);
             paxosParticipant.joinRound(paxosId);
         }
 

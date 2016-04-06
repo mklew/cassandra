@@ -22,6 +22,7 @@ package org.apache.cassandra.service.mppaxos;
 import java.net.InetAddress;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
@@ -43,6 +44,8 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
 
     private final Map<InetAddress, MpCommit> commitsByReplica = new ConcurrentHashMap<>();
 
+    private final AtomicBoolean rolledBack = new AtomicBoolean(false);
+
     public MpPrepareCallback(TransactionState transactionState, int targets, ConsistencyLevel consistency, ReplicasGroupsOperationCallback replicasGroupOperationCallback)
     {
         super(targets, consistency, replicasGroupOperationCallback);
@@ -56,6 +59,14 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
     {
         MpPrepareResponse response = message.payload;
         logger.debug("Prepare response {} from {}", response, message.from);
+
+        if(message.payload.rolledBack) {
+            logger.debug("Prepare response says that transaction was rolled back at replica {} We will rollback that transaction completely", message.from);
+            rolledBack.compareAndSet(false, true);
+            while (latch.getCount() > 0)
+                latch.countDown();
+            return;
+        }
 
         // In case of clock skew, another node could be proposing with ballot that are quite a bit
         // older than our own. In that case, we record the more recent commit we've received to make
@@ -81,6 +92,10 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
             mostRecentInProgressCommitWithUpdate = response.inProgressCommit;
 
         latch.countDown();
+    }
+
+    public boolean wasRolledBack() {
+        return rolledBack.get();
     }
 
     public Iterable<InetAddress> replicasMissingMostRecentCommit()
