@@ -532,9 +532,9 @@ public class MppServiceImpl implements MppService
         logger.info("DONE: deleted single transaction item tx {} ti {}", transactionStateAsJson, transactionItemAsJson);
     }
 
-    public void storageProxyExtAddToWaitUntilAfterPrePrepared(List<String> transactionIds)
+    public void storageProxyExtAddToWaitUntilAfterPrePrepared(String ... transactionIds)
     {
-        StorageProxyMpPaxosExtensions.addToWaitUntilAfterPrePrepared(transactionIds.stream().map(UUID::fromString).collect(Collectors.toList()));
+        StorageProxyMpPaxosExtensions.addToWaitUntilAfterPrePrepared(Stream.of(transactionIds).map(UUID::fromString).collect(Collectors.toList()));
     }
 
     private void purgeTransactionItem(TransactionState transactionState, TransactionItem transactionItem)

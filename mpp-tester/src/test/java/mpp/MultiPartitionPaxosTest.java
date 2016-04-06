@@ -96,8 +96,6 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         // Item to create
         MppTestSchemaHelpers.Item item = createSingleItem();
 
-        Thread.sleep(3000);
-
         Session sessionN1 = getSessionN1();
         Session sessionN2 = getSessionN2();
 
@@ -108,9 +106,9 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         UUID tx1Id = tx1.getTransactionId();
         UUID tx2Id = tx2.getTransactionId();
         // Wait for them in multi partition paxos, allow them to proceed when both of them are registered in index.
-//        getNodeProbesStream().forEach(nodeProbe -> {
-//            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(Arrays.asList(tx1Id.toString(), tx2Id.toString()));
-//        });
+        getNodeProbesStream().forEach(nodeProbe -> {
+            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(tx1Id.toString(), tx2Id.toString());
+        });
 
         // 2. Transactions modify same piece of data.
         MppTestSchemaHelpers.Item itemForTx1 = item.copyWithDescription("tx 1 description");
@@ -120,20 +118,20 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, itemForTx1, tx1));
         tx2 = tx2.merge(MppTestSchemaHelpers.Item.persistItem(sessionN2, itemForTx2, tx2));
 
-        // TODO [MPP] Go back to Async version
-        commitTransaction(sessionN1, tx1);
-//        commitTransactionAsync(sessionN2, tx2);
+        commitTransactionAsync(sessionN1, tx1);
+        commitTransactionAsync(sessionN2, tx2);
 
-//        Thread.sleep(10000);
+        Thread.sleep(10000);
         MppTestSchemaHelpers.Item foundItem = MppTestSchemaHelpers.Item.findItemById(item.itemId, sessionN1);
 
         System.out.println("Item is: " + foundItem);
 
-//        ResultSet execute = sessionN1.execute("SELECT * FROM mpptest.items WHERE item_id = ?", item.itemId);
-//        execute.one().getString("item_description")
-
         if(foundItem.description == null && foundItem.price == null) {
             Assert.fail("Both description and price were null");
+        }
+
+        if(foundItem.description != null && foundItem.price != null) {
+            Assert.fail("Both should not be defined");
         }
 
         // 3. Try to commit at same time.
