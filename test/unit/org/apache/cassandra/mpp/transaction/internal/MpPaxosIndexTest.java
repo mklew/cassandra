@@ -422,6 +422,7 @@ public class MpPaxosIndexTest
         final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
         Assert.assertTrue("Tx4 starts its own round", r4.isPresent());
         Assert.assertEquals(r4, mpPaxosIndex.acquireAndFindPaxosId(tx4));
+        Assert.assertEquals(r4, mpPaxosIndex.acquireForMppPaxos(tx4)); // Testing idempotency of operation.
 
         final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
         Assert.assertTrue("Tx1 starts its own round", r1.isPresent());

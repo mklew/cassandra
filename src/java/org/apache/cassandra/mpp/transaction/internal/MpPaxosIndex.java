@@ -494,7 +494,11 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     private Optional<MpPaxosParticipant> findParticipant(TransactionItem item, TransactionState tx)
     {
-        return getIndexUnsafe().get(item).getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst();
+        MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe().get(item);
+        if(mppPaxosRoundPointers != null) {
+            return mppPaxosRoundPointers.getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst();
+        }
+        else return Optional.empty();
     }
 
     private static MppIndexResultActions createIndexResult(UUID paxosId, MpPaxosParticipant paxosParticipant)
@@ -926,12 +930,17 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     public Optional<MpPaxosId> acquireAndFindPaxosId(TransactionState transactionState) {
         final Optional<MpPaxosId>[] maybeMpPaxosId = new Optional[1];
         acquireIndex(transactionState, (index, items) -> {
-            Optional<MpPaxosId> optPaxosId = findParticipant(items.iterator().next(), transactionState)
-                                             .flatMap(MpPaxosParticipant::getPaxosId)
-                                             .map(id -> (MpPaxosId) new MpPaxosIdImpl(id));
+            Optional<MpPaxosId> optPaxosId = findPaxosIdOfMaybeAlreadyRegisteredParticipant(transactionState, items);
             maybeMpPaxosId[0] = optPaxosId;
         });
         return maybeMpPaxosId[0];
+    }
+
+    private Optional<MpPaxosId> findPaxosIdOfMaybeAlreadyRegisteredParticipant(TransactionState transactionState, List<TransactionItem> items)
+    {
+        return findParticipant(items.iterator().next(), transactionState)
+                                                 .flatMap(MpPaxosParticipant::getPaxosId)
+                                                 .map(id -> (MpPaxosId) new MpPaxosIdImpl(id));
     }
 
     /**
@@ -947,6 +956,11 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     public Optional<MpPaxosId> acquireForMppPaxos(TransactionState transactionState) {
         final Optional<MpPaxosId>[] maybeMpPaxosId = new Optional[1];
         acquireIndex(transactionState, (index, items) -> {
+            Optional<MpPaxosId> maybeAlreadyRegistered = findPaxosIdOfMaybeAlreadyRegisteredParticipant(transactionState, items);
+            if(maybeAlreadyRegistered.isPresent()) {
+                maybeMpPaxosId[0] = maybeAlreadyRegistered;
+                return;
+            }
             // 1. Register in index.
             MppIndexResultActions actions = null;
             actions = index.addItToIndex(transactionState, items);
