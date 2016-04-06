@@ -409,13 +409,23 @@ public class StorageProxyMpPaxosExtensions
         }
     };
 
-    public static class ReplicaGroupInProposedPhase extends AbstractReplicaGroupInPhase {
+    // TODO [MPP] It needs to extend from ReplicaGroupInPreparedPhase because if one replica group gets proposal and other doesn't
+    // then both of them start at prepare. So next phase MUST extend previous phases.
+    public static class ReplicaGroupInProposedPhase extends ReplicaGroupInPreparedPhase {
 
         MpCommit proposal;
 
-        protected ReplicaGroupInProposedPhase(ReplicasGroupAndOwnedItems replicaGroup, TransactionState transactionState, ClientState state, MpCommit proposal)
+        protected ReplicaGroupInProposedPhase(ReplicasGroupAndOwnedItems replicaGroup,
+                                              TransactionState transactionState,
+                                              ClientState state,
+                                              Map<InetAddress, Optional<MpPaxosId>> responsesByReplica,
+                                              MpPrepareCallback summary,
+                                              List<InetAddress> liveEndpoints,
+                                              int requiredParticipants,
+                                              UUID ballot,
+                                              MpCommit proposal)
         {
-            super(replicaGroup, transactionState, state);
+            super(replicaGroup, transactionState, state, responsesByReplica, summary, liveEndpoints, requiredParticipants, ballot);
             this.proposal = proposal;
         }
 
@@ -431,7 +441,15 @@ public class StorageProxyMpPaxosExtensions
 
         public static ReplicaGroupInPhase fromInPrepared(ReplicaGroupInPreparedPhase inPrepared, MpCommit proposal)
         {
-            return new ReplicaGroupInProposedPhase(inPrepared.getReplicaGroup(), inPrepared.getTransactionState(), inPrepared.getState(), proposal);
+            return new ReplicaGroupInProposedPhase(inPrepared.getReplicaGroup(),
+                                                   inPrepared.getTransactionState(),
+                                                   inPrepared.getState(),
+                                                   inPrepared.getResponsesByReplica(),
+                                                   inPrepared.getSummary(),
+                                                   inPrepared.liveEndpoints,
+                                                   inPrepared.requiredParticipants,
+                                                   inPrepared.ballot,
+                                                   proposal);
         }
     }
 
