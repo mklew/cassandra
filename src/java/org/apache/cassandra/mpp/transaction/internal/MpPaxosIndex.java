@@ -956,11 +956,6 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     public Optional<MpPaxosId> acquireForMppPaxos(TransactionState transactionState) {
         final Optional<MpPaxosId>[] maybeMpPaxosId = new Optional[1];
         acquireIndex(transactionState, (index, items) -> {
-            Optional<MpPaxosId> maybeAlreadyRegistered = findPaxosIdOfMaybeAlreadyRegisteredParticipant(transactionState, items);
-            if(maybeAlreadyRegistered.isPresent()) {
-                maybeMpPaxosId[0] = maybeAlreadyRegistered;
-                return;
-            }
             // 1. Register in index.
             MppIndexResultActions actions = null;
             actions = index.addItToIndex(transactionState, items);
