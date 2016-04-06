@@ -34,6 +34,9 @@ import java.util.stream.Stream;
 
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -56,6 +59,8 @@ public class TransactionDataImpl implements TransactionData
 
     private volatile boolean hasBeenApplied = false;
     private volatile boolean frozen = false;
+
+    private static final Logger logger = LoggerFactory.getLogger(TransactionDataImpl.class);
 
     // TODO [MPP] this will be changed to actual private memtables, or maybe not.
     private final Map<String, Map<DecoratedKey, Mutation>> ksToKeyToMutation = new HashMap<>();
@@ -191,26 +196,36 @@ public class TransactionDataImpl implements TransactionData
 
     public void applyAllMutations(long applyTimestamp, Function<PartitionUpdate, Boolean> predicate)
     {
+        logger.info("applyAllMutations timestamp {}", applyTimestamp);
         Preconditions.checkArgument(!hasBeenApplied, "Cannot apply same transaction data twice");
-        ksToKeyToMutation.entrySet().stream().map(Map.Entry::getValue).flatMap(m -> m.entrySet().stream().map(Map.Entry::getValue))
-                         .map(Mutation::copy) // copy, to refresh createdAt which is used to determine rpc timeout
-                         .map(m -> {
-                             // Update timestamps of all partition updates
-                             m.getPartitionUpdates().forEach(pu -> pu.updateAllTimestamp(applyTimestamp));
-                             return m;
-                         })
-                         .map(m -> {
-                             Set<UUID> cfIds = m.getPartitionUpdates().stream().filter(pu -> !predicate.apply(pu)).map(pu -> pu.metadata().cfId).collect(Collectors.toSet());
-                             if (!cfIds.isEmpty())
-                             {
-                                 return m.without(cfIds);
-                             }
-                             else
-                             {
-                                 return m;
-                             }
-                         })
-                         .forEach(mutation -> Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true));
+        List<Mutation> materializeMutations = ksToKeyToMutation.entrySet().stream().map(Map.Entry::getValue).flatMap(m -> m.entrySet().stream().map(Map.Entry::getValue))
+                                 .map(Mutation::copy) // copy, to refresh createdAt which is used to determine rpc timeout
+                                 .map(m -> {
+                                     // Update timestamps of all partition updates
+                                     m.getPartitionUpdates().forEach(pu -> pu.updateAllTimestamp(applyTimestamp));
+                                     return m;
+                                 })
+                                 .map(m -> {
+                                     Set<UUID> cfIds = m.getPartitionUpdates().stream().filter(pu -> !predicate.apply(pu)).map(pu -> pu.metadata().cfId).collect(Collectors.toSet());
+                                     if (!cfIds.isEmpty())
+                                     {
+                                         logger.debug("applyAllMutations without cfIds {}", cfIds);
+                                         return m.without(cfIds);
+                                     }
+                                     else
+                                     {
+                                         return m;
+                                     }
+                                 }).collect(Collectors.toList());
+
+        materializeMutations
+                         .forEach(mutation -> {
+                             logger.debug("applyAllMutations applying mutation on keyspace. Mutation key {}", mutation.key());
+                             mutation.getPartitionUpdates().forEach(pu -> {
+                                 logger.debug("Mutation details. PartitionUpdate data size {}, rowCount {}, hasRows {} tableName {}", pu.dataSize(), pu.rowCount(), pu.hasRows(), pu.metadata().cfName);
+                             });
+                             Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true);
+                         });
 
         // Mutations happen in different thread so this method returns before actually doing mutations.
         // It is done same way for paxos and others therefore it should be enough and should not fail.

@@ -21,6 +21,7 @@ package mpp;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.stream.Stream;
 
 import org.junit.After;
 import org.junit.Before;
@@ -124,6 +125,10 @@ public abstract class BaseClusterTest
         {
             throw new RuntimeException(e);
         }
+    }
+
+    protected Stream<NodeProbe> getNodeProbesStream() {
+        return Stream.of(getNodeProbe1(), getNodeProbe2(), getNodeProbe3());
     }
 
     protected Session getSessionN1()

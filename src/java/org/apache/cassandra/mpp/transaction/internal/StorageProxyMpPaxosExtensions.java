@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,7 +37,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Uninterruptibles;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,6 +81,18 @@ public class StorageProxyMpPaxosExtensions
     private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("MPPCASRead");
 
     private static final Logger logger = LoggerFactory.getLogger(StorageProxyMpPaxosExtensions.class);
+
+    private static Set<UUID> transactionsThatAreAfterPrePrepared = new ConcurrentSkipListSet<>();
+
+    private static Set<UUID> waitingForTransactionUntilItIsInPrePrepared = new ConcurrentSkipListSet<>();
+
+    // TODO [MPP] For TESTING ONLY
+    public static void addToWaitUntilAfterPrePrepared(List<UUID> transactionIds)
+    {
+        logger.debug("addToWaitUntilAfterPrePrepared transactionId {}", transactionIds);
+        waitingForTransactionUntilItIsInPrePrepared = new ConcurrentSkipListSet<>(transactionIds);
+        transactionsThatAreAfterPrePrepared = new ConcurrentSkipListSet<>();
+    }
 
     enum Phase
     {
@@ -365,6 +377,14 @@ public class StorageProxyMpPaxosExtensions
         MpPrePrepareMpPaxosCallback callback = ((MppServiceImpl) MppServicesLocator.getInstance()).prePrepareReplicaGroup(replicaGroup.getTransactionState(), replicaGroup.getReplicaGroup(), null);
         callback.await();
 
+        // TODO [MPP] For testing
+        if(!waitingForTransactionUntilItIsInPrePrepared.isEmpty() && waitingForTransactionUntilItIsInPrePrepared.contains(replicaGroup.getTransactionState().getTransactionId())) {
+            logger.debug("Adding transaction id {} to transactionsThatAreAfterPrePrepared", replicaGroup.getTransactionState().getTransactionId());
+            transactionsThatAreAfterPrePrepared.add(replicaGroup.getTransactionState().getTransactionId());
+            logger.debug("transactionsThatAreAfterPrePrepared is {}", transactionsThatAreAfterPrePrepared);
+        }
+        // END TODO
+
         Map<InetAddress, Optional<MpPaxosId>> responsesByReplica = callback.getResponsesByReplica();
 
         return new ReplicaGroupInPrePreparedPhase(replicaGroup.getReplicaGroup(), replicaGroup.getTransactionState(), replicaGroup.getState(), responsesByReplica, null);
@@ -390,6 +410,26 @@ public class StorageProxyMpPaxosExtensions
 
         MpCommit toPrepare = MpCommit.newPrepare(inPhase.getTransactionState(), ballot);
         summary = preparePaxos(toPrepare, liveEndpoints, requiredParticipants, consistencyForPaxos, null);
+
+        // TODO [MPP] For testing
+        if(!waitingForTransactionUntilItIsInPrePrepared.isEmpty() && waitingForTransactionUntilItIsInPrePrepared.contains(replicaGroupInPhase.getTransactionState().getTransactionId())) {
+            if(waitingForTransactionUntilItIsInPrePrepared.equals(transactionsThatAreAfterPrePrepared)) {
+                logger.debug("all transactions waited for are in phase after PRE PREPARED");
+            }
+            else {
+                logger.debug("transition to prepared will wait for other transactions");
+                return new ReplicaGroupInPreparedPhase(inPhase.getReplicaGroup(),
+                                                       inPhase.getTransactionState(),
+                                                       inPhase.getState(),
+                                                       inPhase.getResponsesByReplica(),
+                                                       summary,
+                                                       liveEndpoints,
+                                                       requiredParticipants,
+                                                       ballot);
+            }
+        }
+        // END TODO [MPP] For Testing
+
         if (notPromised(summary))
         {
             Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
@@ -402,7 +442,7 @@ public class StorageProxyMpPaxosExtensions
                                                    inPhase.getTransactionState(),
                                                    inPhase.getState(),
                                                    inPhase.getResponsesByReplica(),
-                                                   inPhase.getSummary(),
+                                                   summary,
                                                    liveEndpoints,
                                                    requiredParticipants,
                                                    ballot);

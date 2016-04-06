@@ -385,6 +385,7 @@ public class MppServiceImpl implements MppService
         Preconditions.checkState(privateMemtableStorage.transactionExistsInStorage(transactionState.id()), "TransactionData not found for transaction id %s", transactionState.getTransactionId());
         final TransactionData transactionData = getTransactionData(transactionState.id());
 
+        logger.debug("transactionData.applyAllMutationsIfNotTruncated. TxId {}", transactionState.getTransactionId());
         transactionData.applyAllMutationsIfNotTruncated(timestamp);
         mpPaxosIndex.acquireAndMarkAsCommitted(transactionState, timestamp);
         mpPaxosIndex.acquireAndRemoveSelf(transactionState);
@@ -392,6 +393,7 @@ public class MppServiceImpl implements MppService
         // It can be deleted if none of replicas miss Most Recent Commit
         // It can be deleted on next paxos round
         privateMemtableStorage.removePrivateData(transactionState.id());
+        logger.info("multiPartitionPaxosCommitPhase is done. TxId {}", transactionState.getTransactionId());
     }
 
     public void submitHints(List<MppHint> hints)
@@ -457,6 +459,7 @@ public class MppServiceImpl implements MppService
                 privateMemtableStorage.storeMutation(transactionState.id(), mutation);
             });
 
+            logger.info("TransactionData is consistent TxID {}", transactionState.getTransactionId());
             privateMemtableStorage.freezeTransaction(transactionState.id());
         }
     }
@@ -465,6 +468,8 @@ public class MppServiceImpl implements MppService
     {
         logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}", prePrepare.getTransactionState().getTransactionId());
         Optional<MpPaxosId> mpPaxosId = mpPaxosIndex.acquireForMppPaxos(prePrepare.getTransactionState());
+        logger.info("prePrepareMultiPartitionPaxos making transaction data consistent. TxID {}", prePrepare.getTransactionState().getTransactionId());
+        makeTransactionDataConsistent(prePrepare.getTransactionState());
 
         logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}, is paxos round present: {}, paxos id is: {}", prePrepare.getTransactionState().getTransactionId(), mpPaxosId.isPresent(), mpPaxosId.map(id -> id.getPaxosId().toString()).orElse("not defined"));
         return mpPaxosId;
@@ -525,6 +530,11 @@ public class MppServiceImpl implements MppService
         purgeTransactionItem(transactionState, transactionItem);
 
         logger.info("DONE: deleted single transaction item tx {} ti {}", transactionStateAsJson, transactionItemAsJson);
+    }
+
+    public void storageProxyExtAddToWaitUntilAfterPrePrepared(List<String> transactionIds)
+    {
+        StorageProxyMpPaxosExtensions.addToWaitUntilAfterPrePrepared(transactionIds.stream().map(UUID::fromString).collect(Collectors.toList()));
     }
 
     private void purgeTransactionItem(TransactionState transactionState, TransactionItem transactionItem)

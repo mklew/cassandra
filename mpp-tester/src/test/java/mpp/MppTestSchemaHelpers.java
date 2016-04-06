@@ -130,6 +130,14 @@ public class MppTestSchemaHelpers
             this.price = price;
         }
 
+        public Item copyWithDescription(String description) {
+            return new Item(itemId, description, price);
+        }
+
+        public Item copyWithPrice(String price) {
+            return new Item(itemId, description, price);
+        }
+
         public static Item newItem(String description, String price) {
             return new Item(UUIDs.random(), description, price);
         }
@@ -144,6 +152,13 @@ public class MppTestSchemaHelpers
 
         public static Item newItem() {
             return new Item(UUIDs.random(), null, null);
+        }
+
+        public static Item persistItemWithoutTx(Session session, Item item) {
+            SimpleStatement simpleStatement = new SimpleStatement("INSERT INTO mpptest.items (item_id, item_description, price) values (?, ?, ?)", item.itemId, item.description, item.price);
+            simpleStatement.setConsistencyLevel(ConsistencyLevel.QUORUM);
+            session.execute(simpleStatement);
+            return findItemById(item.itemId, session);
         }
 
         public static TransactionState persistItem(Session session, Item item, TransactionState transactionState) {
@@ -218,6 +233,21 @@ public class MppTestSchemaHelpers
             result = 31 * result + (description != null ? description.hashCode() : 0);
             result = 31 * result + (price != null ? price.hashCode() : 0);
             return result;
+        }
+
+        public static Item findItemById(UUID itemId, Session session)
+        {
+            ResultSet query = session.execute("SELECT * FROM mpptest.items WHERE item_id = ? ", itemId);
+            return readItems(query).iterator().next();
+        }
+
+        public String toString()
+        {
+            return "Item{" +
+                   "itemId=" + itemId +
+                   ", description='" + description + '\'' +
+                   ", price='" + price + '\'' +
+                   '}';
         }
     }
 

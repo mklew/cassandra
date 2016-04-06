@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.service;
 
+import java.util.List;
+
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
  * @since 19/02/16
@@ -27,4 +29,6 @@ public interface MppServiceMXBean
     void makeTransactionDataConsistent(String transactionStateAsJson);
 
     void deleteSingleItem(String transactionStateAsJson, String transactionItemAsJson);
+
+    void storageProxyExtAddToWaitUntilAfterPrePrepared(List<String> transactionId);
 }

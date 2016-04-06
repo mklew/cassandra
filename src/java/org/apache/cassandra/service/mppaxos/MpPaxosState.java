@@ -31,6 +31,7 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.internal.SystemKeyspaceMultiPartitionPaxosExtensions;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
 public class MpPaxosState
@@ -104,7 +105,7 @@ public class MpPaxosState
             boolean wasRolledBack = true;
             // returning nulls, because paxos instance cannot be found at this node..
             // It is possible to send with prepare, paxos id that was received in pre prepare response, but probably it won't be necessary.
-            return new MpPrepareResponse(notPromised, wasRolledBack, null, null);
+            return new MpPrepareResponse(notPromised, wasRolledBack, MpCommit.emptyCommit(), MpCommit.emptyCommit());
         }
 
     }
@@ -130,10 +131,10 @@ public class MpPaxosState
                     MpPaxosState state = SystemKeyspaceMultiPartitionPaxosExtensions.loadPaxosState(paxosId);
                     if (proposal.hasBallot(state.promised.ballot) || proposal.isAfter(state.promised))
                     {
-                        logger.info("About to accept proposal, but making data consistent first. Proposal is {}", proposal);
+//                        logger.info("About to accept proposal, but making data consistent first. Proposal is {}", proposal);
                         Tracing.trace("Accepting proposal {}", proposal);
                         // TODO Maybe it should be done outside of lock, just before commit? But then transaction that cannot be made consistent, should not be proposed.
-                        MppServicesLocator.getInstance().makeTransactionDataConsistent(proposal.update);
+                        // MppServicesLocator.getInstance().makeTransactionDataConsistent(proposal.update);
                         logger.info("Accepting proposal {}", proposal);
                         SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosProposal(proposal, paxosId);
                         return true;
@@ -181,12 +182,16 @@ public class MpPaxosState
                 // don't want to perform the mutation and potentially resurrect truncated data
 
                 long timestamp = UUIDGen.unixTimestamp(proposal.ballot);
+                // TODO [MPP] Expertimenting with timestamp, because it is possbile that timestamp is LONG.MIN_VALUE
+                final long timestampOfWrite = FBUtilities.timestampMicros();
                 logger.info("Commiting multi partition paxos proposal. Tx ID is: {}", proposal.update.id());
-                MppServicesLocator.getInstance().multiPartitionPaxosCommitPhase(proposal.update, timestamp);
+                MppServicesLocator.getInstance().multiPartitionPaxosCommitPhase(proposal.update, timestampOfWrite);
                 // We don't need to lock, we're just blindly updating
+                logger.info("savePaxosCommit. Tx ID is: {}", proposal.update.id());
                 SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosCommit(proposal, paxosId);
             }
             else {
+                // Case when this replica has missing Most Recent Commit and it was replied.
                 logger.warn("Uncommon conditions. PaxosId cannot be found when doing paxos commit. Transaction ID is: {}", proposal.update.id());
             }
 

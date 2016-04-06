@@ -18,9 +18,12 @@
 
 package mpp;
 
+import java.util.UUID;
+
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Session;
 import junit.framework.Assert;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -47,6 +50,16 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         transactionState = transactionState.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, itemForPartition1, transactionState));
         transactionState = transactionState.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, itemForPartition2, transactionState));
 
+        commitTransaction(sessionN1, transactionState);
+        ResultSet execute = sessionN1.execute("SELECT * FROM mpptest.items WHERE item_id = ?", itemForPartition1.itemId);
+        Assert.assertEquals("descriptions of item for partition 1 should match", itemForPartition1Desc, execute.one().getString("item_description"));
+
+        ResultSet execute2 = sessionN1.execute("SELECT * FROM mpptest.items WHERE item_id = ?", itemForPartition2.itemId);
+        Assert.assertEquals("descriptions of item for partition 2 should match", itemForPartition2Desc, execute2.one().getString("item_description"));
+    }
+
+    private static void commitTransaction(Session session, TransactionState transactionState)
+    {
         final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
         final String txStateJson = MppTest.getJson(transactionStateDto);
 
@@ -57,12 +70,83 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
 //        sessionN1.execute(boundStatement);
 
         // Json had to be wrapped in single quotes
-        sessionN1.execute("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
-        ResultSet execute = sessionN1.execute("SELECT * FROM mpptest.items WHERE item_id = ?", itemForPartition1.itemId);
-        Assert.assertEquals("descriptions of item for partition 1 should match", itemForPartition1Desc, execute.one().getString("item_description"));
-
-        ResultSet execute2 = sessionN1.execute("SELECT * FROM mpptest.items WHERE item_id = ?", itemForPartition2.itemId);
-        Assert.assertEquals("descriptions of item for partition 2 should match", itemForPartition2Desc, execute2.one().getString("item_description"));
+        session.execute("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
     }
 
+    private static ResultSetFuture commitTransactionAsync(Session session, TransactionState transactionState)
+    {
+        final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
+        final String txStateJson = MppTest.getJson(transactionStateDto);
+
+        // TODO [MPP] I get operation time out when trying to use prepared statement. None of hosts can handle that prepared statement.
+
+//        PreparedStatement preparedCommitTransactionStmt = sessionN1.prepare("COMMIT TRANSACTION AS JSON ?");
+//        BoundStatement boundStatement = preparedCommitTransactionStmt.bind("'" + txStateJson + "'");
+//        sessionN1.execute(boundStatement);
+
+        // Json had to be wrapped in single quotes
+        return session.executeAsync("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
+    }
+
+    // TODO [MPP] Test doesn't work when data is supposed to update already existing data in Cassandra - WTF
+    // Test works
+    @Test
+    public void shouldRollbackConcurrentTransaction() throws InterruptedException
+    {
+        // Item to create
+        MppTestSchemaHelpers.Item item = createSingleItem();
+
+        Thread.sleep(3000);
+
+        Session sessionN1 = getSessionN1();
+        Session sessionN2 = getSessionN2();
+
+        // 1. Given Two transactions
+        TransactionState tx1 = beginTransaction(sessionN1);
+        TransactionState tx2 = beginTransaction(sessionN2);
+
+        UUID tx1Id = tx1.getTransactionId();
+        UUID tx2Id = tx2.getTransactionId();
+        // Wait for them in multi partition paxos, allow them to proceed when both of them are registered in index.
+//        getNodeProbesStream().forEach(nodeProbe -> {
+//            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(Arrays.asList(tx1Id.toString(), tx2Id.toString()));
+//        });
+
+        // 2. Transactions modify same piece of data.
+        MppTestSchemaHelpers.Item itemForTx1 = item.copyWithDescription("tx 1 description");
+
+        MppTestSchemaHelpers.Item itemForTx2 = item.copyWithPrice("tx 2 price");
+
+        tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, itemForTx1, tx1));
+        tx2 = tx2.merge(MppTestSchemaHelpers.Item.persistItem(sessionN2, itemForTx2, tx2));
+
+        // TODO [MPP] Go back to Async version
+        commitTransaction(sessionN1, tx1);
+//        commitTransactionAsync(sessionN2, tx2);
+
+//        Thread.sleep(10000);
+        MppTestSchemaHelpers.Item foundItem = MppTestSchemaHelpers.Item.findItemById(item.itemId, sessionN1);
+
+        System.out.println("Item is: " + foundItem);
+
+//        ResultSet execute = sessionN1.execute("SELECT * FROM mpptest.items WHERE item_id = ?", item.itemId);
+//        execute.one().getString("item_description")
+
+        if(foundItem.description == null && foundItem.price == null) {
+            Assert.fail("Both description and price were null");
+        }
+
+        // 3. Try to commit at same time.
+            // TODO [MPP] Need to wait on both of them just after PRE PREPARE so they are both registered in index, but do not proceed
+        // 4. After, only one should get saved, other should not be able to proceed - it will fail on next phase
+
+    }
+
+    private MppTestSchemaHelpers.Item createSingleItem()
+    {
+        Session sessionN1 = getSessionN1();
+        final MppTestSchemaHelpers.Item item = MppTestSchemaHelpers.Item.newItem();
+        MppTestSchemaHelpers.Item createdItem = MppTestSchemaHelpers.Item.persistItemWithoutTx(sessionN1, item);
+        return createdItem;
+    }
 }
