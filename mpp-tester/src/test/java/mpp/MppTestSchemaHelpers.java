@@ -19,6 +19,7 @@
 package mpp;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -237,8 +238,13 @@ public class MppTestSchemaHelpers
 
         public static Item findItemById(UUID itemId, Session session)
         {
+            return findItemByIdOptional(itemId, session).get();
+        }
+
+        public static Optional<Item> findItemByIdOptional(UUID itemId, Session session)
+        {
             ResultSet query = session.execute("SELECT * FROM mpptest.items WHERE item_id = ? ", itemId);
-            return readItems(query).iterator().next();
+            return readItems(query).stream().findFirst();
         }
 
         public String toString()

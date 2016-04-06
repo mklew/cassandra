@@ -18,6 +18,7 @@
 
 package mpp;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.Test;
@@ -87,6 +88,119 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         // Json had to be wrapped in single quotes
         return session.executeAsync("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
     }
+
+    /**
+     * Scenario:
+     *
+     * Two transactions modify:
+     *  - same partition
+     *  - and other independent partitions
+     *
+     *  After execution, only one should succeed (in most cases, because it depends on timing).
+     *
+     *  See which succeeded based on results of modifications of common partition.
+     *
+     *  Check if independent partitions have expected that.
+     *  Check if independent partitions from rolledback transaction are empty.
+     *
+     * @throws Throwable
+     */
+    @Test
+    public void shouldRollbackConcurrentTransactionWithManyPartitions() throws Throwable {
+        MppTestSchemaHelpers.Item commonItem = createSingleItem();
+        Session sessionN1 = getSessionN1();
+        Session sessionN2 = getSessionN2();
+
+        // 1. Given Two transactions
+        TransactionState tx1 = beginTransaction(sessionN1);
+        TransactionState tx2 = beginTransaction(sessionN2);
+
+        UUID tx1Id = tx1.getTransactionId();
+        UUID tx2Id = tx2.getTransactionId();
+        // Wait for them in multi partition paxos, allow them to proceed when both of them are registered in index.
+        getNodeProbesStream().forEach(nodeProbe -> {
+            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(tx1Id.toString(), tx2Id.toString());
+        });
+
+        // 2. Transactions modify same piece of data.
+        MppTestSchemaHelpers.Item itemForTx1 = commonItem.copyWithDescription("tx 1 description");
+
+        MppTestSchemaHelpers.Item itemForTx2 = commonItem.copyWithPrice("tx 2 price");
+
+        tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, itemForTx1, tx1));
+        tx2 = tx2.merge(MppTestSchemaHelpers.Item.persistItem(sessionN2, itemForTx2, tx2));
+
+        // Independent data for Tx1
+        final MppTestSchemaHelpers.Item tx1Item1 = MppTestSchemaHelpers.Item.newItemWithDescription("tx1 item 1");
+        final MppTestSchemaHelpers.Item tx1Item2 = MppTestSchemaHelpers.Item.newItemWithDescription("tx1 item 2");
+        final MppTestSchemaHelpers.Item tx1Item3 = MppTestSchemaHelpers.Item.newItemWithDescription("tx1 item 3");
+
+        // persist for Tx1
+        tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, tx1Item1, tx1));
+        tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, tx1Item2, tx1));
+        tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, tx1Item3, tx1));
+
+        // Independent data for Tx2
+        final MppTestSchemaHelpers.Item tx2Item1 = MppTestSchemaHelpers.Item.newItemWithDescription("tx2 item 1");
+        final MppTestSchemaHelpers.Item tx2Item2 = MppTestSchemaHelpers.Item.newItemWithDescription("tx2 item 2");
+
+        // persist for Tx2
+        tx2 = tx2.merge(MppTestSchemaHelpers.Item.persistItem(sessionN2, tx2Item1, tx2));
+        tx2 = tx2.merge(MppTestSchemaHelpers.Item.persistItem(sessionN2, tx2Item2, tx2));
+
+        commitTransactionAsync(sessionN1, tx1);
+        commitTransactionAsync(sessionN2, tx2);
+
+        Thread.sleep(10000);
+        MppTestSchemaHelpers.Item foundItem = MppTestSchemaHelpers.Item.findItemById(commonItem.itemId, sessionN1);
+
+        if(foundItem.description == null && foundItem.price == null) {
+            Assert.fail("Nothing worked, something went bad. Check logs");
+        }
+
+        if(foundItem.description != null && foundItem.price != null) {
+            Assert.fail("Timing was bad and both succeeded. Run test again.");
+        }
+
+        if(foundItem.description != null) {
+            // First transaction succeeded. Check data for presence.
+            System.out.println("Tx1 succeeded");
+            Assert.assertTrue("items of Tx1 should exist", itemsOfTx1Exist(sessionN1, tx1Item1, tx1Item2, tx1Item3));
+            Assert.assertFalse("items of Tx2 should NOT exist", itemsOfTx2Exist(sessionN2, tx2Item1, tx2Item2));
+        }
+        else {
+            // Second transaction succeeded. Check data for presence.
+            System.out.println("Tx2 succeeded");
+            Assert.assertFalse("items of Tx1 should NOT exist", itemsOfTx1Exist(sessionN1, tx1Item1, tx1Item2, tx1Item3));
+            Assert.assertTrue("items of Tx2 should exist", itemsOfTx2Exist(sessionN2, tx2Item1, tx2Item2));
+        }
+
+        System.out.println("Test is done");
+
+    }
+
+    private static boolean itemsOfTx1Exist(Session sessionN1, MppTestSchemaHelpers.Item tx1Item1, MppTestSchemaHelpers.Item tx1Item2, MppTestSchemaHelpers.Item tx1Item3)
+    {
+        Optional<MppTestSchemaHelpers.Item> i1pt = MppTestSchemaHelpers.Item.findItemByIdOptional(tx1Item1.itemId, sessionN1);
+        Optional<MppTestSchemaHelpers.Item> i2pt = MppTestSchemaHelpers.Item.findItemByIdOptional(tx1Item2.itemId, sessionN1);
+        Optional<MppTestSchemaHelpers.Item> i3pt = MppTestSchemaHelpers.Item.findItemByIdOptional(tx1Item3.itemId, sessionN1);
+        i1pt.ifPresent(item -> Assert.assertEquals("tx1 item 1", item.description));
+        i2pt.ifPresent(item -> Assert.assertEquals("tx1 item 2", item.description));
+        i3pt.ifPresent(item -> Assert.assertEquals("tx1 item 3", item.description));
+
+        return i1pt.isPresent() && i2pt.isPresent() && i3pt.isPresent();
+    }
+
+    private static boolean itemsOfTx2Exist(Session sessionN2, MppTestSchemaHelpers.Item tx2Item1, MppTestSchemaHelpers.Item tx2Item2)
+    {
+        Optional<MppTestSchemaHelpers.Item> i1pt = MppTestSchemaHelpers.Item.findItemByIdOptional(tx2Item1.itemId, sessionN2);
+        Optional<MppTestSchemaHelpers.Item> i2pt = MppTestSchemaHelpers.Item.findItemByIdOptional(tx2Item2.itemId, sessionN2);
+        i1pt.ifPresent(item -> Assert.assertEquals("tx2 item 1", item.description));
+        i2pt.ifPresent(item -> Assert.assertEquals("tx2 item 2", item.description));
+
+        return i1pt.isPresent() && i2pt.isPresent();
+    }
+
 
     @Test
     public void shouldRollbackConcurrentTransaction() throws InterruptedException
