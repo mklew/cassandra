@@ -31,7 +31,6 @@ import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.internal.SystemKeyspaceMultiPartitionPaxosExtensions;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
 public class MpPaxosState
@@ -181,11 +180,9 @@ public class MpPaxosState
                 // The table may have been truncated since the proposal was initiated. In that case, we
                 // don't want to perform the mutation and potentially resurrect truncated data
 
-                long timestamp = UUIDGen.unixTimestamp(proposal.ballot);
-                // TODO [MPP] Expertimenting with timestamp, because it is possbile that timestamp is LONG.MIN_VALUE
-                final long timestampOfWrite = FBUtilities.timestampMicros();
+                long timestamp = UUIDGen.microsTimestamp(proposal.ballot);
                 logger.info("Commiting multi partition paxos proposal. Tx ID is: {}", proposal.update.id());
-                MppServicesLocator.getInstance().multiPartitionPaxosCommitPhase(proposal.update, timestampOfWrite);
+                MppServicesLocator.getInstance().multiPartitionPaxosCommitPhase(proposal.update, timestamp);
                 // We don't need to lock, we're just blindly updating
                 logger.info("savePaxosCommit. Tx ID is: {}", proposal.update.id());
                 SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosCommit(proposal, paxosId);
