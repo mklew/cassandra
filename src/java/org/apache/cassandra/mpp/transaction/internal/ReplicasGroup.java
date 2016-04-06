@@ -20,6 +20,7 @@ package org.apache.cassandra.mpp.transaction.internal;
 
 import java.net.InetAddress;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
 * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -42,5 +43,13 @@ public class ReplicasGroup
     public String toString()
     {
         return "ReplicaGroup[" + replicas + ']';
+    }
+
+
+    public boolean hasSameReplicasAs(ReplicasGroup replicasGroup)
+    {
+        List<String> thisHosts = replicas.stream().map(InetAddress::getHostAddress).sorted().collect(Collectors.toList());
+        List<String> otherHosts = replicasGroup.replicas.stream().map(InetAddress::getHostAddress).sorted().collect(Collectors.toList());
+        return thisHosts.equals(otherHosts);
     }
 }

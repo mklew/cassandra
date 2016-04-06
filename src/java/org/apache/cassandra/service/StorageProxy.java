@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
@@ -1455,6 +1456,24 @@ public class StorageProxy implements StorageProxyMBean
                 }
             }
         });
+    }
+
+    public static CompletableFuture<?> performLocally(final Runnable runnable) {
+        CompletableFuture<Object> objectCompletableFuture = new CompletableFuture<>();
+        StageManager.getStage(Stage.PRIVATE_MEMTABLES_WRITE).maybeExecuteImmediately(() -> {
+            try
+            {
+                runnable.run();
+                objectCompletableFuture.complete(new Object());
+            }
+            catch (Exception ex)
+            {
+                if (!(ex instanceof WriteTimeoutException))
+                    logger.error("Failed to apply mutation locally : {}", ex);
+                objectCompletableFuture.completeExceptionally(ex);
+            }
+        });
+        return objectCompletableFuture;
     }
 
     private static void performLocally(Stage stage, final Runnable runnable, final IAsyncCallbackWithFailure<?> handler)
