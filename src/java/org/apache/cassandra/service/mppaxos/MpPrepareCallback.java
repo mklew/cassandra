@@ -41,6 +41,7 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
     public MpCommit mostRecentCommit;
     public MpCommit mostRecentInProgressCommit;
     public MpCommit mostRecentInProgressCommitWithUpdate;
+    private final TransactionState transactionState;
 
     private final Map<InetAddress, MpCommit> commitsByReplica = new ConcurrentHashMap<>();
 
@@ -53,6 +54,7 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
         mostRecentCommit = MpCommit.emptyCommit(transactionState);
         mostRecentInProgressCommit = MpCommit.emptyCommit(transactionState);
         mostRecentInProgressCommitWithUpdate = MpCommit.emptyCommit(transactionState);
+        this.transactionState = transactionState;
     }
 
     public synchronized void response(MessageIn<MpPrepareResponse> message)
@@ -61,7 +63,7 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
         logger.debug("Prepare response {} from {}", response, message.from);
 
         if(message.payload.rolledBack) {
-            logger.debug("Prepare response says that transaction was rolled back at replica {} We will rollback that transaction completely", message.from);
+            logger.debug("Prepare response says that transaction {} was rolled back at replica {} We will rollback that transaction completely", transactionState.getTransactionId(), message.from);
             rolledBack.compareAndSet(false, true);
             while (latch.getCount() > 0)
                 latch.countDown();

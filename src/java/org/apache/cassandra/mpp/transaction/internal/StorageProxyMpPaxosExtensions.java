@@ -45,6 +45,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.exceptions.MultiPartitionPaxosTimeoutException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.TransactionRolledBackException;
@@ -54,6 +55,7 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.mpp.MppServicesLocator;
+import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
@@ -254,6 +256,8 @@ public class StorageProxyMpPaxosExtensions
 
         public boolean timeOutProposalIfPartialResponses;
 
+        private Optional<TransactionId> txRepairedAlready = Optional.empty();
+
         protected ReplicaGroupInPreparedPhase(ReplicasGroupAndOwnedItems replicaGroup,
                                               TransactionState transactionState,
                                               ClientState state,
@@ -269,6 +273,21 @@ public class StorageProxyMpPaxosExtensions
             this.requiredParticipants = requiredParticipants;
             this.ballot = ballot;
             this.timeOutProposalIfPartialResponses = timeOutProposalIfPartialResponses;
+        }
+
+        protected ReplicaGroupInPreparedPhase(ReplicasGroupAndOwnedItems replicaGroup,
+                                              TransactionState transactionState,
+                                              ClientState state,
+                                              Map<InetAddress, Optional<MpPaxosId>> responsesByReplica,
+                                              MpPrepareCallback summary,
+                                              List<InetAddress> liveEndpoints,
+                                              int requiredParticipants,
+                                              UUID ballot,
+                                              boolean timeOutProposalIfPartialResponses,
+                                              Optional<TransactionId> txRepairedAlready)
+        {
+            this(replicaGroup, transactionState, state, responsesByReplica, summary, liveEndpoints, requiredParticipants, ballot, timeOutProposalIfPartialResponses);
+            this.txRepairedAlready = txRepairedAlready;
         }
 
         @Override
@@ -379,7 +398,14 @@ public class StorageProxyMpPaxosExtensions
 
         void runTransitionFrom(Phase groupsMinimumPhase) {
             replicasInPhase.stream().forEach(replicaGroupHolder -> {
-                Transition transitionForReplicaGroup = findTransition(groupsMinimumPhase, replicaGroupHolder.replicaGroup.currentPhase());
+                Phase thisGroupPhase = replicaGroupHolder.replicaGroup.currentPhase();
+                logger.debug("ReplicaGroup {} is in phase {} and current minimum phase is {} and next expected phase is {}",
+                             replicaGroupHolder.getReplicaGroup().getReplicaGroup().getReplicasGroup(),
+                             thisGroupPhase,
+                             groupsMinimumPhase,
+                             getNextExpectedPhase(groupsMinimumPhase));
+
+                Transition transitionForReplicaGroup = findTransition(groupsMinimumPhase, thisGroupPhase);
                 // TODO [MPP] Maybe it will return Future<ReplicaGroupInPhase>
                 ReplicaGroupInPhase transitionedReplicaGroup = transitionForReplicaGroup.transition(replicaGroupHolder.getReplicaGroup());
                 replicaGroupHolder.setReplicaGroup(transitionedReplicaGroup);
@@ -410,6 +436,10 @@ public class StorageProxyMpPaxosExtensions
                     Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), TimeUnit.MILLISECONDS);
                 }
             }
+            UUID txId = replicasInPhase.iterator().next().getReplicaGroup().getTransactionState().getTransactionId();
+            logger.error("MultiPartitionPaxosTimeoutException timeout occurred. TxID {}", txId);
+            throw new MultiPartitionPaxosTimeoutException("Timeout occured. TxID is: " + txId);
+            //throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, 0);
         }
 
     }
@@ -490,7 +520,7 @@ public class StorageProxyMpPaxosExtensions
             MpCommit inProgress = summary.mostRecentInProgressCommitWithUpdate;
             MpCommit mostRecent = summary.mostRecentCommit;
 
-            if(inProgressNeedsToBeCompleted(inProgress, mostRecent)) {
+            if(inProgressNeedsToBeCompleted(inProgress, mostRecent) && !wasAlreadyRepaired(inPhase, inProgress)) {
                 // This in progress transaction can be also for different replicas,
                 // therefore process needs to start over for that transaction.
                 // but the assumption is
@@ -552,6 +582,18 @@ public class StorageProxyMpPaxosExtensions
         }
     };
 
+    private static boolean wasAlreadyRepaired(ReplicaGroupInPrePreparedPhase inPhase, MpCommit inProgress)
+    {
+        if(ReplicaGroupInPreparedPhase.class.isInstance(inPhase)) {
+            ReplicaGroupInPreparedPhase inPreparedPhaseMaybeAfterRepair = (ReplicaGroupInPreparedPhase) inPhase;
+            return inPreparedPhaseMaybeAfterRepair.txRepairedAlready.isPresent() &&
+                   inPreparedPhaseMaybeAfterRepair.txRepairedAlready.get().equals(inProgress.update.id());
+        }
+        else {
+            return false;
+        }
+    }
+
     public static Transition transitionToPreparedFromReparing = replicaGroupInPhase -> {
         // It just waits until nested repair is done.
         ReplicaGroupInReparingInProgressPhase inPhase = (ReplicaGroupInReparingInProgressPhase) replicaGroupInPhase;
@@ -569,7 +611,8 @@ public class StorageProxyMpPaxosExtensions
                                                    inPhase.summary,
                                                    inPhase.liveEndpoints,
                                                    inPhase.requiredParticipants,
-                                                   otherInPrepared.ballot, true);
+                                                   otherInPrepared.ballot, true,
+                                                   Optional.of(otherInPrepared.getTransactionState().id()));
         }
         else {
             return inPhase;
@@ -929,7 +972,7 @@ public class StorageProxyMpPaxosExtensions
                                                   ReplicasGroupsOperationCallback replicasGroupOperationCallback)
     throws WriteTimeoutException
     {
-        logger.debug("preparePaxos. Targeted endpoints are {}. Required participants {}", endpoints, requiredParticipants, requiredParticipants);
+        logger.debug("preparePaxos. for Tx ID {} Targeted endpoints are {}. Required participants {}", toPrepare.update.getTransactionId(),  endpoints, requiredParticipants, requiredParticipants);
         MpPrepareCallback callback = new MpPrepareCallback(toPrepare.update, requiredParticipants, consistencyForPaxos, replicasGroupOperationCallback);
         MessageOut<MpCommit> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_PREPARE, toPrepare, MpCommit.serializer);
         for (InetAddress target : endpoints) {
@@ -950,26 +993,27 @@ public class StorageProxyMpPaxosExtensions
     throws WriteTimeoutException
     {
         logger.debug("proposePaxos call {}", proposePaxosCallsCount.incrementAndGet());
-        logger.debug("proposePaxos begins. Targeted endpoints are {}. Required participants {}. Consistency Level {}", endpoints, requiredParticipants, consistencyLevel);
+        logger.debug("proposePaxos begins. TxId {} Targeted endpoints are {}. Required participants {}. Consistency Level {}", proposal.update.getTransactionId(), endpoints, requiredParticipants, consistencyLevel);
         MpProposeCallback callback = new MpProposeCallback(endpoints.size(), requiredParticipants, !timeoutIfPartial, consistencyLevel, replicasGroupOperationCallback);
         MessageOut<MpCommit> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_PROPOSE, proposal, MpCommit.serializer);
         for (InetAddress target : endpoints) {
             logger.debug("Sending MP_PAXOS_PROPOSE message to target {} with ballot {} proposing transaction with id {}", target, proposal.ballot, proposal.update.id());
             MessagingService.instance().sendRR(message, target, callback);
         }
-        logger.debug("Awaiting MP_PAXOS_PROPOSE callback");
+        logger.debug("Awaiting MP_PAXOS_PROPOSE callback for tx id {}", proposal.update.getTransactionId());
         callback.await();
         if(callback.wasRolledBack()) {
+            logger.info("Callback from proposal says that transaction id {} was rolled back. Throwing excpetion", proposal.update.getTransactionId());
             throw new TransactionRolledBackException(proposal.update);
         }
         if (callback.isSuccessful()) {
-            logger.debug("MP_PAXOS_PROPOSE callback was successful");
+            logger.debug("MP_PAXOS_PROPOSE callback was successful. Tx ID {}", proposal.update.getTransactionId());
             return true;
         }
 
         if (timeoutIfPartial && !callback.isFullyRefused())
             throw new WriteTimeoutException(WriteType.CAS, consistencyLevel, callback.getAcceptCount(), requiredParticipants);
-        logger.debug("MP_PAXOS_PROPOSE callback was not successful, returning false");
+        logger.debug("MP_PAXOS_PROPOSE callback was not successful, returning false. Tx ID {}", proposal.update.getTransactionId());
         return false;
     }
 

@@ -18,14 +18,17 @@
 
 package mpp;
 
+import java.util.List;
 import java.util.Optional;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.utils.UUIDs;
 import junit.framework.Assert;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.tools.NodeProbe;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -117,6 +120,29 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         System.out.println(info);
     }
 
+    @Before
+    public void clearListsOfCommittedAndRolledBack() {
+        getNodeProbesStream().forEach(nodeProbe -> nodeProbe.getMppProxy().clearLists());
+    }
+
+    private void displaySummaryOfCommits()
+    {
+        System.out.println("Printing committed and rolled back transactions at each node");
+        getNodeProbesNamedStream().forEach(namedProbe -> {
+            String info = "For node " + namedProbe.name;
+            NodeProbe nodeProbe = namedProbe.nodeProbe;
+            String [] committed1 = nodeProbe.getMppProxy().listOfCommittedTransactions();
+            List<String> committed = getListOf(committed1);
+            info = info + "\n" + "Committed transactions: " + committed;
+            List<String> rolledBack = getListOf(nodeProbe.getMppProxy().listOfRolledBackTransactions());
+            info = info + "\n" + "Rolled back transactions: " + rolledBack;
+            List<String> historyOfCommitRollback = getListOf(nodeProbe.getMppProxy().listOfCommittedAndRolledBack());
+            info = info + "\n" + "Order: " + historyOfCommitRollback;
+
+            System.out.println(info);
+        });
+    }
+
     @Test
     public void testInsertData() {
         CountersSchemaHelpers.CounterData counterData1 = createCounter1();
@@ -128,7 +154,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         TransactionState transactionState = beginTransaction(sessionN1);
         transactionState = counterTestData.persistUsingTransaction(transactionState, sessionN1);
 
+        System.out.println("Tested transaction ID is: " + transactionState.getTransactionId());
+
         commitTransaction(sessionN1, transactionState);
+
+
+        displaySummaryOfCommits();
 
         counterTestData.refresh(sessionN1);
 
@@ -140,7 +171,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         Assert.assertEquals(1, counterTestData.counter2.counter.counter1);
         Assert.assertEquals(1, counterTestData.counter2.counter.counter2);
-        Assert.assertEquals(1, counterTestData.counter2.counter.counter3);
+        Assert.assertEquals(5, counterTestData.counter2.counter.counter3);
         Assert.assertEquals(1, counterTestData.counter2.counter.counter4);
         Assert.assertEquals(1, counterTestData.counter2.counter.counter5);
 
@@ -148,7 +179,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         Assert.assertEquals(2, counterTestData.counter3.counter.counter2);
         Assert.assertEquals(1, counterTestData.counter3.counter.counter3);
         Assert.assertEquals(2, counterTestData.counter3.counter.counter4);
-        Assert.assertEquals(4, counterTestData.counter3.counter.counter5);
+        Assert.assertEquals(1, counterTestData.counter3.counter.counter5);
     }
 
     private CountersSchemaHelpers.NamedCounterData createCounter3()
@@ -167,7 +198,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         CountersSchemaHelpers.CounterData counterData2 = CountersSchemaHelpers.CounterData.newUsingId(UUIDs.random());
         counterData2.setCounter1(1);
         counterData2.setCounter2(1);
-        counterData2.setCounter3(1);
+        counterData2.setCounter3(5);
         counterData2.setCounter4(1);
         counterData2.setCounter5(1);
         return counterData2;

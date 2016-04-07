@@ -433,6 +433,10 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
                     par.markItWasRolledBack();
 
                     final TransactionState txStateOfRolledback = par.getTransactionState();
+                    logger.info("rollbackParticipantsDueToTx. Transaction with ID {} caused transaction with ID {} to rollback",
+                                transactionStateThatCausedRollbackOf.getTransactionId(),
+                                txStateOfRolledback.getTransactionId());
+
                     if (allLocksForParticipantsToRollbackWereAcquired || transactionStateThatCausedRollbackOf.hasExactlySameItems(txStateOfRolledback))
                     {
                         // then all locks are acquired, and it it can be removed from index
@@ -1073,10 +1077,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         }
     }
 
-    public interface MpPaxosState
-    {
-        // TODO Proposal is TransactionState
-    }
+
 
     // TODO [MPP] rename it later
     public static class MppPaxosRoundPointers

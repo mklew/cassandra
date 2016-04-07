@@ -58,7 +58,11 @@ public class PrivateMemtableStorageImpl implements PrivateMemtableStorage
     {
         Tracing.trace("PrivateMemtableStorage stores mutation for transaction id " + txId);
         final TransactionData transactionData = txIdToData.computeIfAbsent(txId, PrivateMemtableStorageImpl::createNewTransactionData);
-        transactionData.addMutation(mutation);
+        synchronized (transactionData) {
+            if(!transactionData.isFrozen()) {
+                transactionData.addMutation(mutation);
+            }
+        }
     }
 
     public TransactionData readTransactionData(TransactionId txId)

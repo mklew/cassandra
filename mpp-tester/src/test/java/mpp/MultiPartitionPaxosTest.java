@@ -24,8 +24,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -177,12 +175,6 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
 
             System.out.println(info);
         });
-    }
-
-    private List<String> getListOf(Object committed)
-    {
-        String [] committedArr = (String[])committed;
-        return Stream.of(committedArr).collect(Collectors.toList());
     }
 
     private static boolean itemsOfTx1Exist(Session sessionN1, MppTestSchemaHelpers.Item tx1Item1, MppTestSchemaHelpers.Item tx1Item2, MppTestSchemaHelpers.Item tx1Item3)

@@ -106,6 +106,10 @@ public class CommitTransactionStatement implements CQLStatement
             logger.warn("Transaction was rolled back " + rolledBack.getMessage(), rolledBack);
             return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(false, rolledBack.getRolledBackTransaction().id()));
         }
+        catch (Throwable e) {
+            logger.error("Error occurred during CommitTransaction. TxID {}", transactionState.getTransactionId(), e);
+            throw e;
+        }
     }
 
     public static ResultSet buildTxResultSet(boolean success, TransactionId txId)

@@ -21,12 +21,15 @@ package mpp;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.junit.After;
 import org.junit.Before;
 
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
@@ -75,7 +78,7 @@ public abstract class BaseClusterTest
         }
     }
 
-    protected static void commitTransaction(Session session, TransactionState transactionState)
+    protected static ResultSet commitTransaction(Session session, TransactionState transactionState)
     {
         final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
         String result;
@@ -97,7 +100,7 @@ public abstract class BaseClusterTest
 //        sessionN1.execute(boundStatement);
 
         // Json had to be wrapped in single quotes
-        session.execute("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
+        return session.execute("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
     }
 
     protected static ResultSetFuture commitTransactionAsync(Session session, TransactionState transactionState)
@@ -252,6 +255,12 @@ public abstract class BaseClusterTest
     protected TransactionState startTransaction(Session session) throws Throwable
     {
         return mapResultToTransactionState(session.execute(START_TRANSACTION));
+    }
+
+    protected List<String> getListOf(Object committed)
+    {
+        String [] committedArr = (String[])committed;
+        return Stream.of(committedArr).collect(Collectors.toList());
     }
 }
 
