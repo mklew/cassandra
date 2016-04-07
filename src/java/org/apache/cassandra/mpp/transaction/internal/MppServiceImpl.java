@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -52,6 +53,7 @@ import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.TransactionRolledBackException;
 import org.apache.cassandra.mpp.transaction.HintsService;
 import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
@@ -65,6 +67,7 @@ import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
+import org.apache.cassandra.mpp.transaction.serialization.TransactionStateSerializer;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.ClientState;
@@ -160,7 +163,16 @@ public class MppServiceImpl implements MppService
         List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
         StorageProxyMpPaxosExtensions.ReplicaGroupsPhaseExecutor multiPartitionPaxosPhaseExecutor = StorageProxyMpPaxosExtensions.createMultiPartitionPaxosPhaseExecutor(replicasAndOwnedItems, transactionState, clientState);
 
-        multiPartitionPaxosPhaseExecutor.tryToExecute();
+        try
+        {
+            multiPartitionPaxosPhaseExecutor.tryToExecute();
+        }
+        catch (TransactionRolledBackException e)
+        {
+            // TODO [MPP] Commenting it out, because it will get rolled back by other transaction.
+//            rollbackTransactionInternal(e.getRolledBackTransaction(), replicasAndOwnedItems);
+            throw e;
+        }
 
 //        ReplicasGroupsOperationCallback replicasOperationsCallback = new ReplicasGroupsOperationCallback(replicasAndOwnedItems);
 //        List<MpPrePrepareMpPaxosCallback> callbacksForPhase1 = replicasAndOwnedItems.stream().parallel().map(replicaGroupWithItems -> {
@@ -212,10 +224,26 @@ public class MppServiceImpl implements MppService
         throw new NotImplementedException();
     }
 
+    public void rollbackTransactionInternal(TransactionState transactionState, List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems) {
+        MessageOut<TransactionState> message = new MessageOut<>(MessagingService.Verb.MP_ROLLBACK, transactionState, TransactionStateSerializer.instance);
+        for (ReplicasGroupAndOwnedItems replicasAndOwnedItem : replicasAndOwnedItems)
+        {
+            List<InetAddress> replicas = replicasAndOwnedItem.getReplicasGroup().getReplicas();
+            for (InetAddress replica : replicas)
+            {
+                messagingService.sendOneWay(message, replica);
+            }
+        }
+    }
+
     public void rollbackTransactionLocal(TransactionState transactionState)
     {
-        logger.info("Rollback transaction local txState: " + transactionState);
-        privateMemtableStorage.removePrivateData(transactionState.id());
+        TransactionId id = transactionState.id();
+        if(privateMemtableStorage.transactionExistsInStorage(id)) {
+            logger.info("Rollback transaction local tx id: {}" + id);
+            privateMemtableStorage.removePrivateData(id);
+        }
+        mpPaxosIndex.acquireAndRollback(transactionState);
     }
 
     public Collection<TransactionId> getInProgressTransactions()

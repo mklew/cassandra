@@ -57,6 +57,7 @@ public class MppModule
         MpPaxosIndex mpPaxosIndex = new MpPaxosIndex();
 
         mpPaxosIndex.setDeleteTransactionsDataService(privateMemtableStorage);
+        mpPaxosIndex.setJmxRolledBackTxsInfo(service);
 
         final NativeReadTransactionDataRequestExecutor nativeReadTransactionDataRequestExecutor = new NativeReadTransactionDataRequestExecutor(MessagingService.instance());
 

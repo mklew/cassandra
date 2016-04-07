@@ -71,6 +71,18 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     private DeleteTransactionsDataService deleteTransactionsDataService;
 
+    private JmxRolledBackTxsInfo jmxRolledBackTxsInfo;
+
+    public JmxRolledBackTxsInfo getJmxRolledBackTxsInfo()
+    {
+        return jmxRolledBackTxsInfo;
+    }
+
+    public void setJmxRolledBackTxsInfo(JmxRolledBackTxsInfo jmxRolledBackTxsInfo)
+    {
+        this.jmxRolledBackTxsInfo = jmxRolledBackTxsInfo;
+    }
+
     public DeleteTransactionsDataService getDeleteTransactionsDataService()
     {
         return deleteTransactionsDataService;
@@ -306,10 +318,23 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     public void acquireAndRemoveSelf(TransactionState transactionState)
     {
+        acquireAndRemoveSelfInternal(transactionState);
+    }
+
+    private boolean acquireAndRemoveSelfInternal(TransactionState transactionState)
+    {
+        final Boolean[] wasInIndex = new Boolean[1];
         acquireIndex(transactionState, (index, items) -> {
             Optional<MpPaxosParticipant> participant = findParticipant(items.iterator().next(), transactionState);
             participant.ifPresent(this::removeParticipantFromIndex);
+            wasInIndex[0] = participant.isPresent();
         });
+        return wasInIndex[0];
+    }
+
+    public boolean acquireAndRollback(TransactionState transactionState)
+    {
+        return acquireAndRemoveSelfInternal(transactionState);
     }
 
 
@@ -404,6 +429,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         return participantsToRollback.map(par -> {
                     par.markThatItHasToRollback();
                     getDeleteTransactionsDataService().deleteAllPrivateTransactionData(par.getTransactionState().id());
+                    maybeNotifyAboutRollback(par);
                     par.markItWasRolledBack();
 
                     final TransactionState txStateOfRolledback = par.getTransactionState();
@@ -428,6 +454,13 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
                    .map(Optional::get)
                    .map(par -> new RemoveParticipantsFromIndex(Stream.of(par), getTransactionItemsOwnedByThisNodeSorted(par.getTransactionState()).stream()))
                    .reduce(RemoveParticipantsFromIndex.reducer);
+    }
+
+    private void maybeNotifyAboutRollback(MpPaxosParticipant par)
+    {
+        if(jmxRolledBackTxsInfo != null) {
+            jmxRolledBackTxsInfo.jmxAddToRolledBack(par.getTransactionState());
+        }
     }
 
     /**

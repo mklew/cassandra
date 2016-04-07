@@ -45,7 +45,6 @@ import org.apache.cassandra.mpp.MppServicesLocator;
 import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
-import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -105,8 +104,6 @@ public class CommitTransactionStatement implements CQLStatement
         } catch (TransactionRolledBackException rolledBack)
         {
             logger.warn("Transaction was rolled back " + rolledBack.getMessage(), rolledBack);
-            // TODO [MPP] Just for testing
-            ((MppServiceImpl)MppServicesLocator.getInstance()).jmxAddToRolledBack(rolledBack.getRolledBackTransaction());
             return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(false, rolledBack.getRolledBackTransaction().id()));
         }
     }

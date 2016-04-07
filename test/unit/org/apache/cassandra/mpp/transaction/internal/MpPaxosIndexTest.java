@@ -435,6 +435,35 @@ public class MpPaxosIndexTest
         Assert.assertEquals(r1, r3);
     }
 
+    @Test
+    public void testSimpleAcquireForMppPaxosScenario3AndRollback() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        final TransactionState tx3 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx4 = newTransactionState(ti4);
+
+
+        final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
+        Assert.assertTrue("Tx4 starts its own round", r4.isPresent());
+        Assert.assertEquals(r4, mpPaxosIndex.acquireAndFindPaxosId(tx4));
+
+        final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
+        Assert.assertTrue("Tx1 starts its own round", r1.isPresent());
+        Assert.assertEquals(r1, mpPaxosIndex.acquireAndFindPaxosId(tx1));
+
+        final Optional<MpPaxosId> r3 = mpPaxosIndex.acquireForMppPaxos(tx3);
+        Assert.assertTrue("Tx3 joins Tx1", r3.isPresent());
+        Assert.assertEquals(r1, r3);
+
+        mpPaxosIndex.acquireAndRollback(tx1);
+        Assert.assertFalse("After rollback it should not be found", mpPaxosIndex.acquireAndFindPaxosId(tx1).isPresent());
+
+        // should be idempotent
+        mpPaxosIndex.acquireAndRollback(tx1);
+        Assert.assertFalse("Should be idempotent operation", mpPaxosIndex.acquireAndFindPaxosId(tx1).isPresent());
+
+    }
+
     // TODO [MPP]:
         // TODO actually check for conflict
         // TODO:    check for same cells.

@@ -161,6 +161,7 @@ import org.apache.cassandra.service.mppaxos.MpCommitWithHintsVerbHandler;
 import org.apache.cassandra.service.mppaxos.MpPrePrepareVerbHandler;
 import org.apache.cassandra.service.mppaxos.MpPrepareVerbHandler;
 import org.apache.cassandra.service.mppaxos.MpProposeVerbHandler;
+import org.apache.cassandra.service.mppaxos.MpRollbackVerbHandler;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
 import org.apache.cassandra.service.paxos.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.ProposeVerbHandler;
@@ -340,6 +341,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_COMMIT, new MpCommitVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_COMMIT_WITH_HINTS, new MpCommitWithHintsVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_PAXOS_PRE_PREARE, new MpPrePrepareVerbHandler());
+        MessagingService.instance().registerVerbHandlers(MessagingService.Verb.MP_ROLLBACK, new MpRollbackVerbHandler());
 
 
         // see BootStrapper for a summary of how the bootstrap verbs interact

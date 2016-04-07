@@ -91,6 +91,7 @@ import org.apache.cassandra.metrics.ConnectionMetrics;
 import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.mpp.transaction.network.messages.PrivateMemtableReadCommand;
 import org.apache.cassandra.mpp.transaction.network.messages.PrivateMemtableReadResponse;
+import org.apache.cassandra.mpp.transaction.serialization.TransactionStateSerializer;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
@@ -187,6 +188,7 @@ public final class MessagingService implements MessagingServiceMBean
         MP_PAXOS_COMMIT,
         MP_PAXOS_COMMIT_WITH_HINTS,
         MP_PAXOS_PRE_PREARE,
+        MP_ROLLBACK,
         UNUSED_1,
         UNUSED_2,
         UNUSED_3,
@@ -212,6 +214,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.MP_PAXOS_COMMIT, Stage.MUTATION);
         put(Verb.MP_PAXOS_PRE_PREARE, Stage.MUTATION);
         put(Verb.MP_PAXOS_COMMIT_WITH_HINTS, Stage.MUTATION);
+        put(Verb.MP_ROLLBACK, Stage.PRIVATE_MEMTABLES_WRITE);
 
         put(Verb.READ, Stage.READ);
         put(Verb.PRIVATE_MEMTABLE_READ, Stage.PRIVATE_MEMTABLES_WRITE); // TODO [MPP] Maybe another stage for reads? Guess not
@@ -291,6 +294,7 @@ public final class MessagingService implements MessagingServiceMBean
         put(Verb.MP_PAXOS_COMMIT, MpCommit.serializer);
         put(Verb.MP_PAXOS_PRE_PREARE, MpPrePrepare.serializer);
         put(Verb.MP_PAXOS_COMMIT_WITH_HINTS, MpCommitWithHints.serializer);
+        put(Verb.MP_ROLLBACK, TransactionStateSerializer.instance);
         put(Verb.HINT, HintMessage.serializer);
         put(Verb.BATCH_STORE, Batch.serializer);
         put(Verb.BATCH_REMOVE, UUIDSerializer.serializer);
