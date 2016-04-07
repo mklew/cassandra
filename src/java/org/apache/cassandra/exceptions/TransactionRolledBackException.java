@@ -28,6 +28,11 @@ public class TransactionRolledBackException extends RuntimeException
 {
     private final TransactionState rolledBackTransaction;
 
+    public TransactionState getRolledBackTransaction()
+    {
+        return rolledBackTransaction;
+    }
+
     public TransactionRolledBackException(TransactionState rolledBackTransaction)
     {
         super(String.format("Transaction was ID: %s was rolled back.", rolledBackTransaction.getTransactionId()));

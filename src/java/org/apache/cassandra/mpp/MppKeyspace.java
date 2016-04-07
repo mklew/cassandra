@@ -25,4 +25,6 @@ package org.apache.cassandra.mpp;
 public class MppKeyspace
 {
     public static final String NAME = "mpp_extension";
+
+    public static final String TABLE_NAME_FOR_RESULT_SET = "tx";
 }

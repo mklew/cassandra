@@ -18,18 +18,32 @@
 
 package org.apache.cassandra.cql3.statements;
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.TransactionRolledBackException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.mpp.MppKeyspace;
 import org.apache.cassandra.mpp.MppServicesLocator;
 import org.apache.cassandra.mpp.transaction.MppServiceUtils;
+import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -44,6 +58,12 @@ public class CommitTransactionStatement implements CQLStatement
 
     private final int boundTermsSize;
     private final Term transactionStateAsJson;
+
+    private static final ColumnIdentifier TX_RESULT_COLUMN = new ColumnIdentifier("[committed]", false);
+
+    private static final ColumnIdentifier TX_ID_RESULT_COLUMN = new ColumnIdentifier("[tx_id]", false);
+
+    private static final Logger logger = LoggerFactory.getLogger(CommitTransactionStatement.class);
 
     public CommitTransactionStatement(int boundTermsSize, Term transactionStateAsJson)
     {
@@ -78,10 +98,26 @@ public class CommitTransactionStatement implements CQLStatement
 
         System.out.println("CommitTransactionStatement transactionState is " + transactionState);
 
-        MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency(), options, clientState);
-        // TODO [MPP]  Maybe return some result
-        return MppServiceUtils.transformResultSetToResultMessage(MppServiceUtils.mapTransactionStateToResultSet(transactionState, false));
+        try {
+            MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency(), options, clientState);
+            return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(true, transactionState.id()));
+        } catch (TransactionRolledBackException rolledBack)
+        {
+            logger.warn("Transaction was rolled back " + rolledBack.getMessage(), rolledBack);
+            return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(false, rolledBack.getRolledBackTransaction().id()));
+        }
+    }
 
+    public static ResultSet buildTxResultSet(boolean success, TransactionId txId)
+    throws InvalidRequestException
+    {
+        ColumnSpecification spec = new ColumnSpecification(MppKeyspace.NAME, MppKeyspace.TABLE_NAME_FOR_RESULT_SET, TX_RESULT_COLUMN, BooleanType.instance);
+        ColumnSpecification spec2 = new ColumnSpecification(MppKeyspace.NAME, MppKeyspace.TABLE_NAME_FOR_RESULT_SET, TX_ID_RESULT_COLUMN, UUIDType.instance);
+        ResultSet.ResultMetadata metadata = new ResultSet.ResultMetadata(Arrays.asList(spec, spec2));
+        List<List<ByteBuffer>> rows = Collections.singletonList(Arrays.asList(BooleanType.instance.decompose(success), UUIDType.instance.decompose(txId.unwrap())));
+
+        ResultSet rs = new ResultSet(metadata, rows);
+        return rs;
     }
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException

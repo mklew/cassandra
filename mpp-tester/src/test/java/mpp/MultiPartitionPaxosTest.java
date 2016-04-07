@@ -20,11 +20,15 @@ package mpp;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.ResultSetFuture;
+import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import junit.framework.Assert;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -118,9 +122,9 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         UUID tx1Id = tx1.getTransactionId();
         UUID tx2Id = tx2.getTransactionId();
         // Wait for them in multi partition paxos, allow them to proceed when both of them are registered in index.
-        getNodeProbesStream().forEach(nodeProbe -> {
-            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(tx1Id.toString(), tx2Id.toString());
-        });
+//        getNodeProbesStream().forEach(nodeProbe -> {
+//            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(tx1Id.toString(), tx2Id.toString());
+//        });
 
         // 2. Transactions modify same piece of data.
         MppTestSchemaHelpers.Item itemForTx1 = commonItem.copyWithDescription("tx 1 description");
@@ -176,7 +180,6 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         }
 
         System.out.println("Test is done");
-
     }
 
     private static boolean itemsOfTx1Exist(Session sessionN1, MppTestSchemaHelpers.Item tx1Item1, MppTestSchemaHelpers.Item tx1Item2, MppTestSchemaHelpers.Item tx1Item3)
@@ -230,8 +233,56 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         tx1 = tx1.merge(MppTestSchemaHelpers.Item.persistItem(sessionN1, itemForTx1, tx1));
         tx2 = tx2.merge(MppTestSchemaHelpers.Item.persistItem(sessionN2, itemForTx2, tx2));
 
-        commitTransactionAsync(sessionN1, tx1);
-        commitTransactionAsync(sessionN2, tx2);
+        ExecutorService executor = Executors.newFixedThreadPool(1);
+
+        ResultSetFuture tx1ResultSetF = commitTransactionAsync(sessionN1, tx1);
+        tx1ResultSetF.addListener(() -> {
+            System.out.println("Tx1 future has finished. Tx1 ID is " + tx1Id);
+            ResultSet rows = null;
+            try
+            {
+                rows = tx1ResultSetF.get();
+                Row one = rows.one();
+                UUID txId = one.getUUID("[tx_id]");
+                boolean committed = one.getBool("[committed]");
+                if (committed)
+                    System.out.println("Transaction with ID " + txId + " was committed");
+                else
+                    System.out.println("Transaction with ID " + txId + " was rolled back");
+            }
+            catch (InterruptedException e)
+            {
+                e.printStackTrace();
+            }
+            catch (ExecutionException e)
+            {
+                e.printStackTrace();
+            }
+        }, executor);
+        ResultSetFuture tx2ResultSetF = commitTransactionAsync(sessionN2, tx2);
+        tx2ResultSetF.addListener(() -> {
+            System.out.println("Tx2 future has finished. Tx2 ID is " + tx2Id);
+            ResultSet rows = null;
+            try
+            {
+                rows = tx2ResultSetF.get();
+                Row one = rows.one();
+                UUID txId = one.getUUID("[tx_id]");
+                boolean committed = one.getBool("[committed]");
+                if (committed)
+                    System.out.println("Transaction with ID " + txId + " was committed");
+                else
+                    System.out.println("Transaction with ID " + txId + " was rolled back");
+            }
+            catch (InterruptedException e)
+            {
+                e.printStackTrace();
+            }
+            catch (ExecutionException e)
+            {
+                e.printStackTrace();
+            }
+        }, executor);
 
         Thread.sleep(10000);
         MppTestSchemaHelpers.Item foundItem = MppTestSchemaHelpers.Item.findItemById(item.itemId, sessionN1);
