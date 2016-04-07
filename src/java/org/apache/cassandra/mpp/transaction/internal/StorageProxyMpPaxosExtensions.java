@@ -514,13 +514,17 @@ public class StorageProxyMpPaxosExtensions
         if (notPromised(summary))
         {
             Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
+            logger.debug("PreparePaxos. Ballot {} wasn't accepted by replicas {} TxId {}", ballot, inPhase.getReplicaGroup().getReplicasGroup(), inPhase.getTransactionState().getTransactionId());
             return inPhase.copyWith(summary);
         }
         else {
             MpCommit inProgress = summary.mostRecentInProgressCommitWithUpdate;
             MpCommit mostRecent = summary.mostRecentCommit;
 
+            logger.debug("PreparePaxos. Ballot {} was accepted by replicas {} TxId {}", ballot, inPhase.getReplicaGroup().getReplicasGroup(), inPhase.getTransactionState().getTransactionId());
+
             if(inProgressNeedsToBeCompleted(inProgress, mostRecent) && !wasAlreadyRepaired(inPhase, inProgress)) {
+                logger.debug("PreparePaxos. Found in progress proposal that needs to be completed. Proposal for TxId {}. Replicas are {} this transaction TxId {}", inProgress.update.getTransactionId(), inPhase.getReplicaGroup().getReplicasGroup(), inPhase.getTransactionState().getTransactionId());
                 // This in progress transaction can be also for different replicas,
                 // therefore process needs to start over for that transaction.
                 // but the assumption is
