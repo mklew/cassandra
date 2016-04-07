@@ -593,6 +593,15 @@ public class MppServiceImpl implements MppService
         listOfMixedTransactions = new ConcurrentLinkedQueue<>();
     }
 
+    public Integer countReplicaGroupsForTransaction(String transactionStateAsJson)
+    {
+        TransactionState transactionState = readTransactionStateFromJson(transactionStateAsJson);
+        List<ReplicasGroupAndOwnedItems> replicasGroupAndOwnedItemses = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
+        List<ReplicasGroup> replicaGroups = replicasGroupAndOwnedItemses.stream().map(ReplicasGroupAndOwnedItems::getReplicasGroup).collect(Collectors.toList());
+        logger.debug("countReplicaGroupsForTransaction for tx {} has replica groups {}", transactionState.getTransactionId(), replicaGroups);
+        return replicaGroups.size();
+    }
+
     public String [] listOfCommittedTransactions()
     {
         return asArr(listOfCommittedTransactions);

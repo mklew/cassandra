@@ -37,4 +37,6 @@ public interface MppServiceMXBean
     String [] listOfCommittedAndRolledBack();
 
     void clearLists();
+
+    Integer countReplicaGroupsForTransaction(String transactionStateAsJson);
 }

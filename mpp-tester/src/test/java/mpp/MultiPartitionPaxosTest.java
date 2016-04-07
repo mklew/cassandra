@@ -34,6 +34,8 @@ import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import junit.framework.Assert;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
@@ -76,7 +78,17 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
     private static void commitTransaction(Session session, TransactionState transactionState)
     {
         final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
-        final String txStateJson = MppTest.getJson(transactionStateDto);
+        String result;
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try
+        {
+            result = objectMapper.writeValueAsString(transactionStateDto);
+        }
+        catch (JsonProcessingException e)
+        {
+            throw new RuntimeException(e);
+        }
+        final String txStateJson = result;
 
         // TODO [MPP] I get operation time out when trying to use prepared statement. None of hosts can handle that prepared statement.
 
@@ -91,7 +103,17 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
     private static ResultSetFuture commitTransactionAsync(Session session, TransactionState transactionState)
     {
         final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
-        final String txStateJson = MppTest.getJson(transactionStateDto);
+        String result;
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try
+        {
+            result = objectMapper.writeValueAsString(transactionStateDto);
+        }
+        catch (JsonProcessingException e)
+        {
+            throw new RuntimeException(e);
+        }
+        final String txStateJson = result;
 
         // TODO [MPP] I get operation time out when trying to use prepared statement. None of hosts can handle that prepared statement.
 

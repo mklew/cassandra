@@ -27,3 +27,5 @@ CREATE KEYSPACE "mpptest_counters_other" WITH replication = {'class': 'SimpleStr
 
 create table mpptest_counters_other.counter1 (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
 
+create table mpptest_counters_other.named_counter1 (id text, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+

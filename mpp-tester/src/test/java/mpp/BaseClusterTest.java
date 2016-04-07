@@ -30,9 +30,12 @@ import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.Policies;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.MppTestingUtilities;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.tools.NodeProbe;
 
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.START_TRANSACTION;
@@ -56,6 +59,20 @@ public abstract class BaseClusterTest
     }
 
     private Collection<Session> sessionsOpended;
+
+    public static String transactionStateToJson(TransactionState transactionState)
+    {
+        final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try
+        {
+            return objectMapper.writeValueAsString(transactionStateDto);
+        }
+        catch (JsonProcessingException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Before
     public void setUpTest() {
@@ -115,7 +132,7 @@ public abstract class BaseClusterTest
         }
     }
 
-    private NodeProbe initNodeProbe(int jmxPort)
+    protected NodeProbe initNodeProbe(int jmxPort)
     {
         try
         {
@@ -165,7 +182,7 @@ public abstract class BaseClusterTest
         return getSessionWithMppTest(address);
     }
 
-    private Session getSessionWithMppTest(String address)
+    protected Session getSessionWithMppTest(String address)
     {
         Cluster cluster = getSessionForNode(address);
         Session session = cluster.connect("mpptest");

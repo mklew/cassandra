@@ -31,12 +31,9 @@ import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.utils.UUIDs;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import junit.framework.Assert;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
-import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 
 import static mpp.MppTestSchemaHelpers.Item;
 
@@ -68,8 +65,7 @@ public class MppTest extends BaseClusterTest
         transactionState = transactionState.merge(afterPriceless);
         transactionState = transactionState.merge(Item.persistItem(sessionN1, itemWithJustId, transactionState));
 
-        final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
-        final String txStateJson = getJson(transactionStateDto);
+        final String txStateJson = transactionStateToJson(transactionState);
 
         final String stmt = "READ TRANSACTIONAL TRANSACTION AS JSON '" + txStateJson + "' FROM " + "mpptest.items TOKEN " + pricelessToken.getTokenValue();
         final SimpleStatement simpleStatement = new SimpleStatement(stmt);
@@ -98,20 +94,6 @@ public class MppTest extends BaseClusterTest
         Assert.assertEquals(1, allItems.stream().filter(i -> i.equals(priceless)).count());
         Assert.assertEquals(1, allItems.stream().filter(i -> i.equals(itemWithJustId)).count());
     }
-
-    public static String getJson(TransactionStateDto transactionStateDto)
-    {
-        final ObjectMapper objectMapper = new ObjectMapper();
-        try
-        {
-            return objectMapper.writeValueAsString(transactionStateDto);
-        }
-        catch (JsonProcessingException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
 
 
     @Test

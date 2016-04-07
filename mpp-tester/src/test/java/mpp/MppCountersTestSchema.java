@@ -39,6 +39,9 @@ public class MppCountersTestSchema
     static String counterKeyspace2 = "mpptest_counters_other";
 
     static CountersSchemaHelpers.CounterTable otherCounters = new CountersSchemaHelpers.CounterTable(counterKeyspace2, "counter1");
+    static CountersSchemaHelpers.NamedCounterTable otherCountersNamed = new CountersSchemaHelpers.NamedCounterTable(counterKeyspace2, "named_counter1");
+
+
 
     public static CountersSchemaHelpers.CounterData inititateCounterData(CountersSchemaHelpers.CounterTable counterTable, UUID counterId, Session session) {
 
