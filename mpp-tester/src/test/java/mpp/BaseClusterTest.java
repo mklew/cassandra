@@ -27,6 +27,7 @@ import org.junit.After;
 import org.junit.Before;
 
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.Policies;
@@ -72,6 +73,56 @@ public abstract class BaseClusterTest
         {
             throw new RuntimeException(e);
         }
+    }
+
+    protected static void commitTransaction(Session session, TransactionState transactionState)
+    {
+        final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
+        String result;
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try
+        {
+            result = objectMapper.writeValueAsString(transactionStateDto);
+        }
+        catch (JsonProcessingException e)
+        {
+            throw new RuntimeException(e);
+        }
+        final String txStateJson = result;
+
+        // TODO [MPP] I get operation time out when trying to use prepared statement. None of hosts can handle that prepared statement.
+
+//        PreparedStatement preparedCommitTransactionStmt = sessionN1.prepare("COMMIT TRANSACTION AS JSON ?");
+//        BoundStatement boundStatement = preparedCommitTransactionStmt.bind("'" + txStateJson + "'");
+//        sessionN1.execute(boundStatement);
+
+        // Json had to be wrapped in single quotes
+        session.execute("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
+    }
+
+    protected static ResultSetFuture commitTransactionAsync(Session session, TransactionState transactionState)
+    {
+        final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
+        String result;
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try
+        {
+            result = objectMapper.writeValueAsString(transactionStateDto);
+        }
+        catch (JsonProcessingException e)
+        {
+            throw new RuntimeException(e);
+        }
+        final String txStateJson = result;
+
+        // TODO [MPP] I get operation time out when trying to use prepared statement. None of hosts can handle that prepared statement.
+
+//        PreparedStatement preparedCommitTransactionStmt = sessionN1.prepare("COMMIT TRANSACTION AS JSON ?");
+//        BoundStatement boundStatement = preparedCommitTransactionStmt.bind("'" + txStateJson + "'");
+//        sessionN1.execute(boundStatement);
+
+        // Json had to be wrapped in single quotes
+        return session.executeAsync("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
     }
 
     @Before
