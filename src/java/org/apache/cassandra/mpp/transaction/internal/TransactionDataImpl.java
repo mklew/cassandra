@@ -59,6 +59,7 @@ public class TransactionDataImpl implements TransactionData
 
     private volatile boolean hasBeenApplied = false;
     private volatile boolean frozen = false;
+    private volatile boolean isBeingMadeConsistent = false;
 
     private static final Logger logger = LoggerFactory.getLogger(TransactionDataImpl.class);
 
@@ -106,6 +107,16 @@ public class TransactionDataImpl implements TransactionData
                 return pu;
         }).map(Mutation::new)
            .collect(Collectors.toList());
+    }
+
+    public void assertThatIsNotBeingMadeConsistent()
+    {
+        Preconditions.checkState(!isBeingMadeConsistent, "Transaction data TxId" + txId + " is already under process making it consistent");
+    }
+
+    public void setThatItIsBeingMadeConsistent()
+    {
+        isBeingMadeConsistent = true;
     }
 
     private static UUID getCfId(TransactionItem transactionItem)

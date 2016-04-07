@@ -476,6 +476,9 @@ public class MppServiceImpl implements MppService
     @Override
     public void makeTransactionDataConsistent(TransactionState transactionState)
     {
+        TransactionData transactionData = privateMemtableStorage.readTransactionData(transactionState.id());
+        transactionData.assertThatIsNotBeingMadeConsistent();
+        transactionData.setThatItIsBeingMadeConsistent();
         if(transactionNotFrozenAlready(transactionState)) {
             Map<TransactionItem, List<PartitionUpdate>> itemWithPartitionUpdates = readTransactionDataService.readRelevantForThisNode(transactionState,
                                                                                                                                       ConsistencyLevel.LOCAL_TRANSACTIONAL);

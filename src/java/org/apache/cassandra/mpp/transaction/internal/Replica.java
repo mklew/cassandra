@@ -19,38 +19,43 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.net.InetAddress;
-import java.util.List;
-
-import static java.util.stream.Collectors.toList;
 
 /**
-* @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
-* @since 04/04/16
-*/
-public class ReplicasGroup
+ * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
+ * @since 07/04/16
+ */
+public class Replica
 {
-    private final List<Replica> replicas;
+    private final InetAddress host;
 
-    ReplicasGroup(List<Replica> replicas)
+    public Replica(InetAddress host)
     {
-        this.replicas = replicas;
+        this.host = host;
     }
 
-    public List<InetAddress> getReplicas()
-    {
-        return replicas.stream().map(Replica::getHost).collect(toList());
+    public String getHostAddress() {
+        return host.getHostAddress();
     }
 
-    public String toString()
+    public boolean equals(Object o)
     {
-        return "ReplicaGroup[" + replicas + ']';
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        Replica replica = (Replica) o;
+
+        if (!host.getHostAddress().equals(replica.host.getHostAddress())) return false;
+
+        return true;
     }
 
-
-    public boolean hasSameReplicasAs(ReplicasGroup replicasGroup)
+    public int hashCode()
     {
-        List<String> thisHosts = replicas.stream().map(Replica::getHostAddress).sorted().collect(toList());
-        List<String> otherHosts = replicasGroup.replicas.stream().map(Replica::getHostAddress).sorted().collect(toList());
-        return thisHosts.equals(otherHosts);
+        return host.getHostAddress().hashCode();
+    }
+
+    public InetAddress getHost()
+    {
+        return host;
     }
 }

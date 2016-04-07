@@ -69,4 +69,8 @@ public interface TransactionData extends ReadableTransactionData
     void purge(String ksName, UUID cfId, Token token);
 
     List<Mutation> createMutationsForItems(List<TransactionItem> items, long timestamp);
+
+    void assertThatIsNotBeingMadeConsistent();
+
+    void setThatItIsBeingMadeConsistent();
 }

@@ -58,15 +58,14 @@ public class ForEachReplicaGroupOperations
     public static List<ReplicasGroupAndOwnedItems> groupItemsByReplicas(TransactionState transactionState) {
         final Stream<TransactionItemWithAddresses> withAddresses = ForEachReplicaGroupOperations.mapTransactionItemsToTheirEndpoints(transactionState);
 
-        // addresses -> replication factor -> transaction items
+        List<TransactionItemWithAddresses> collected = withAddresses.collect(Collectors.toList());
 
-        // group transaction items by common replication factor and by common replicas
-//        Map<List<InetAddress>, List<TransactionItemWithAddresses>> itemsGroupedByReplicasGroup = withAddresses.collect(Collectors.groupingBy(x -> {
-//            x.getEndPoints()
-//            return eImmutableList()
-//        }, Collectors.toList()));
+        Map<String, Replica> hostAddressToReplica = collected.stream().flatMap(ti -> ti.getEndPoints().stream())
+                                                             .map(Replica::new)
+                                                             .distinct()
+                                                             .collect(Collectors.toMap(Replica::getHostAddress, Function.identity()));
 
-        Map<List<String>, List<TransactionItemWithAddresses>> groupedBySameReplicas = withAddresses.map(txItemWithAddress -> {
+        Map<List<String>, List<TransactionItemWithAddresses>> groupedBySameReplicas = collected.stream().map(txItemWithAddress -> {
             List<String> grouping = txItemWithAddress.getEndPoints().stream().map(InetAddress::getHostAddress).sorted().collect(Collectors.toList());
 
             return Pair.create(txItemWithAddress, grouping);
@@ -78,12 +77,12 @@ public class ForEachReplicaGroupOperations
 
 
         List<ReplicasGroupAndOwnedItems> groupingByReplicas = itemsGroupedByReplicasGroup.entrySet().stream().map(v -> {
-            List<InetAddress> replicas = v.getKey();
+            List<InetAddress> replicasAddrs = v.getKey();
             List<TransactionItem> itemsOwnedByReplicasGroup = v.getValue().stream().map(TransactionItemWithAddresses::getTxItem).collect(Collectors.toList());
 
-
+            List<Replica> replicas = replicasAddrs.stream().map(host -> hostAddressToReplica.get(host.getHostAddress())).collect(Collectors.toList());
             ReplicasGroup replicasGroup = new ReplicasGroup(replicas);
-            ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems = new ReplicasGroupAndOwnedItems(replicasGroup, itemsOwnedByReplicasGroup);
+            ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems = new ReplicasGroupAndOwnedItems(replicasGroup, itemsOwnedByReplicasGroup, hostAddressToReplica.values());
             return replicasGroupAndOwnedItems;
         }).collect(Collectors.toList());
         return groupingByReplicas;

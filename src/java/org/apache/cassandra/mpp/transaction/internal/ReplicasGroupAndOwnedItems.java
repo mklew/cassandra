@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 
@@ -32,10 +35,13 @@ public class ReplicasGroupAndOwnedItems
 
     private final List<TransactionItem> ownedItems;
 
-    ReplicasGroupAndOwnedItems(ReplicasGroup replicasGroup, List<TransactionItem> ownedItems)
+    private final Set<Replica> allReplicas;
+
+    ReplicasGroupAndOwnedItems(ReplicasGroup replicasGroup, List<TransactionItem> ownedItems, Collection<Replica> allReplicas)
     {
         this.replicasGroup = replicasGroup;
         this.ownedItems = ownedItems;
+        this.allReplicas = new HashSet<>(allReplicas);
     }
 
     public ReplicasGroup getReplicasGroup()
@@ -46,6 +52,11 @@ public class ReplicasGroupAndOwnedItems
     public List<TransactionItem> getOwnedItems()
     {
         return ownedItems;
+    }
+
+    public Collection<Replica> getAllReplicas()
+    {
+        return allReplicas;
     }
 
     public String toString()

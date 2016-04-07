@@ -106,6 +106,16 @@ public class EmptyTransactionData implements TransactionData
         return null;
     }
 
+    public void assertThatIsNotBeingMadeConsistent()
+    {
+
+    }
+
+    public void setThatItIsBeingMadeConsistent()
+    {
+
+    }
+
     public Optional<PartitionUpdate> readData(String ksName, UUID cfId, Token token)
     {
         return Optional.empty();
