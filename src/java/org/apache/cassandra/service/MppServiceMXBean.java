@@ -29,4 +29,12 @@ public interface MppServiceMXBean
     void deleteSingleItem(String transactionStateAsJson, String transactionItemAsJson);
 
     void storageProxyExtAddToWaitUntilAfterPrePrepared(String ... transactionIds);
+
+    String [] listOfCommittedTransactions();
+
+    String [] listOfRolledBackTransactions();
+
+    String [] listOfCommittedAndRolledBack();
+
+    void clearLists();
 }

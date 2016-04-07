@@ -18,12 +18,16 @@
 
 package mpp;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
@@ -33,6 +37,7 @@ import com.datastax.driver.core.Session;
 import junit.framework.Assert;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
+import org.apache.cassandra.tools.NodeProbe;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -40,6 +45,11 @@ import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
  */
 public class MultiPartitionPaxosTest extends BaseClusterTest
 {
+
+    @Before
+    public void clearListsOfCommittedAndRolledBack() {
+        getNodeProbesStream().forEach(nodeProbe -> nodeProbe.getMppProxy().clearLists());
+    }
 
     @Test
     public void shouldCommitTwoPartitionsAtSameTime() {
@@ -182,6 +192,30 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         System.out.println("Test is done");
     }
 
+    private void displaySummaryOfCommits()
+    {
+        System.out.println("Printing committed and rolled back transactions at each node");
+        getNodeProbesNamedStream().forEach(namedProbe -> {
+            String info = "For node " + namedProbe.name;
+            NodeProbe nodeProbe = namedProbe.nodeProbe;
+            String [] committed1 = nodeProbe.getMppProxy().listOfCommittedTransactions();
+            List<String> committed = getListOf(committed1);
+            info = info + "\n" + "Committed transactions: " + committed;
+            List<String> rolledBack = getListOf(nodeProbe.getMppProxy().listOfRolledBackTransactions());
+            info = info + "\n" + "Rolled back transactions: " + rolledBack;
+            List<String> historyOfCommitRollback = getListOf(nodeProbe.getMppProxy().listOfCommittedAndRolledBack());
+            info = info + "\n" + "Order: " + historyOfCommitRollback;
+
+            System.out.println(info);
+        });
+    }
+
+    private List<String> getListOf(Object committed)
+    {
+        String [] committedArr = (String[])committed;
+        return Stream.of(committedArr).collect(Collectors.toList());
+    }
+
     private static boolean itemsOfTx1Exist(Session sessionN1, MppTestSchemaHelpers.Item tx1Item1, MppTestSchemaHelpers.Item tx1Item2, MppTestSchemaHelpers.Item tx1Item3)
     {
         Optional<MppTestSchemaHelpers.Item> i1pt = MppTestSchemaHelpers.Item.findItemByIdOptional(tx1Item1.itemId, sessionN1);
@@ -300,6 +334,7 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         // 3. Try to commit at same time.
             // TODO [MPP] Need to wait on both of them just after PRE PREPARE so they are both registered in index, but do not proceed
         // 4. After, only one should get saved, other should not be able to proceed - it will fail on next phase
+        displaySummaryOfCommits();
 
     }
 

@@ -127,8 +127,24 @@ public abstract class BaseClusterTest
         }
     }
 
+    static class NamedNodeProbe {
+        NodeProbe nodeProbe;
+
+        String name;
+
+        public NamedNodeProbe(NodeProbe nodeProbe, String name)
+        {
+            this.nodeProbe = nodeProbe;
+            this.name = name;
+        }
+    }
+
     protected Stream<NodeProbe> getNodeProbesStream() {
         return Stream.of(getNodeProbe1(), getNodeProbe2(), getNodeProbe3());
+    }
+
+    protected Stream<NamedNodeProbe> getNodeProbesNamedStream() {
+        return Stream.of(new NamedNodeProbe(getNodeProbe1(), "Node1"), new NamedNodeProbe(getNodeProbe2(), "Node3"), new NamedNodeProbe(getNodeProbe3(), "Node3"));
     }
 
     protected Session getSessionN1()

@@ -19,12 +19,15 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -394,6 +397,7 @@ public class MppServiceImpl implements MppService
         // It can be deleted on next paxos round
         privateMemtableStorage.removePrivateData(transactionState.id());
         logger.info("multiPartitionPaxosCommitPhase is done. TxId {}", transactionState.getTransactionId());
+        jmxAddToCommitted(transactionState);
     }
 
     public void submitHints(List<MppHint> hints)
@@ -535,6 +539,51 @@ public class MppServiceImpl implements MppService
     public void storageProxyExtAddToWaitUntilAfterPrePrepared(String ... transactionIds)
     {
         StorageProxyMpPaxosExtensions.addToWaitUntilAfterPrePrepared(Stream.of(transactionIds).map(UUID::fromString).collect(Collectors.toList()));
+    }
+
+    Queue<String> listOfCommittedTransactions = new ConcurrentLinkedQueue<>();
+
+    Queue<String> listOfRolledBackTransactions = new ConcurrentLinkedQueue<>();
+
+    Queue<String> listOfMixedTransactions = new ConcurrentLinkedQueue<>();
+
+    synchronized private void jmxAddToCommitted(TransactionState tx) {
+        String txId = tx.getTransactionId().toString();
+        listOfCommittedTransactions.add(txId);
+        listOfMixedTransactions.add("C|"+txId);
+    }
+
+    synchronized public void jmxAddToRolledBack(TransactionState tx) {
+        String txId = tx.getTransactionId().toString();
+        listOfRolledBackTransactions.add(txId);
+        listOfMixedTransactions.add("R|"+txId);
+    }
+
+    public void clearLists() {
+        listOfCommittedTransactions = new ConcurrentLinkedQueue<>();
+        listOfRolledBackTransactions = new ConcurrentLinkedQueue<>();
+        listOfMixedTransactions = new ConcurrentLinkedQueue<>();
+    }
+
+    public String [] listOfCommittedTransactions()
+    {
+        return asArr(listOfCommittedTransactions);
+    }
+
+    private String[] asArr(Queue<String> list)
+    {
+        ArrayList<String> copy = new ArrayList<>(list);
+        return copy.toArray(new String [copy.size()]);
+    }
+
+    public String [] listOfRolledBackTransactions()
+    {
+        return asArr(listOfRolledBackTransactions);
+    }
+
+    public String [] listOfCommittedAndRolledBack()
+    {
+        return asArr(listOfMixedTransactions);
     }
 
     private void purgeTransactionItem(TransactionState transactionState, TransactionItem transactionItem)
