@@ -251,7 +251,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         }
 
         public static CounterExpectedResult merge(CounterExpectedResult r1, CounterExpectedResult r2) {
-            System.out.println("Merge r1 " + r1 + " with r2 " + r2);
+//            System.out.println("Merge r1 " + r1 + " with r2 " + r2);
             Preconditions.checkArgument(r1.keyspace.equals(r2.keyspace));
             Preconditions.checkArgument(r1.table.equals(r2.table));
             Preconditions.checkArgument(r1.counterId.equals(r2.counterId));
@@ -263,7 +263,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             });
 
             CounterExpectedResult afterMerge = new CounterExpectedResult(r1.keyspace, r1.table, r1.counterId, copyOfR1);
-            System.out.println("After merge " + afterMerge);
+//            System.out.println("After merge " + afterMerge);
             return afterMerge;
         }
 
@@ -389,7 +389,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         // TODO [MPP] Returning only single executor to test if test works just as single transaction inserting some other data.
 //        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
-        return Arrays.asList(counter1Executor);
+        return Arrays.asList(counter1Executor, counter2Executor);
+//        return Arrays.asList(counter1Executor);
     }
 
     private static <T> CompletableFuture<List<T>> sequence(List<CompletableFuture<T>> futures) {
@@ -405,7 +406,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
     @Test
     public void runTestUsingCounters() throws Throwable {
-        int iterations = 10;
+        int iterations = 3;
         // There counters exist from previous test because they use named keys. Need to reset them
         Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
         Session anySession = getAnySession();
@@ -425,6 +426,10 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         CompletableFuture<List<CounterExecutorResults>> allResults = sequence(futureResults);
 
         counterExecutors.forEach(counterExecutor -> executorService.execute(counterExecutor));
+
+        allResults.thenAccept(results -> {
+            displaySummaryOfCommits();
+        });
 
         allResults.thenAccept(results -> {
             results.forEach(expectedResult -> {
@@ -568,10 +573,13 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             TransactionState transactionState = beginTransaction(session);
             UUID transactionId = transactionState.getTransactionId();
 
-            // TODO Logic related to incrementing
+            System.out.println("Transaction " + transactionId + " runs");
+
             Pair<IterationExpectations, TransactionState> expectationsAndState = doInTransaction(transactionState, session);
             transactionState = expectationsAndState.right;
 //            Boolean committed = null;
+            Boolean gotException = null;
+
             try
             {
                 ResultSet resultSet = commitTransaction(session, transactionState);
@@ -587,11 +595,13 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 else {
                     System.out.println("Transaction with ID " + txId + " was rolled back");
                 }
+                gotException = false;
             }
             catch (Exception e)
             {
                 System.err.println("Exception occurred during commit of transaction" + e);
 //                committed = false;
+                gotException = true;
             }
 
             // TODO [MPP] Check in JMX whether this transaction was really committed or not.
@@ -621,13 +631,19 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             }).filter(Optional::isPresent).map(Optional::get);
 
             Set<Boolean> shouldConvergeOnTransactionResult = committedOnReplica.collect(Collectors.toSet());
+            if(!gotException)  {
+                Assert.assertEquals("Transaction with ID " + transactionId.toString() + " should be either committed or rolled back", 1, shouldConvergeOnTransactionResult.size());
+                Boolean committed = shouldConvergeOnTransactionResult.iterator().next();
+                IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, committed, session, iteration);
+                iterationResults.add(iterationResult);
+            }
+            else {
+                IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, false, session, iteration);
+                iterationResults.add(iterationResult);
+            }
 
-            Assert.assertEquals("Transaction with ID " + transactionId.toString() + " should be either committed or rolled back", 1, shouldConvergeOnTransactionResult.size());
 
-            Boolean committed = shouldConvergeOnTransactionResult.iterator().next();
 
-            IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, committed, session, iteration);
-            iterationResults.add(iterationResult);
         }
     }
 
@@ -748,6 +764,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             info = info + "\n" + "Rolled back transactions: " + rolledBack;
             List<String> historyOfCommitRollback = getListOf(nodeProbe.getMppProxy().listOfCommittedAndRolledBack());
             info = info + "\n" + "Order: " + historyOfCommitRollback;
+
+            info = info + "\n" + "Rolled back count: " + rolledBack.size() + " committed count: " + committed.size();
 
             System.out.println(info);
         });

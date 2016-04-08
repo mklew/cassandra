@@ -793,7 +793,8 @@ public class StorageProxyMpPaxosExtensions
             List<ReplicasGroup> replicaGroups = replicasInPhase.stream().map(h -> h.getReplicaGroup().getReplicaGroup().getReplicasGroup()).collect(Collectors.toList());
 
             logger.debug("Will run transitions for each replica. ReplicaGroups size: {}", replicaGroups.size());
-            replicas.parallelStream().forEach(replica -> {
+            // TODO [MPP] This parallel stream might be a problem.
+            replicas.stream().forEach(replica -> {
                 Phase nextPhaseForReplica = findNextPhaseForReplica(replica, replicaGroups);
                 TransitionId transitionId = transitionToPhase(replica.getPhase(), nextPhaseForReplica);
                 logger.debug("Replica {} is in phase '{}' and next expected phase is {}. It will transition using {}",
