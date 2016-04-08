@@ -40,7 +40,7 @@ public class CountersSchemaHelpers
 {
     public static final ConsistencyLevel consistencyLevel = ConsistencyLevel.LOCAL_TRANSACTIONAL;
 
-    public static class BaseCounterData<ID> {
+    public abstract static class BaseCounterData<ID> {
         protected ID id;
 
         int counter1;
@@ -146,6 +146,41 @@ public class CountersSchemaHelpers
             return session.execute(simpleStatement);
         }
 
+        private ResultSet executeCqlWithCounterColumn(CD counterData, Session session, String cql, String columnName)
+        {
+            // TODO [MPP] This is stupid right now
+            final int counterDataToSelect;
+            if ("counter1".equals(columnName))
+            {
+                counterDataToSelect = counterData.counter1;
+            }
+            else if ("counter2".equals(columnName))
+            {
+                counterDataToSelect = counterData.counter2;
+            }
+            else if ("counter3".equals(columnName))
+            {
+                counterDataToSelect = counterData.counter3;
+            }
+            else if ("counter4".equals(columnName))
+            {
+                counterDataToSelect = counterData.counter4;
+            }
+            else if ("counter5".equals(columnName))
+            {
+                counterDataToSelect = counterData.counter5;
+            }
+            else
+            {
+                throw new RuntimeException("BAAD column name");
+            }
+
+            SimpleStatement simpleStatement = new SimpleStatement(cql, counterData.getId(),
+                                                                  counterDataToSelect);
+            simpleStatement.setConsistencyLevel(ConsistencyLevel.ALL);
+            return session.execute(simpleStatement);
+        }
+
         abstract protected ID readId(Row row);
 
         abstract protected CD createCounterData(ID id, int counter1, int counter2, int counter3, int counter4, int counter5);
@@ -180,6 +215,12 @@ public class CountersSchemaHelpers
         public TransactionState persistUsingTransaction(TransactionState transactionState, CD counterData, Session session) {
             String cql = String.format("INSERT INTO %s.%s (id, counter1, counter2, counter3, counter4, counter5 ) VALUES (?, ?, ?, ?, ?, ?) USING TRANSACTION %s", keyspaceName, tableName, transactionState.getTransactionId());
             ResultSet resultSet = executeCqlWithCounterData(counterData, session, cql);
+            return transactionState.merge(MppTestingUtilities.mapResultToTransactionState(resultSet));
+        }
+
+        public TransactionState updateCounterColumn(TransactionState transactionState, CD counterData, String counterColumn, Session session) {
+            String cql = String.format("INSERT INTO %s.%s (id, %s) VALUES (?, ?) USING TRANSACTION %s", keyspaceName, tableName, counterColumn, transactionState.getTransactionId());
+            ResultSet resultSet = executeCqlWithCounterColumn(counterData, session, cql, counterColumn);
             return transactionState.merge(MppTestingUtilities.mapResultToTransactionState(resultSet));
         }
     }
@@ -217,6 +258,10 @@ public class CountersSchemaHelpers
         protected NamedCounterData createCounterData(String s, int counter1, int counter2, int counter3, int counter4, int counter5)
         {
             return new NamedCounterData(s, counter1, counter2, counter3, counter4, counter5);
+        }
+
+        public NamedCounterData createCounterData(String s) {
+            return new NamedCounterData(s, 0, 0, 0, 0, 0);
         }
     }
 }

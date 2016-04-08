@@ -23,6 +23,10 @@ create table mpptest_counters.counter3 (id uuid, counter1 int, counter2 int, cou
 
 create table mpptest_counters.counter4 (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
 
+create table mpptest_counters.named_counters_counter1 (id text, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
+create table mpptest_counters.named_counters_counter2 (id text, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
 CREATE KEYSPACE "mpptest_counters_other" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
 
 create table mpptest_counters_other.counter1 (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));

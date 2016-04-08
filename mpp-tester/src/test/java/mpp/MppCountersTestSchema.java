@@ -34,13 +34,14 @@ public class MppCountersTestSchema
     static CountersSchemaHelpers.CounterTable countersCounter2 = new CountersSchemaHelpers.CounterTable(counters, "counter2");
     static CountersSchemaHelpers.CounterTable countersCounter3 = new CountersSchemaHelpers.CounterTable(counters, "counter3");
     static CountersSchemaHelpers.CounterTable countersCounter4 = new CountersSchemaHelpers.CounterTable(counters, "counter4");
+    static CountersSchemaHelpers.NamedCounterTable countersNamedCounter1 = new CountersSchemaHelpers.NamedCounterTable(counters, "named_counters_counter1");
+    static CountersSchemaHelpers.NamedCounterTable countersNamedCounter2 = new CountersSchemaHelpers.NamedCounterTable(counters, "named_counters_counter2");
 //    static CountersSchemaHelpers.CounterTable countersCounter5 = new CountersSchemaHelpers.CounterTable(counters, "counter5");
 
     static String counterKeyspace2 = "mpptest_counters_other";
 
     static CountersSchemaHelpers.CounterTable otherCounters = new CountersSchemaHelpers.CounterTable(counterKeyspace2, "counter1");
     static CountersSchemaHelpers.NamedCounterTable otherCountersNamed = new CountersSchemaHelpers.NamedCounterTable(counterKeyspace2, "named_counter1");
-
 
 
     public static CountersSchemaHelpers.CounterData inititateCounterData(CountersSchemaHelpers.CounterTable counterTable, UUID counterId, Session session) {

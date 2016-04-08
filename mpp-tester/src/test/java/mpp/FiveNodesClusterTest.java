@@ -73,6 +73,11 @@ public class FiveNodesClusterTest extends BaseClusterTest
         return getSessionWithMppTest(address);
     }
 
+    @Override
+    protected String [] getContactPoints() {
+        return new String [] { "127.0.0.4", "127.0.0.5" };
+    }
+
     protected Stream<NodeProbe> getNodeProbesStream()
     {
         return Stream.concat(super.getNodeProbesStream(), Stream.of(getNodeProbe4(), getNodeProbe5()));

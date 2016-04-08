@@ -34,6 +34,7 @@ import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.Policies;
+import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -250,6 +251,20 @@ public abstract class BaseClusterTest
                       .withRetryPolicy(new LoggingRetryPolicy(Policies.defaultRetryPolicy()))
                       .withLoadBalancingPolicy(AlwaysSameNodeLoadBalancingPolicy.create(address))
                       .withPort(DatabaseDescriptor.getNativeTransportPort()).build();
+    }
+
+    protected String [] getContactPoints() {
+        return new String [] { "127.0.0.1", "127.0.0.2" };
+    }
+
+    protected Session getAnySession() {
+        Cluster cluster = Cluster.builder().addContactPoints(getContactPoints())
+                                 .withRetryPolicy(new LoggingRetryPolicy(Policies.defaultRetryPolicy()))
+                                 .withLoadBalancingPolicy(new RoundRobinPolicy())
+                                 .withPort(DatabaseDescriptor.getNativeTransportPort()).build();
+        Session session = cluster.connect();
+        sessionsOpended.add(session);
+        return session;
     }
 
     protected TransactionState startTransaction(Session session) throws Throwable
