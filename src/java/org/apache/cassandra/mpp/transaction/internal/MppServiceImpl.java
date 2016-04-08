@@ -218,6 +218,16 @@ public class MppServiceImpl implements MppService
         return callbackForPrePrepare;
     }
 
+    public MpPrePrepareMpPaxosCallback prePrepareReplica(TransactionState transactionState, Replica replica, ReplicasGroupsOperationCallback replicasOperationsCallback)
+    {
+        int targetReplicas = 1;
+        MpPrePrepareMpPaxosCallback callbackForPrePrepare = new MpPrePrepareMpPaxosCallback(targetReplicas, MPP_HARDCODED_CONSISTENCY_LEVEL, replicasOperationsCallback);
+        MpPrePrepare mpPrePrepare = new MpPrePrepare(transactionState);
+        MessageOut<MpPrePrepare> message = new MessageOut<>(MessagingService.Verb.MP_PAXOS_PRE_PREARE, mpPrePrepare, MpPrePrepare.serializer);
+        messagingService.sendRR(message, replica.getHost(), callbackForPrePrepare);
+        return callbackForPrePrepare;
+    }
+
     public void rollbackTransaction(TransactionState transactionState)
     {
         // TODO [MPP][MPP-23] Implement it

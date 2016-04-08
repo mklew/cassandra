@@ -63,7 +63,8 @@ public class MppCommitWriteResponseHandler<T> extends AbstractWriteResponseHandl
 
     protected int totalBlockFor()
     {
-        return 2 + pendingEndpoints.size(); // TODO [MPP] 2 because assumption is that N = 3
+//        return 2 + pendingEndpoints.size(); // TODO [MPP] 2 because assumption is that N = 3
+        return 1 + pendingEndpoints.size(); // TODO [MPP] 1 because write is done per single replica. Plus assumption is that N = 3
     }
 
     public void assureSufficientLiveNodes() throws UnavailableException

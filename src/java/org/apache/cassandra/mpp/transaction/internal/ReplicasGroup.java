@@ -46,11 +46,19 @@ public class ReplicasGroup
         return "ReplicaGroup[" + replicas + ']';
     }
 
+    public List<Replica> getAllReplicasInThatGroup() {
+        return replicas;
+    }
 
     public boolean hasSameReplicasAs(ReplicasGroup replicasGroup)
     {
         List<String> thisHosts = replicas.stream().map(Replica::getHostAddress).sorted().collect(toList());
         List<String> otherHosts = replicasGroup.replicas.stream().map(Replica::getHostAddress).sorted().collect(toList());
         return thisHosts.equals(otherHosts);
+    }
+
+    public boolean hasReplica(Replica replica)
+    {
+        return replicas.contains(replica);
     }
 }

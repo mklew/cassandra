@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
@@ -99,17 +100,6 @@ public class StorageProxyMpPaxosExtensions
         transactionsThatAreAfterPrePrepared = new ConcurrentSkipListSet<>();
     }
 
-    enum Phase
-    {
-        NO_PHASE,
-        PRE_PREPARE_PHASE,
-        BEGIN_AND_REPAIR_PHASE,
-        PREPARE_PHASE,
-        PROPOSE_PHASE,
-        COMMIT_PHASE,
-        AFTER_COMMIT_PHASE;
-    }
-
     private static final Map<Phase, Phase> nextPhaseIs;
 
     // Transition to phase from key
@@ -138,6 +128,46 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
+    public static class ReplicaInPhaseHolder {
+        private ReplicaInPhase replicaInPhase;
+        private TransitionResult transitionResult;
+
+        public ReplicaInPhaseHolder(ReplicaInPhase replicaInPhase)
+        {
+            this.replicaInPhase = replicaInPhase;
+        }
+
+        public ReplicaInPhase getReplicaInPhase()
+        {
+            return replicaInPhase;
+        }
+
+        public void setReplicaInPhase(ReplicaInPhase replicaInPhase)
+        {
+            this.replicaInPhase = replicaInPhase;
+        }
+
+        public void setTransitionResult(TransitionResult transitionResult)
+        {
+            this.transitionResult = transitionResult;
+        }
+
+        public TransitionResult getTransitionResult()
+        {
+            return transitionResult;
+        }
+    }
+
+    interface ReplicaInPhase {
+        TransactionState getTransactionState();
+
+        Replica getReplica();
+
+        ClientState getState();
+
+        Optional<MpPaxosId> getPaxosId();
+    }
+
     interface ReplicaGroupInPhase {
         Phase currentPhase();
 
@@ -150,16 +180,61 @@ public class StorageProxyMpPaxosExtensions
         ClientState getState();
     }
 
+    static abstract class AbstractReplicaInPhase implements ReplicaInPhase {
+        protected TransactionState transactionState;
+        protected ClientState state;
+        protected Replica replica;
+
+        protected AbstractReplicaInPhase(TransactionState transactionState, ClientState state, Replica replica)
+        {
+            this.transactionState = transactionState;
+            this.state = state;
+            this.replica = replica;
+        }
+
+
+        @Override
+        public TransactionState getTransactionState()
+        {
+            return transactionState;
+        }
+
+        @Override
+        public ClientState getState()
+        {
+            return state;
+        }
+
+        @Override
+        public Replica getReplica()
+        {
+            return replica;
+        }
+
+        @Override
+        public Optional<MpPaxosId> getPaxosId()
+        {
+            return Optional.empty();
+        }
+    }
+
     static abstract class AbstractReplicaGroupInPhase implements ReplicaGroupInPhase {
         protected ReplicasGroupAndOwnedItems replicaGroup;
         protected TransactionState transactionState;
         protected ClientState state;
 
-        protected AbstractReplicaGroupInPhase(ReplicasGroupAndOwnedItems replicaGroup, TransactionState transactionState, ClientState state)
+        protected AbstractReplicaGroupInPhase(ReplicasGroupAndOwnedItems replicaGroup, TransactionState transactionState, ClientState state, Phase phase)
         {
             this.replicaGroup = replicaGroup;
             this.transactionState = transactionState;
             this.state = state;
+            setPhaseOnReplicas(replicaGroup, phase);
+        }
+
+        @Override
+        final public Phase currentPhase()
+        {
+            return getMaximumPhaseSharedByQuorum(replicaGroup.getReplicasGroup());
         }
 
         @Override
@@ -181,27 +256,156 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
-    public static class BaseReplicaGroupInPhase extends AbstractReplicaGroupInPhase {
+    public static void setPhaseOnReplicas(ReplicasGroupAndOwnedItems replicaGroup, Phase phase) {
+        replicaGroup.getReplicasGroup().getAllReplicasInThatGroup().forEach(replica -> replica.setPhase(phase));
+    }
 
-        private final Phase phase;
+    public static Phase findMinimumPhase(ReplicasGroup replicasGroup) {
+        return replicasGroup.getAllReplicasInThatGroup().stream().map(Replica::getPhase).sorted().findFirst().get();
+    }
+
+    public static Phase getCurrentPhase(ReplicasGroup replicaGroup) {
+        Optional<Phase> maybeHasQuorum = getPhaseOfQuorum(replicaGroup);
+
+        return maybeHasQuorum.orElse(findMinimumPhase(replicaGroup));
+    }
+
+    public static Optional<Phase> getPhaseOfQuorum(ReplicasGroup replicaGroup)
+    {
+        List<Replica> allReplicasInThatGroup = replicaGroup.getAllReplicasInThatGroup();
+        int size = allReplicasInThatGroup.size();
+        long quorum = size / 2 + 1;
+        Map<Phase, Long> countByPhase = allReplicasInThatGroup.stream().map(Replica::getPhase).collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+        return countByPhase.entrySet().stream().filter(e -> e.getValue() >= quorum).map(Map.Entry::getKey).findFirst();
+    }
+
+
+    public static boolean isQuorumInSamePhase(ReplicasGroup replicaGroup) {
+        return getPhaseOfQuorum(replicaGroup).isPresent();
+    }
+
+    public static Phase getMaximumPhaseSharedByQuorum(ReplicasGroup replicasGroup)
+    {
+        List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+        return getMaximumPhaseSharedByQuorum(allReplicasInThatGroup.stream().map(x -> x).collect(Collectors.toList()));
+    }
+
+    public static Phase getMaximumPhaseSharedByQuorum(Collection<WithPhase> withPhases) {
+        int size = withPhases.size();
+        int quorum = size / 2 + 1;
+        List<Phase> collected = withPhases.stream().map(WithPhase::getPhase).sorted().collect(Collectors.toList());
+        return collected.get(quorum - 1);
+    }
+
+    public static Phase findNextPhaseForReplica(Replica replica, Phase minimumPhaseAmongAllReplicaGroups, Phase nextExpectedPhase) {
+        if(replica.getPhase() == nextExpectedPhase) {
+            return replica.getPhase();
+        }
+        else if(replica.getPhase() == minimumPhaseAmongAllReplicaGroups ) {
+            return nextExpectedPhase;
+        }
+        else
+        {
+            return getNextExpectedPhase(replica.getPhase());
+        }
+    }
+
+    public static Phase findNextPhaseForReplica(Replica replica, Collection<ReplicasGroup> replicaGroups) {
+        Phase minimumPhaseAmongAllReplicaGroups = findMinimumPhaseAmongAllReplicaGroups(replicaGroups);
+        Phase nextExpectedPhase = getNextExpectedPhase(minimumPhaseAmongAllReplicaGroups);
+        return findNextPhaseForReplica(replica, minimumPhaseAmongAllReplicaGroups, nextExpectedPhase);
+    }
+
+    public static TransitionId findNextTransitionId(Replica replica, Phase nextPhaseForReplica) {
+        return transitionToPhase(replica.getPhase(), nextPhaseForReplica);
+    }
+
+    public static class BaseReplicaInPhase extends AbstractReplicaInPhase {
+
+        protected BaseReplicaInPhase(TransactionState transactionState, ClientState state, Replica replica, Phase phase)
+        {
+            super(transactionState, state, replica);
+            if(phase != null)
+                replica.setPhase(phase);
+        }
+
+
+//        @Override
+//        public boolean isQuorum()
+//        {
+//            return true;
+//        }
+    }
+
+    public static class BaseReplicaGroupInPhase extends AbstractReplicaGroupInPhase {
 
         protected BaseReplicaGroupInPhase(ReplicasGroupAndOwnedItems replicaGroup, TransactionState transactionState, ClientState state, Phase phase)
         {
-            super(replicaGroup, transactionState, state);
-            this.phase = phase;
+            super(replicaGroup, transactionState, state, phase);
         }
 
-        @Override
-        public Phase currentPhase()
-        {
-            return phase;
-        }
 
         @Override
         public boolean isQuorum()
         {
             return true;
         }
+    }
+
+    public static class ReplicaInPrePreparedPhase extends AbstractReplicaInPhase {
+
+        /**
+         * This is response for PRE PREPARED PHASE.
+         */
+        Optional<MpPaxosId> paxosIdOpt;
+
+        MpPrepareCallback summary;
+
+        public ReplicaInPrePreparedPhase(TransactionState transactionState, ClientState state, Replica replica,
+                                              Map<InetAddress, Optional<MpPaxosId>> responsesByReplica, MpPrepareCallback summary)
+        {
+            super(transactionState, state, replica);
+            Preconditions.checkArgument(responsesByReplica.size() == 1);
+            Preconditions.checkArgument(responsesByReplica.entrySet().iterator().next().getKey().getHostAddress().equals(replica.getHostAddress()));
+            this.paxosIdOpt = responsesByReplica.entrySet().iterator().next().getValue();
+            this.summary = summary;
+        }
+
+        private ReplicaInPrePreparedPhase(TransactionState transactionState, ClientState state, Replica replica,
+                                         Optional<MpPaxosId> paxosId, MpPrepareCallback summary)
+        {
+            super(transactionState, state, replica);
+            this.paxosIdOpt = paxosId;
+            this.summary = summary;
+        }
+
+        public ReplicaInPrePreparedPhase copyWith(MpPrepareCallback summary) {
+            return new ReplicaInPrePreparedPhase(transactionState, state, replica, paxosIdOpt, summary);
+        }
+
+//        @Override
+//        public Phase currentPhase()
+//        {
+//            return Phase.PRE_PREPARE_PHASE;
+//        }
+
+//        @Override
+//        public boolean isQuorum()
+//        {
+//            return true; // because it was taken care of in callback handler MppPrePrepareCallback
+//        }
+
+        @Override
+        public Optional<MpPaxosId> getPaxosId()
+        {
+            return paxosIdOpt;
+        }
+
+        public MpPrepareCallback getSummary()
+        {
+            return summary;
+        }
+
     }
 
     public static class ReplicaGroupInPrePreparedPhase extends AbstractReplicaGroupInPhase {
@@ -214,7 +418,7 @@ public class StorageProxyMpPaxosExtensions
                                        TransactionState transactionState, ClientState state,
                                        Map<InetAddress, Optional<MpPaxosId>> responsesByReplica, MpPrepareCallback summary)
         {
-            super(replicaGroup, transactionState, state);
+            super(replicaGroup, transactionState, state, Phase.PRE_PREPARE_PHASE);
             this.responsesByReplica = responsesByReplica;
             this.summary = summary;
         }
@@ -223,11 +427,11 @@ public class StorageProxyMpPaxosExtensions
             return new ReplicaGroupInPrePreparedPhase(replicaGroup, transactionState, state, responsesByReplica, summary);
         }
 
-        @Override
-        public Phase currentPhase()
-        {
-            return Phase.PRE_PREPARE_PHASE;
-        }
+//        @Override
+//        public Phase currentPhase()
+//        {
+//            return Phase.PRE_PREPARE_PHASE;
+//        }
 
         @Override
         public boolean isQuorum()
@@ -290,17 +494,69 @@ public class StorageProxyMpPaxosExtensions
             this.txRepairedAlready = txRepairedAlready;
         }
 
-        @Override
-        public Phase currentPhase()
-        {
-            return Phase.PREPARE_PHASE;
-        }
+//        @Override
+//        public Phase currentPhase()
+//        {
+//            return Phase.PREPARE_PHASE;
+//        }
 
         @Override
         public boolean isQuorum()
         {
             return false;
         }
+
+        public UUID getBallot()
+        {
+            return ballot;
+        }
+    }
+
+    public static class ReplicaInPreparedPhase extends ReplicaInPrePreparedPhase {
+
+        private final UUID ballot;
+
+        public boolean timeOutProposalIfPartialResponses;
+
+        private Optional<TransactionId> txRepairedAlready = Optional.empty();
+
+        protected ReplicaInPreparedPhase(TransactionState transactionState,
+                                              ClientState state,
+                                              Replica replica,
+                                              Optional<MpPaxosId> paxosId,
+                                              MpPrepareCallback summary,
+                                              UUID ballot,
+                                              boolean timeOutProposalIfPartialResponses)
+        {
+            super(transactionState, state, replica, paxosId, summary);
+            this.ballot = ballot;
+            this.timeOutProposalIfPartialResponses = timeOutProposalIfPartialResponses;
+        }
+
+        protected ReplicaInPreparedPhase(TransactionState transactionState,
+                                         ClientState state,
+                                         Replica replica,
+                                         Optional<MpPaxosId> paxosId,
+                                         MpPrepareCallback summary,
+                                         UUID ballot,
+                                         boolean timeOutProposalIfPartialResponses,
+                                         Optional<TransactionId> txRepairedAlready)
+        {
+            this(transactionState, state, replica, paxosId, summary, ballot, timeOutProposalIfPartialResponses);
+            this.txRepairedAlready = txRepairedAlready;
+        }
+
+//        @Override
+//        public Phase currentPhase()
+//        {
+//            return Phase.PREPARE_PHASE;
+//        }
+
+//        @Override
+//        public boolean isQuorum()
+//        {
+//            return false;
+//        }
 
         public UUID getBallot()
         {
@@ -329,29 +585,128 @@ public class StorageProxyMpPaxosExtensions
             this.repairInProgressPaxosExecutor = repairInProgressPaxosExecutor;
         }
 
-        public Phase currentPhase()
+//        public Phase currentPhase()
+//        {
+//            return Phase.BEGIN_AND_REPAIR_PHASE;
+//        }
+    }
+
+    public static class ReplicaInReparingInProgressPhase extends ReplicaInPreparedPhase {
+
+        ReplicaGroupsPhaseExecutor repairInProgressPaxosExecutor;
+
+        volatile boolean isRepairDone = false;
+
+        protected ReplicaInReparingInProgressPhase(TransactionState transactionState,
+                                                        ClientState state,
+                                                        Replica replica,
+                                                        Optional<MpPaxosId> paxosId,
+                                                        MpPrepareCallback summary,
+                                                        UUID ballot,
+                                                        boolean timeOutProposalIfPartialResponses,
+                                                        ReplicaGroupsPhaseExecutor repairInProgressPaxosExecutor)
         {
-            return Phase.BEGIN_AND_REPAIR_PHASE;
+            super(transactionState, state, replica, paxosId, summary, ballot, timeOutProposalIfPartialResponses);
+            this.repairInProgressPaxosExecutor = repairInProgressPaxosExecutor;
+        }
+
+//        public Phase currentPhase()
+//        {
+//            return Phase.BEGIN_AND_REPAIR_PHASE;
+//        }
+    }
+
+    enum TransitionId {
+        NOOP, TO_PRE_PREPARED, TO_PREPARED, TO_PROPOSED, TO_COMMITTED, TO_PREPARED_FROM_REPARING,
+    }
+
+    public static Transition findTransitionByTransitionId(TransitionId transitionId) {
+        if(transitionId == TransitionId.NOOP) return noopTransition;
+        else if(transitionId == TransitionId.TO_PRE_PREPARED) return transitionToPrePrepared;
+        else if(transitionId == TransitionId.TO_PREPARED) return transitionToPrepared;
+        else if(transitionId == TransitionId.TO_PREPARED_FROM_REPARING) return transitionToPreparedFromReparing;
+        else if(transitionId == TransitionId.TO_COMMITTED) return transitionToCommitted;
+        else if(transitionId == TransitionId.TO_PROPOSED) return transitionToProposed;
+        else
+        {
+            throw new RuntimeException("Unknown transition id " + transitionId);
         }
     }
 
+//    interface Transition {
+//        ReplicaGroupInPhase transition(ReplicaGroupInPhase replicaGroup);
+//    }
+
     interface Transition {
-        ReplicaGroupInPhase transition(ReplicaGroupInPhase replicaGroup);
+        TransitionResult transition(ReplicaInPhase replicaInPhase);
     }
 
-    public static Transition getNextTransition(Phase phase) {
-        Phase nextPhase = getNextExpectedPhase(phase);
-        return transitionToPhase.get(nextPhase);
+    interface TransitionResult extends WithPhase {
+        boolean wasTransitionSuccessful();
+
+        Phase phaseAfterTransition();
+
+        ReplicaInPhase getReplicaInPhase();
     }
+
+    public static class TransitionResultImpl implements TransitionResult {
+
+        private final boolean wasTransitionSuccessful;
+        private final Phase phaseAfterTransition;
+        private final ReplicaInPhase replicaInPhase;
+
+        public TransitionResultImpl(ReplicaInPhase replicaInPhase, Phase phaseAfterTransition, boolean wasTransitionSuccessful)
+        {
+            this.wasTransitionSuccessful = wasTransitionSuccessful;
+            this.phaseAfterTransition = phaseAfterTransition;
+            this.replicaInPhase = replicaInPhase;
+        }
+
+
+        public boolean wasTransitionSuccessful()
+        {
+            return wasTransitionSuccessful;
+        }
+
+        public Phase phaseAfterTransition()
+        {
+            return phaseAfterTransition;
+        }
+
+        public ReplicaInPhase getReplicaInPhase()
+        {
+            return replicaInPhase;
+        }
+
+        public Phase getPhase()
+        {
+            return phaseAfterTransition();
+        }
+    }
+
+
+//    public static Transition getNextTransition(Phase phase) {
+//        Phase nextPhase = getNextExpectedPhase(phase);
+//        return transitionToPhase.get(nextPhase);
+//    }
 
     public static ReplicaGroupsPhaseExecutor createMultiPartitionPaxosPhaseExecutor(List<ReplicasGroupAndOwnedItems> replicaGroups, TransactionState transactionState, ClientState state) {
+        Phase noPhase = Phase.NO_PHASE;
+        Collection<Replica> allReplicas = replicaGroups.iterator().next().getAllReplicas();
+        allReplicas.forEach(replica -> {
+            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new BaseReplicaInPhase(transactionState, state, replica, noPhase));
+            replica.setHolder(holder);
+        });
         logger.debug("createMultiPartitionPaxosPhaseExecutor replicaGroups {}. TransactionState is {}", replicaGroups, transactionState);
         List<ReplicaGroupInPhaseHolder> inPhases = replicaGroups.stream()
-                                                              .map(rg -> new BaseReplicaGroupInPhase(rg, transactionState, state, Phase.NO_PHASE))
+                                                              .map(rg -> {
+
+                                                                  return new BaseReplicaGroupInPhase(rg, transactionState, state, noPhase);
+                                                              })
                                                               .map(ReplicaGroupInPhaseHolder::new)
                                                               .collect(Collectors.toList());
 
-        return new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases);
+        return new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases, replicaGroups.iterator().next().getAllReplicas());
     }
 
     public static ReplicaGroupsPhaseExecutor createRepairInProgressPaxosExecutor(TransactionState inProgressTransactionState, ClientState state, UUID ballot) {
@@ -359,60 +714,244 @@ public class StorageProxyMpPaxosExtensions
         List<ReplicasGroupAndOwnedItems> replicasGroupAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(inProgressTransactionState);
         Map<InetAddress, Optional<MpPaxosId>> responsesByReplica = Collections.emptyMap(); // TODO [MPP] Maybe it will work.
 
+        Collection<Replica> allReplicas = replicasGroupAndOwnedItems.iterator().next().getAllReplicas();
+        allReplicas.forEach(replica -> {
+            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new ReplicaInPreparedPhase(inProgressTransactionState, state, replica, Optional.empty(), null, ballot, false));
+            replica.setHolder(holder);
+        });
+
         List<ReplicaGroupInPhaseHolder> inPhases = replicasGroupAndOwnedItems.stream().map(rg -> {
             Pair<List<InetAddress>, Integer> p = getPaxosParticipants(rg, consistencyForPaxos);
             List<InetAddress> liveEndpoints = p.left;
             int requiredParticipants = p.right;
+            // TODO [MPP] This can be later deleted or at least simplified.
             return new ReplicaGroupInPreparedPhase(rg, inProgressTransactionState, state, responsesByReplica, null, liveEndpoints, requiredParticipants, ballot, false);
         }).map(ReplicaGroupInPhaseHolder::new)
         .collect(Collectors.toList());
 
         // TODO [MPP] It might be done if we see that transaction was rolled back.
-        return new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases);
+        return new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases, replicasGroupAndOwnedItems.iterator().next().getAllReplicas());
     }
+
+    public static Phase findMinimumPhaseAmongAllReplicaGroups(Collection<ReplicasGroup> replicaGroups) {
+        return replicaGroups.stream().map(StorageProxyMpPaxosExtensions::getMaximumPhaseSharedByQuorum).sorted().findFirst().get();
+    }
+
+//    public static Phase findMinimumPhaseAmongTransitionResults(Collection<TransitionResult> results) {
+//        return results.stream().map(StorageProxyMpPaxosExtensions::getMaximumPhaseSharedByQuorum).sorted().findFirst().get();
+//    }
+
 
 
     public static class ReplicaGroupsPhaseExecutor {
 
+        private final Collection<Replica> replicas;
         Phase isDoneWhen;
 
         Collection<ReplicaGroupInPhaseHolder> replicasInPhase;
 
-        public ReplicaGroupsPhaseExecutor(Phase isDoneWhen, Collection<ReplicaGroupInPhaseHolder> replicasInPhase)
+        Map<Replica, ReplicaInPhaseHolder> replicaToReplicaInPhaseHolder = new HashMap<>();
+
+        public ReplicaGroupsPhaseExecutor(Phase isDoneWhen, Collection<ReplicaGroupInPhaseHolder> replicasInPhase, Collection<Replica> allReplicas)
         {
             this.isDoneWhen = isDoneWhen;
             this.replicasInPhase = replicasInPhase;
+            this.replicas = allReplicas;
+            // TODO [MPP] Something needs to be done here.
+            replicas.forEach(replica -> {
+//                replicaToReplicaInPhaseHolder.put(replica, new ReplicaInPhaseHolder())
+            });
         }
 
         boolean areInSamePhase() {
             return replicasInPhase.stream().map(h -> h.getReplicaGroup().currentPhase()).distinct().count() == 1;
         }
 
-        Phase findMinimumPhase() {
+        /**
+         * All replica groups MUST be in phase with replica group with minimum phase.
+         * @return
+         */
+        Phase findMinimumPhaseAmongAllReplicaGroups() {
             return replicasInPhase.stream().map(h -> h.getReplicaGroup().currentPhase()).sorted().findFirst().get();
         }
 
         boolean isDone() {
-            return areInSamePhase() && (findMinimumPhase() == isDoneWhen);
+            return areInSamePhase() && (findMinimumPhaseAmongAllReplicaGroups() == isDoneWhen);
         }
 
-        void runTransitionFrom(Phase groupsMinimumPhase) {
-            replicasInPhase.stream().forEach(replicaGroupHolder -> {
-                Phase thisGroupPhase = replicaGroupHolder.replicaGroup.currentPhase();
-                logger.debug("ReplicaGroup {} is in phase {} and current minimum phase is {} and next expected phase is {}",
-                             replicaGroupHolder.getReplicaGroup().getReplicaGroup().getReplicasGroup(),
-                             thisGroupPhase,
-                             groupsMinimumPhase,
-                             getNextExpectedPhase(groupsMinimumPhase));
+        void runTransitionsForEachReplica()
+        {
+            final Phase minimumPhaseAmongAllBeforeTransitions = findMinimumPhaseAmongAllReplicaGroups();
 
-                Transition transitionForReplicaGroup = findTransition(groupsMinimumPhase, thisGroupPhase);
-                // TODO [MPP] Maybe it will return Future<ReplicaGroupInPhase>
-                ReplicaGroupInPhase transitionedReplicaGroup = transitionForReplicaGroup.transition(replicaGroupHolder.getReplicaGroup());
-                replicaGroupHolder.setReplicaGroup(transitionedReplicaGroup);
+            final Map<ReplicaGroupInPhase, Phase> replicaGroupInPhaseToItsQuorumPhase = replicasInPhase.stream().map(h -> h.getReplicaGroup()).collect(Collectors.toMap(Function.identity(), rg -> {
+                return getMaximumPhaseSharedByQuorum(rg.getReplicaGroup().getReplicasGroup());
+            }));
+
+            List<ReplicasGroup> replicaGroups = replicasInPhase.stream().map(h -> h.getReplicaGroup().getReplicaGroup().getReplicasGroup()).collect(Collectors.toList());
+
+            logger.debug("Will run transitions for each replica. ReplicaGroups size: {}", replicaGroups.size());
+            replicas.parallelStream().forEach(replica -> {
+                Phase nextPhaseForReplica = findNextPhaseForReplica(replica, replicaGroups);
+                TransitionId transitionId = transitionToPhase(replica.getPhase(), nextPhaseForReplica);
+                logger.debug("Replica {} is in phase '{}' and next expected phase is {}. It will transition using {}",
+                             replica.getHostAddress(),
+                             replica.getPhase(),
+                             nextPhaseForReplica,
+                             transitionId);
+
+                Transition transitionForReplica = findTransitionByTransitionId(transitionId);
+                ReplicaInPhaseHolder holder = replica.getReplicaInPhaseHolder();
+                ReplicaInPhase replicaInPhase = holder.getReplicaInPhase();
+                TransitionResult transitionResult = transitionForReplica.transition(replicaInPhase);
+                holder.setTransitionResult(transitionResult);
             });
+
+            logger.debug("Transitions for replica groups are done. Time to evaluate responses");
+
+            // After transition, some replicas could not transition forward. Their phase must be accepted.
+            replicas.forEach(replica -> {
+                TransitionResult transitionResult = replica.getReplicaInPhaseHolder().getTransitionResult();
+                if(!transitionResult.wasTransitionSuccessful()) {
+                    logger.debug("Replica {} failed to transition and will transition to phase {}", replica, transitionResult.phaseAfterTransition());
+                    replica.getReplicaInPhaseHolder().setReplicaInPhase(transitionResult.getReplicaInPhase());
+                    replica.setPhase(transitionResult.phaseAfterTransition());
+                }
+            });
+
+            // For each replica group
+            Map<Replica, Phase> replicaToProposedPhase = new HashMap<>();
+
+            replicasInPhase.forEach(replicaGroupInPhaseHolder -> {
+                    ReplicaGroupInPhase replicaGroup = replicaGroupInPhaseHolder.getReplicaGroup();
+                    ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems = replicaGroup.getReplicaGroup();
+                    ReplicasGroup replicasGroup = replicasGroupAndOwnedItems.getReplicasGroup();
+                    Phase quorumPhaseBeforeTransitions = replicaGroupInPhaseToItsQuorumPhase.get(replicaGroup);
+                    Phase nextExpectedMinimumPhase = getNextExpectedPhase(minimumPhaseAmongAllBeforeTransitions);
+
+                    List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+                    long quorum = allReplicasInThatGroup.size() / 2 + 1;
+
+                    List<TransitionResult> transitionResults = allReplicasInThatGroup.stream().map(Replica::getReplicaInPhaseHolder).map(x -> x.getTransitionResult()).collect(Collectors.toList());
+                    Phase quorumPhaseAfterTransition = getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
+
+                    List<Replica> successfullyTransitioned = allReplicasInThatGroup.stream().filter(replica -> replica.getReplicaInPhaseHolder().getTransitionResult().wasTransitionSuccessful()).collect(Collectors.toList());
+
+                    // Phase of replica that successfully transitioned will be set to minimum quorum phase among replica groups it belongs to
+                    successfullyTransitioned.forEach(replica -> {
+                        Phase phase = replicaToProposedPhase.get(replica);
+                        if (phase == null || phase.ordinal() > quorumPhaseAfterTransition.ordinal())
+                        {
+                            replicaToProposedPhase.put(replica, quorumPhaseAfterTransition);
+                        }
+                    });
+                });
+
+
+            replicaToProposedPhase.forEach((replica, phase) -> {
+                TransitionResult transitionResult = replica.getReplicaInPhaseHolder().getTransitionResult();
+
+                replica.getReplicaInPhaseHolder().setReplicaInPhase(transitionResult.getReplicaInPhase());
+                replica.setPhase(phase);
+            });
+
+            // After sorting out transition results, clear them
+            replicas.forEach(replica -> {
+                replica.getReplicaInPhaseHolder().setTransitionResult(null);
+            });
+
+//                if(successfullyTransitioned.size() >= quorum) {
+//                    // quorum has successfully transitioned.
+//
+//
+//
+//                    // Replicas that succeeded can get phase from quorum.
+//                    // Replicas that failed must get their actual phase after transition
+//                }
+//                else {
+//                    // quorum didn't successfully transition.
+//                }
+
+//                // TODO [MPP] Below is code probably to be cut out.
+//                if (quorumPhaseBeforeTransitions.ordinal() >= nextExpectedMinimumPhase.ordinal())
+//                {
+//                    // Quorum phase before transitions is same as next expected so there are no conditions
+//                }
+//                else
+//                {
+//                    // Quorum is smaller than next expected phase. So replicas had to transition.
+//                    // Need to evaluate conditions before transitions.
+//
+//                    // If condition for transition is satified, then this replica group can propose new phase, but only to replicas which
+//
+//                    // are in phase no less than quorumPhaseBeforeTransitions.
+//
+//                    // Others are lagging behind.
+//
+//                    List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+//                    long quorum = allReplicasInThatGroup.size() / 2 + 1;
+//
+//                    if (quorumPhaseBeforeTransitions == Phase.NO_PHASE && nextExpectedMinimumPhase == Phase.PRE_PREPARE_PHASE)
+//                    {
+//                        // TODO evaluate if quorum of replicas have defined paxosId
+//                        List<Replica> replicasThatSuccessfullyPrepared = allReplicasInThatGroup.stream().filter(replica -> {
+//                            return replica.getReplicaInPhaseHolder().getReplicaInPhase().getPaxosId().isPresent();
+//                        }).collect(Collectors.toList());
+//                        int countOfReplicasWithPaxosId = replicasThatSuccessfullyPrepared.size();
+//
+//                        if (countOfReplicasWithPaxosId >= quorum)
+//                        {
+//                            // Can propose that
+//                        }
+//                    }
+//                    else if (quorumPhaseBeforeTransitions == Phase.PRE_PREPARE_PHASE && nextExpectedMinimumPhase == Phase.PREPARE_PHASE)
+//                    {
+//                        // It had to transition doing toPrepareTransition. Quorum should be "promised"
+//                    }
+//                    else if (quorumPhaseBeforeTransitions == Phase.PREPARE_PHASE && nextExpectedMinimumPhase == Phase.PROPOSE_PHASE)
+//                    {
+//                        // It had to do propose. Quorum should have accepted proposal
+//                    }
+//                    else if (quorumPhaseBeforeTransitions == Phase.PROPOSE_PHASE && nextExpectedMinimumPhase == Phase.COMMIT_PHASE)
+//                    {
+//                        // It had to commit, quorum get write success
+//                    }
+//                }
+//            });
+
+
+            // Assert ReplicaInPhase state in regard to a group.
+
+            // Set ReplicaInPhase state to minimum state proposed by replica groups.
+
         }
+
+        /**
+         * Transitions are run on single replicas, but results of transitions are evaluated on replica groups.
+         *
+         * Replica groups might share some replicas.
+         */
+//        void runTransitionFrom(Phase groupsMinimumPhase) {
+//            replicasInPhase.stream().forEach(replicaGroupHolder -> {
+//                Phase thisGroupPhase = replicaGroupHolder.replicaGroup.currentPhase();
+//                logger.debug("ReplicaGroup {} is in phase {} and current minimum phase is {} and next expected phase is {}",
+//                             replicaGroupHolder.getReplicaGroup().getReplicaGroup().getReplicasGroup(),
+//                             thisGroupPhase,
+//                             groupsMinimumPhase,
+//                             getNextExpectedPhase(groupsMinimumPhase));
+//
+//                TransitionId transitionId = findTransition(groupsMinimumPhase, thisGroupPhase);
+//
+//                // TODO [MPP] IMPLEMENT IT
+//
+//                Transition transitionForReplicaGroup = null;
+//                // TODO [MPP] Maybe it will return Future<ReplicaGroupInPhase>
+//                ReplicaGroupInPhase transitionedReplicaGroup = transitionForReplicaGroup.transition(replicaGroupHolder.getReplicaGroup());
+//                replicaGroupHolder.setReplicaGroup(transitionedReplicaGroup);
+//            });
+//        }
 
         public void tryToExecute() {
+            UUID txId = replicasInPhase.iterator().next().getReplicaGroup().getTransactionState().getTransactionId();
             logger.debug("ReplicaGroupsPhaseExecutor begins. Number of replica groups {}. Replica groups are: {}", replicasInPhase.size(),
                          replicasInPhase.stream().map(x -> x.getReplicaGroup().getReplicaGroup().getReplicasGroup()).collect(Collectors.toList()));
 
@@ -420,23 +959,23 @@ public class StorageProxyMpPaxosExtensions
             consistencyForPaxos.validateForCas();
             long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getMppContentionTimeout());
             while (System.nanoTime() - start < timeout) {
-                Phase groupsMinimumPhase = findMinimumPhase();
-                logger.debug("Current groups minimum phase is {}", groupsMinimumPhase);
-                runTransitionFrom(groupsMinimumPhase);
+                Phase minimumPhaseAmongAllReplicaGroups = findMinimumPhaseAmongAllReplicaGroups();
+                logger.debug("Current groups minimum phase is {}", minimumPhaseAmongAllReplicaGroups);
+                //runTransitionFrom(minimumPhaseAmongAllReplicaGroups);
+                runTransitionsForEachReplica();
 
                 if(isDone()) {
                     return;
                 }
 
-                Phase phaseAfterTransistion = findMinimumPhase();
-                logger.debug("Phase after transition is {}", phaseAfterTransistion);
-                if(phaseAfterTransistion.ordinal() <= groupsMinimumPhase.ordinal()) {
+                Phase phaseAfterTransistion = findMinimumPhaseAmongAllReplicaGroups();
+                logger.debug("Phase after transitions is {} TxID {}", phaseAfterTransistion, txId);
+                if(phaseAfterTransistion.ordinal() <= minimumPhaseAmongAllReplicaGroups.ordinal()) {
                     logger.debug("Phase after transition is not the next phase. Will try again after sleep");
                     // Something didn't work well. Try again.
                     Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), TimeUnit.MILLISECONDS);
                 }
             }
-            UUID txId = replicasInPhase.iterator().next().getReplicaGroup().getTransactionState().getTransactionId();
             logger.error("MultiPartitionPaxosTimeoutException timeout occurred. TxID {}", txId);
             throw new MultiPartitionPaxosTimeoutException("Timeout occured. TxID is: " + txId);
             //throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, 0);
@@ -447,39 +986,43 @@ public class StorageProxyMpPaxosExtensions
     public static ConsistencyLevel consistencyForCommit = ConsistencyLevel.QUORUM;
     public static ConsistencyLevel consistencyForPaxos = ConsistencyLevel.LOCAL_TRANSACTIONAL;
 
-    public static Transition toPrePreparePhaseTransition = replicaGroup -> {
-        Preconditions.checkState(replicaGroup.currentPhase() == Phase.NO_PHASE);
-        // TODO [MPP] Logic from MppServicesLocator should be moved elsewhere.
-        MpPrePrepareMpPaxosCallback callback = ((MppServiceImpl) MppServicesLocator.getInstance()).prePrepareReplicaGroup(replicaGroup.getTransactionState(), replicaGroup.getReplicaGroup(), null);
-        callback.await();
+    public static Transition noopTransition = replicaGroup -> new TransitionResultImpl(replicaGroup, replicaGroup.getReplica().getPhase(), true);
 
-        // TODO [MPP] For testing
-        if(!waitingForTransactionUntilItIsInPrePrepared.isEmpty() && waitingForTransactionUntilItIsInPrePrepared.contains(replicaGroup.getTransactionState().getTransactionId())) {
-            logger.debug("Adding transaction id {} to transactionsThatAreAfterPrePrepared", replicaGroup.getTransactionState().getTransactionId());
-            transactionsThatAreAfterPrePrepared.add(replicaGroup.getTransactionState().getTransactionId());
-            logger.debug("transactionsThatAreAfterPrePrepared is {}", transactionsThatAreAfterPrePrepared);
-        }
-        // END TODO
+    public static Transition transitionToPrePrepared = replicaInPhase -> {
+        Preconditions.checkState(replicaInPhase.getReplica().getPhase() == Phase.NO_PHASE);
+        // TODO [MPP] Logic from MppServicesLocator should be moved elsewhere.
+        MpPrePrepareMpPaxosCallback callback = ((MppServiceImpl) MppServicesLocator.getInstance()).prePrepareReplica(replicaInPhase.getTransactionState(), replicaInPhase.getReplica(), null);
+        callback.await();
 
         Map<InetAddress, Optional<MpPaxosId>> responsesByReplica = callback.getResponsesByReplica();
 
-        return new ReplicaGroupInPrePreparedPhase(replicaGroup.getReplicaGroup(), replicaGroup.getTransactionState(), replicaGroup.getState(), responsesByReplica, null);
+        if(responsesByReplica.size() == 1 && responsesByReplica.entrySet().iterator().next().getValue().isPresent()) {
+            // success
+            ReplicaInPrePreparedPhase replicaInPrePreparedPhase = new ReplicaInPrePreparedPhase(replicaInPhase.getTransactionState(), replicaInPhase.getState(), replicaInPhase.getReplica(), responsesByReplica, null);
+            return new TransitionResultImpl(replicaInPrePreparedPhase, Phase.PRE_PREPARE_PHASE, true);
+        }
+        else {
+            // failed transition
+            return new TransitionResultImpl(replicaInPhase, Phase.NO_PHASE, false);
+        }
     };
 
-    public static Transition transitionToBeginAndRepairPhase = replicaGroupInPhase -> {
-        Pair<List<InetAddress>, Integer> p = getPaxosParticipants(replicaGroupInPhase.getReplicaGroup(), consistencyForPaxos);
-        List<InetAddress> liveEndpoints = p.left;
-        int requiredParticipants = p.right;
-        // TODO Right now I skip paxos repair
-        return null;
-    };
+//    public static Transition transitionToBeginAndRepairPhase = replicaGroupInPhase -> {
+//        Pair<List<InetAddress>, Integer> p = getPaxosParticipants(replicaGroupInPhase.getReplicaGroup(), consistencyForPaxos);
+//        List<InetAddress> liveEndpoints = p.left;
+//        int requiredParticipants = p.right;
+//        // TODO Right now I skip paxos repair
+//        return null;
+//    };
 
-    public static Transition transitionToPrepared = replicaGroupInPhase -> {
-        ReplicaGroupInPrePreparedPhase inPhase = (ReplicaGroupInPrePreparedPhase) replicaGroupInPhase;
+    public static Transition transitionToPrepared = replicaInPhase -> {
+        ReplicaInPrePreparedPhase inPhase = (ReplicaInPrePreparedPhase) replicaInPhase;
 
-        Pair<List<InetAddress>, Integer> p = getPaxosParticipants(replicaGroupInPhase.getReplicaGroup(), consistencyForPaxos);
-        List<InetAddress> liveEndpoints = p.left;
-        int requiredParticipants = p.right;
+//        Pair<List<InetAddress>, Integer> p = getPaxosParticipants(replicaGroupInPhase.getReplicaGroup(), consistencyForPaxos);
+//        List<InetAddress> liveEndpoints = p.left;
+        List<InetAddress> liveEndpoints = Collections.singletonList(replicaInPhase.getReplica().getHost());
+//        int requiredParticipants = p.right;
+        int requiredParticipants = 1;
         MpPrepareCallback summary = inPhase.getSummary(); // TODO [MPP] This state needs to be available on "re-tried" transition.
 
         if(summary != null && summary.wasRolledBack())
@@ -492,39 +1035,40 @@ public class StorageProxyMpPaxosExtensions
         MpCommit toPrepare = MpCommit.newPrepare(inPhase.getTransactionState(), ballot);
         summary = preparePaxos(toPrepare, liveEndpoints, requiredParticipants, consistencyForPaxos, null);
 
-        // TODO [MPP] For testing
-        if(!waitingForTransactionUntilItIsInPrePrepared.isEmpty() && waitingForTransactionUntilItIsInPrePrepared.contains(replicaGroupInPhase.getTransactionState().getTransactionId())) {
-            if(waitingForTransactionUntilItIsInPrePrepared.equals(transactionsThatAreAfterPrePrepared)) {
-                logger.debug("all transactions waited for are in phase after PRE PREPARED");
-            }
-            else {
-                logger.debug("transition to prepared will wait for other transactions");
-                return new ReplicaGroupInPreparedPhase(inPhase.getReplicaGroup(),
-                                                       inPhase.getTransactionState(),
-                                                       inPhase.getState(),
-                                                       inPhase.getResponsesByReplica(),
-                                                       summary,
-                                                       liveEndpoints,
-                                                       requiredParticipants,
-                                                       ballot, true);
-            }
-        }
-        // END TODO [MPP] For Testing
+//        // TODO [MPP] For testing
+//        if(!waitingForTransactionUntilItIsInPrePrepared.isEmpty() && waitingForTransactionUntilItIsInPrePrepared.contains(replicaGroupInPhase.getTransactionState().getTransactionId())) {
+//            if(waitingForTransactionUntilItIsInPrePrepared.equals(transactionsThatAreAfterPrePrepared)) {
+//                logger.debug("all transactions waited for are in phase after PRE PREPARED");
+//            }
+//            else {
+//                logger.debug("transition to prepared will wait for other transactions");
+//                return new ReplicaGroupInPreparedPhase(inPhase.getReplicaGroup(),
+//                                                       inPhase.getTransactionState(),
+//                                                       inPhase.getState(),
+//                                                       inPhase.getResponsesByReplica(),
+//                                                       summary,
+//                                                       liveEndpoints,
+//                                                       requiredParticipants,
+//                                                       ballot, true);
+//            }
+//        }
+//        // END TODO [MPP] For Testing
 
         if (notPromised(summary))
         {
             Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
-            logger.debug("PreparePaxos. Ballot {} wasn't accepted by replicas {} TxId {}", ballot, inPhase.getReplicaGroup().getReplicasGroup(), inPhase.getTransactionState().getTransactionId());
-            return inPhase.copyWith(summary);
+            logger.debug("PreparePaxos. Ballot {} wasn't accepted by replica {} TxId {}", ballot, inPhase.getReplica().getHostAddress(), inPhase.getTransactionState().getTransactionId());
+            ReplicaInPrePreparedPhase newInPhase = inPhase.copyWith(summary);
+            return new TransitionResultImpl(newInPhase, Phase.PRE_PREPARE_PHASE, false);
         }
         else {
             MpCommit inProgress = summary.mostRecentInProgressCommitWithUpdate;
             MpCommit mostRecent = summary.mostRecentCommit;
 
-            logger.debug("PreparePaxos. Ballot {} was accepted by replicas {} TxId {}", ballot, inPhase.getReplicaGroup().getReplicasGroup(), inPhase.getTransactionState().getTransactionId());
+            logger.debug("PreparePaxos. Ballot {} was accepted by replica {} TxId {}", ballot, inPhase.getReplica().getHostAddress(), inPhase.getTransactionState().getTransactionId());
 
-            if(inProgressNeedsToBeCompleted(inProgress, mostRecent) && !wasAlreadyRepaired(inPhase, inProgress)) {
-                logger.debug("PreparePaxos. Found in progress proposal that needs to be completed. Proposal for TxId {}. Replicas are {} this transaction TxId {}", inProgress.update.getTransactionId(), inPhase.getReplicaGroup().getReplicasGroup(), inPhase.getTransactionState().getTransactionId());
+            if(inProgressNeedsToBeCompleted(inProgress, mostRecent) && !wasAlreadyRepaired(inPhase, inProgress) && !inProgressIsSelf(inPhase.getTransactionState(), inProgress.update)) {
+                logger.debug("PreparePaxos. Found in progress proposal that needs to be completed. Proposal for TxId {}. TxId {}", inProgress.update.getTransactionId(), inPhase.getTransactionState().getTransactionId());
                 // This in progress transaction can be also for different replicas,
                 // therefore process needs to start over for that transaction.
                 // but the assumption is
@@ -551,13 +1095,14 @@ public class StorageProxyMpPaxosExtensions
                     repairInProgressPaxosExecutor.tryToExecute();
                 });
 
-                ReplicaGroupInReparingInProgressPhase repairing = new ReplicaGroupInReparingInProgressPhase(inPhase.getReplicaGroup(),
+                ReplicaInReparingInProgressPhase repairing = new ReplicaInReparingInProgressPhase(
                                                                                                                                         inPhase.getTransactionState(),
                                                                                                                                         inPhase.getState(),
-                                                                                                                                        inPhase.getResponsesByReplica(),
+                                                                                                                                        inPhase.getReplica(),
+                                                                                                                                        inPhase.getPaxosId(),
                                                                                                                                         summary,
-                                                                                                                                        liveEndpoints,
-                                                                                                                                        requiredParticipants,
+//                                                                                                                                        liveEndpoints,
+//                                                                                                                                        requiredParticipants,
                                                                                                                                         ballot, true,
                                                                                                                                         repairInProgressPaxosExecutor);
 
@@ -570,26 +1115,34 @@ public class StorageProxyMpPaxosExtensions
                     return null;
                 });
 
-                return repairing;
+                return new TransitionResultImpl(repairing, Phase.BEGIN_AND_REPAIR_PHASE, false);
             }
             else {
                 // Nothing in progress that needs to be completed. Phase completes
-                return new ReplicaGroupInPreparedPhase(inPhase.getReplicaGroup(),
-                                                       inPhase.getTransactionState(),
-                                                       inPhase.getState(),
-                                                       inPhase.getResponsesByReplica(),
-                                                       summary,
-                                                       liveEndpoints,
-                                                       requiredParticipants,
-                                                       ballot, true);
+                ReplicaInPreparedPhase newInPhase = new ReplicaInPreparedPhase(
+                                                                                           inPhase.getTransactionState(),
+                                                                                           inPhase.getState(),
+                                                                                           inPhase.getReplica(),
+                                                                                           inPhase.getPaxosId(),
+                                                                                           summary,
+//                                                                                           liveEndpoints,
+//                                                                                           requiredParticipants,
+                                                                                           ballot, true);
+
+                return new TransitionResultImpl(newInPhase, Phase.PREPARE_PHASE, true);
             }
         }
     };
 
-    private static boolean wasAlreadyRepaired(ReplicaGroupInPrePreparedPhase inPhase, MpCommit inProgress)
+    private static boolean inProgressIsSelf(TransactionState transactionState, TransactionState inProgress)
     {
-        if(ReplicaGroupInPreparedPhase.class.isInstance(inPhase)) {
-            ReplicaGroupInPreparedPhase inPreparedPhaseMaybeAfterRepair = (ReplicaGroupInPreparedPhase) inPhase;
+        return transactionState.getTransactionId().equals(inProgress.getTransactionId());
+    }
+
+    private static boolean wasAlreadyRepaired(ReplicaInPrePreparedPhase inPhase, MpCommit inProgress)
+    {
+        if(ReplicaInPreparedPhase.class.isInstance(inPhase)) {
+            ReplicaInPreparedPhase inPreparedPhaseMaybeAfterRepair = (ReplicaInPreparedPhase) inPhase;
             return inPreparedPhaseMaybeAfterRepair.txRepairedAlready.isPresent() &&
                    inPreparedPhaseMaybeAfterRepair.txRepairedAlready.get().equals(inProgress.update.id());
         }
@@ -598,33 +1151,32 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
-    public static Transition transitionToPreparedFromReparing = replicaGroupInPhase -> {
+    public static Transition transitionToPreparedFromReparing = replicaInPhase -> {
         // It just waits until nested repair is done.
-        ReplicaGroupInReparingInProgressPhase inPhase = (ReplicaGroupInReparingInProgressPhase) replicaGroupInPhase;
+        ReplicaInReparingInProgressPhase inPhase = (ReplicaInReparingInProgressPhase) replicaInPhase;
         if(inPhase.isRepairDone) {
-            ReplicaGroupInPhaseHolder otherReplicaGroupHolder = inPhase.repairInProgressPaxosExecutor.replicasInPhase.stream().filter(replicaGroupHolder -> {
-                return replicaGroupHolder.getReplicaGroup().getReplicaGroup().getReplicasGroup().hasSameReplicasAs(replicaGroupInPhase.getReplicaGroup().getReplicasGroup());
-            }).findFirst().get();
+            ReplicaInPhase otherReplicaInPhase = inPhase.repairInProgressPaxosExecutor.replicas.stream().filter(otherReplica -> otherReplica.equals(replicaInPhase.getReplica()))
+                                                          .findFirst().map(r -> r.getReplicaInPhaseHolder().getReplicaInPhase()).get();
 
-            ReplicaGroupInPreparedPhase otherInPrepared = (ReplicaGroupInPreparedPhase) otherReplicaGroupHolder.getReplicaGroup();
+            ReplicaInPreparedPhase otherInPrepared = (ReplicaInPreparedPhase) otherReplicaInPhase;
 
-            return new ReplicaGroupInPreparedPhase(inPhase.getReplicaGroup(),
-                                                   inPhase.getTransactionState(),
-                                                   inPhase.getState(),
-                                                   inPhase.getResponsesByReplica(),
-                                                   inPhase.summary,
-                                                   inPhase.liveEndpoints,
-                                                   inPhase.requiredParticipants,
-                                                   otherInPrepared.ballot, true,
-                                                   Optional.of(otherInPrepared.getTransactionState().id()));
+            ReplicaInPreparedPhase newInPhase = new ReplicaInPreparedPhase(
+                                                                                      inPhase.getTransactionState(),
+                                                                                      inPhase.getState(),
+                                                                                      inPhase.getReplica(),
+                                                                                      inPhase.getPaxosId(),
+                                                                                      inPhase.summary,
+//                                                   inPhase.liveEndpoints,
+//                                                   inPhase.requiredParticipants,
+                                                                                      otherInPrepared.ballot, true,
+                                                                                      Optional.of(otherInPrepared.getTransactionState().id()));
+            return new TransitionResultImpl(newInPhase, Phase.PREPARE_PHASE, true);
         }
         else {
-            return inPhase;
+            return new TransitionResultImpl(inPhase, Phase.BEGIN_AND_REPAIR_PHASE, false);
         }
     };
 
-    // TODO [MPP] It needs to extend from ReplicaGroupInPreparedPhase because if one replica group gets proposal and other doesn't
-    // then both of them start at prepare. So next phase MUST extend previous phases.
     public static class ReplicaGroupInProposedPhase extends ReplicaGroupInPreparedPhase {
 
         MpCommit proposal;
@@ -646,10 +1198,10 @@ public class StorageProxyMpPaxosExtensions
             this.proposal = proposal;
         }
 
-        public Phase currentPhase()
-        {
-            return Phase.PROPOSE_PHASE;
-        }
+//        public Phase currentPhase()
+//        {
+//            return Phase.PROPOSE_PHASE;
+//        }
 
         public boolean isQuorum()
         {
@@ -671,44 +1223,99 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
+    public static class ReplicaInProposedPhase extends ReplicaInPreparedPhase {
+
+        MpCommit proposal;
+
+        protected ReplicaInProposedPhase(TransactionState transactionState,
+                                              ClientState state,
+                                              Replica replica,
+                                              Optional<MpPaxosId> paxosId,
+                                              MpPrepareCallback summary,
+//                                              List<InetAddress> liveEndpoints,
+//                                              int requiredParticipants,
+                                              UUID ballot,
+                                              boolean timeOutProposalIfPartialResponses,
+                                              MpCommit proposal)
+        {
+            super(transactionState, state, replica, paxosId, summary,
+                  ballot,
+                  timeOutProposalIfPartialResponses);
+            this.proposal = proposal;
+        }
+
+//        public Phase currentPhase()
+//        {
+//            return Phase.PROPOSE_PHASE;
+//        }
+
+//        public boolean isQuorum()
+        {
+//            return true;  // Because quorum is determined in callback for proposePaxos.
+        }
+
+        public static ReplicaInPhase fromInPrepared(ReplicaInPreparedPhase inPrepared, MpCommit proposal)
+        {
+            return new ReplicaInProposedPhase(inPrepared.getTransactionState(),
+                                                   inPrepared.getState(),
+                                                   inPrepared.getReplica(),
+                                                   inPrepared.getPaxosId(),
+                                                   inPrepared.getSummary(),
+//                                                   inPrepared.liveEndpoints,
+//                                                   inPrepared.requiredParticipants,
+                                                   inPrepared.ballot,
+                                                   inPrepared.timeOutProposalIfPartialResponses,
+                                                   proposal);
+        }
+    }
+
     /**
      * Can transition to 'proposed', only from 'prepared'.
      */
-    public static Transition transitionToProposed = replicaGroupInPhase -> {
+    public static Transition transitionToProposed = replicaInPhase -> {
         // Replica Group in Phase should be prepared
-        ReplicaGroupInPreparedPhase inPrepared = (ReplicaGroupInPreparedPhase) replicaGroupInPhase;
+        ReplicaInPreparedPhase inPrepared = (ReplicaInPreparedPhase) replicaInPhase;
         UUID ballot = inPrepared.ballot;
-        MpCommit proposal = MpCommit.newProposal(ballot, replicaGroupInPhase.getTransactionState());
+        MpCommit proposal = MpCommit.newProposal(ballot, replicaInPhase.getTransactionState());
         Tracing.trace("Multi partition paxos; proposing client-requested transaction state for {}", ballot);
 
-        boolean proposed = proposePaxos(proposal, inPrepared.liveEndpoints, inPrepared.requiredParticipants, inPrepared.timeOutProposalIfPartialResponses, consistencyForPaxos, null);
 
-        logger.debug("PaxosProposed response is {} for replica group {}", proposed, replicaGroupInPhase.getReplicaGroup().getReplicasGroup());
+        List<InetAddress> participants = Collections.singletonList(replicaInPhase.getReplica().getHost());
+        boolean proposed = proposePaxos(proposal, participants, 1, inPrepared.timeOutProposalIfPartialResponses, consistencyForPaxos, null);
+
+        logger.debug("PaxosProposed response is {} for replica {}", proposed, replicaInPhase.getReplica());
 
         if(proposed) {
             // then create ReplicaGroupInProposedState
-            return ReplicaGroupInProposedPhase.fromInPrepared(inPrepared, proposal);
+            ReplicaInPhase newInPhase = ReplicaInProposedPhase.fromInPrepared(inPrepared, proposal);
+            return new TransitionResultImpl(newInPhase, Phase.PROPOSE_PHASE, true);
         }
         else {
-            return new ReplicaGroupInPrePreparedPhase(inPrepared.getReplicaGroup(),
-                                                      inPrepared.getTransactionState(),
-                                                      inPrepared.getState(),
-                                                      inPrepared.getResponsesByReplica(),
-                                                      inPrepared.getSummary());
+
+            ReplicaInPrePreparedPhase newInPhase = new ReplicaInPrePreparedPhase(
+                                                                                                               inPrepared.getTransactionState(),
+                                                                                                               inPrepared.getState(),
+                                                                                                               inPrepared.getReplica(),
+                                                                                                               inPrepared.getPaxosId(),
+                                                                                                               inPrepared.getSummary());
+            return new TransitionResultImpl(newInPhase, Phase.PRE_PREPARE_PHASE, false);
         }
     };
 
     /**
      *  Can transition to 'commit', only from 'proposed'
      */
-    public static Transition transitionToCommitted = replicaGroupInPhase -> {
-        ReplicaGroupInProposedPhase inProposed = (ReplicaGroupInProposedPhase) replicaGroupInPhase;
-        commitPaxos2(inProposed.proposal, consistencyForCommit, true, replicaGroupInPhase.getReplicaGroup());
+    public static Transition transitionToCommitted = replicaInPhase -> {
+        ReplicaInProposedPhase inProposed = (ReplicaInProposedPhase) replicaInPhase;
+        commitPaxos3(inProposed.proposal, consistencyForCommit, true, replicaInPhase.getReplica());
+        // TODO [MPP] Maybe I need to check for some error handling, but in principle it should work.
+
         Tracing.trace("CAS successful");
-        return new BaseReplicaGroupInPhase(replicaGroupInPhase.getReplicaGroup(),
-                                           replicaGroupInPhase.getTransactionState(),
-                                           replicaGroupInPhase.getState(),
-                                           Phase.AFTER_COMMIT_PHASE);
+        BaseReplicaInPhase newInPhase = new BaseReplicaInPhase(replicaInPhase.getTransactionState(),
+                                                                       replicaInPhase.getState(),
+                                                                       replicaInPhase.getReplica(),
+                                                                       null);
+        return new TransitionResultImpl(newInPhase, Phase.AFTER_COMMIT_PHASE, true);
     };
 
     static {
@@ -722,7 +1329,7 @@ public class StorageProxyMpPaxosExtensions
         nextPhaseIs.put(Phase.COMMIT_PHASE, Phase.AFTER_COMMIT_PHASE);
 
         transitionToPhase = new HashMap<>();
-        transitionToPhase.put(Phase.PRE_PREPARE_PHASE, toPrePreparePhaseTransition);
+        transitionToPhase.put(Phase.PRE_PREPARE_PHASE, transitionToPrePrepared);
         transitionToPhase.put(Phase.PREPARE_PHASE, transitionToPrepared);
         transitionToPhase.put(Phase.PROPOSE_PHASE, transitionToProposed);
         transitionToPhase.put(Phase.COMMIT_PHASE, transitionToCommitted);
@@ -733,35 +1340,45 @@ public class StorageProxyMpPaxosExtensions
      * @param toPhase
      * @return transition which moves from {@param fromPhase} to {@param toPhase}
      */
-    public static Transition transitionToPhase(Phase fromPhase, Phase toPhase) {
-        if(fromPhase == Phase.NO_PHASE && toPhase == Phase.PRE_PREPARE_PHASE) {
-            return toPrePreparePhaseTransition;
+    public static TransitionId transitionToPhase(Phase fromPhase, Phase toPhase) {
+        if(fromPhase == toPhase) {
+            return TransitionId.NOOP;
+        }
+        else if(fromPhase == Phase.NO_PHASE && toPhase == Phase.PRE_PREPARE_PHASE) {
+//            return transitionToPrePrepared;
+            return TransitionId.TO_PRE_PREPARED;
         }
         else if (fromPhase == Phase.PRE_PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE) {
-            return transitionToPrepared;
+//            return transitionToPrepared;
+            return TransitionId.TO_PREPARED;
         }
         else if (fromPhase == Phase.PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE) {
-            return transitionToPrepared; // TODO [MPP] This will make replica group refresh its ballot, could be NOOP operation.
+//            return transitionToPrepared; // TODO [MPP] This will make replica group refresh its ballot, could be NOOP operation.
+            return TransitionId.TO_PREPARED;
         }
         else if (fromPhase == Phase.BEGIN_AND_REPAIR_PHASE && toPhase == Phase.PREPARE_PHASE) {
-            return transitionToPreparedFromReparing;
+//            return transitionToPreparedFromReparing;
+            return TransitionId.TO_PREPARED_FROM_REPARING;
         }
         else if (fromPhase == Phase.PREPARE_PHASE && toPhase == Phase.PROPOSE_PHASE) {
-            return transitionToProposed;
+//            return transitionToProposed;
+            return TransitionId.TO_PROPOSED;
         }
         else if (fromPhase == Phase.PROPOSE_PHASE && toPhase == Phase.COMMIT_PHASE) {
-            return transitionToCommitted;
+            return TransitionId.TO_COMMITTED;
+//            return transitionToCommitted;
         }
         else if (toPhase == Phase.PREPARE_PHASE) {
             // ignoring current phase, because it just has to go back couple of phases.
-            return transitionToPrepared;
+            return TransitionId.TO_PREPARED;
+//            return transitionToPrepared;
         }
         else {
             throw new RuntimeException("Unexpected transition required from phase " + fromPhase + " to phase " + toPhase);
         }
     }
 
-    public static Transition findTransition(Phase groupsMinimumPhase, Phase thisGroupPhase) {
+    public static TransitionId findTransition(Phase groupsMinimumPhase, Phase thisGroupPhase) {
         Phase nextCommonPhase = getNextExpectedPhase(groupsMinimumPhase);
         return transitionToPhase(thisGroupPhase, nextCommonPhase);
     }
@@ -1038,6 +1655,20 @@ public class StorageProxyMpPaxosExtensions
 //        }
 
 //        commitPaxosInternal(proposal, shouldHint, shouldBlock, naturalEndpoints, pendingEndpoints, responseHandler);
+    }
+
+    private static void commitPaxos3(MpCommit proposal, ConsistencyLevel consistencyLevel, boolean shouldHint, Replica replica) throws WriteTimeoutException
+    {
+        List<InetAddress> naturalEndpoints = Collections.singletonList(replica.getHost());
+        Collection<InetAddress> pendingEndpoints = Collections.emptyList();
+
+        // TODO [MPP] Ignoring parameter consistencyLevel because commits are done seperately for each replica therefore it has to write with One
+        // TODO [MPP] Need to think whether it is OK to commit multiple times because it will yell that transaction was rolled back on second time
+        AbstractWriteResponseHandler<MpCommit> responseHandler = new MppCommitWriteResponseHandler<>(naturalEndpoints,
+                                                                                                     pendingEndpoints,
+                                                                                                     ConsistencyLevel.ONE, null, null, WriteType.SIMPLE);
+        boolean shouldBlockOverride = true; // TODO [MPP]
+        commitPaxosInternal(proposal, shouldHint, shouldBlockOverride, naturalEndpoints, pendingEndpoints, responseHandler);
     }
 
     private static void commitPaxos2(MpCommit proposal, ConsistencyLevel consistencyLevel, boolean shouldHint, ReplicasGroupAndOwnedItems replicasGroupAndItems) throws WriteTimeoutException

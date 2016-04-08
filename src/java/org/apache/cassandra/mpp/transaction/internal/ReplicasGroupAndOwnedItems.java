@@ -35,6 +35,9 @@ public class ReplicasGroupAndOwnedItems
 
     private final List<TransactionItem> ownedItems;
 
+    /**
+     * It has all Replicas not only those in ReplicasGroup but also others, from other groups.
+     */
     private final Set<Replica> allReplicas;
 
     ReplicasGroupAndOwnedItems(ReplicasGroup replicasGroup, List<TransactionItem> ownedItems, Collection<Replica> allReplicas)
