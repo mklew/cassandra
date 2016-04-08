@@ -579,7 +579,7 @@ public class MppServiceImpl implements MppService
 
     public void storageProxyExtAddToWaitUntilAfterPrePrepared(String ... transactionIds)
     {
-        StorageProxyMpPaxosExtensions.addToWaitUntilAfterPrePrepared(Stream.of(transactionIds).map(UUID::fromString).collect(Collectors.toList()));
+        // TODO [MPP] Maybe delete it. Not used any more.
     }
 
     Queue<String> listOfCommittedTransactions = new ConcurrentLinkedQueue<>();
