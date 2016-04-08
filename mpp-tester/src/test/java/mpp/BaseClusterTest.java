@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -39,6 +41,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.MppTestingUtilities;
+import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.tools.NodeProbe;
@@ -58,9 +61,13 @@ public abstract class BaseClusterTest
 
     private NodeProbe nodeProbe3;
 
-    protected static TransactionState beginTransaction(Session session)
+    Queue<TransactionId> beganTransactions;
+
+    protected TransactionState beginTransaction(Session session)
     {
-        return MppTestingUtilities.mapResultToTransactionState(session.execute("START TRANSACTION"));
+        TransactionState transactionState = MppTestingUtilities.mapResultToTransactionState(session.execute("START TRANSACTION"));
+        beganTransactions.add(transactionState.id());
+        return transactionState;
     }
 
     private Collection<Session> sessionsOpended;
@@ -134,6 +141,10 @@ public abstract class BaseClusterTest
         sessionsOpended = new ArrayList<>();
     }
 
+    @Before
+    public void resetStartedTransactions() {
+        beganTransactions = new ConcurrentLinkedQueue<>();
+    }
 
     @After
     public void afterTest() {

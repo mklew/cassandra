@@ -464,6 +464,15 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         allResults.thenAccept(results -> {
             List<ReplicaTransactionsSummary> summaries = getSummaryOfTransactionsPerReplica();
+
+            List<TransactionId> allTransactionsSeenByReplicas = getAllTransactionIdsSeenByReplicas(summaries);
+            List<TransactionId> beganTransactions = this.beganTransactions.stream().collect(toList());
+            if(!areTransactionListsEqual(allTransactionsSeenByReplicas, beganTransactions)) {
+                System.out.println("ERROR ! ! ! Replicas have seen different number of transactions than began ones. Began transactions count " + beganTransactions.size() + ", but replicas have seen " + allTransactionsSeenByReplicas.size() + " transactions");
+                List<TransactionId> difference = findDifference(allTransactionsSeenByReplicas, beganTransactions);
+                System.out.println("Replicas have seen extra transactions: " + difference);
+            }
+
             checkThatReplicasAgreeAboutCommittedAndRolledBackTransactions(summaries);
             // From results of executors
             List<TransactionId> committedTransactions = getCommittedTransactionIdsFromResults(results);
@@ -514,7 +523,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                         ResultSet counterQueryResult = anySession.execute(statement);
                         int actualCounterValue = counterQueryResult.one().getInt(columnName);
 
-                        String msg = String.format("Expecting counter with ID %s from table %s.%s to have counter column %s with counter %s, actual count is: %s",
+                        String msg = String.format("Expecting counter with ID %s from table %s.%s to have counter column %s with count=%s, actual count=%s",
                                                       expectedCounterCount.counterId,
                                                       expectedCounterCount.keyspace,
                                                       expectedCounterCount.table,
