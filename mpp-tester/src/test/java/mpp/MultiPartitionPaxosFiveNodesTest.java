@@ -32,6 +32,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -46,6 +47,8 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.utils.UUIDs;
 import junit.framework.Assert;
+import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.utils.Pair;
@@ -283,11 +286,17 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         private final List<CounterExpectedResult> expectedCounts;
 
+        private final List<TransactionId> committed;
 
-        private CounterExecutorResults(String resultsFromExecutorName, List<CounterExpectedResult> expectedCounts)
+        private final List<TransactionId> rolledBack;
+
+        private CounterExecutorResults(String resultsFromExecutorName, List<CounterExpectedResult> expectedCounts,
+                                       List<TransactionId> committed, List<TransactionId> rolledBack)
         {
             this.resultsFromExecutorName = resultsFromExecutorName;
             this.expectedCounts = expectedCounts;
+            this.committed = committed;
+            this.rolledBack = rolledBack;
         }
     }
 
@@ -316,12 +325,19 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         final int iterationNumber;
         final boolean successfullyCommitted;
         final List<IncrementOf> incrementOfs;
+        final TransactionId txId;
 
-        private IterationResult(int iterationNumber, boolean successfullyCommitted, List<IncrementOf> incrementOfs)
+        private IterationResult(int iterationNumber, TransactionId id, boolean successfullyCommitted, List<IncrementOf> incrementOfs)
         {
             this.iterationNumber = iterationNumber;
+            this.txId = id;
             this.successfullyCommitted = successfullyCommitted;
             this.incrementOfs = incrementOfs;
+        }
+
+        public TransactionId getTxId()
+        {
+            return txId;
         }
     }
 
@@ -404,6 +420,19 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     }
 
 
+    public static boolean areTransactionListsEqual(List<TransactionId> l1, List<TransactionId> l2) {
+        List<String> l1strs = l1.stream().map(txId -> txId.toString()).sorted().collect(toList());
+        List<String> l2strs = l2.stream().map(txId -> txId.toString()).sorted().collect(toList());
+        return l1strs.equals(l2strs);
+    }
+
+    /**
+     *  @return transactions that are in l1, but not in l2
+     */
+    public static List<TransactionId> findDifference(List<TransactionId> l1, List<TransactionId> l2) {
+        return l1.stream().filter(tx -> !l2.contains(tx)).collect(toList());
+    }
+
     @Test
     public void runTestUsingCounters() throws Throwable {
         int iterations = 3;
@@ -413,6 +442,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         // reset counters & refresh counters
         Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
 
+        // TODO [MPP] Modify number of counter executors
         List<CounterColumnIncrementerExecutor> counterExecutors = createCounterExecutors(iterations, counters);
 
         ExecutorService executorService = Executors.newFixedThreadPool(counterExecutors.size());
@@ -425,10 +455,43 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         CompletableFuture<List<CounterExecutorResults>> allResults = sequence(futureResults);
 
+        // Acutal execution on seperate thead pool
         counterExecutors.forEach(counterExecutor -> executorService.execute(counterExecutor));
 
         allResults.thenAccept(results -> {
             displaySummaryOfCommits();
+        });
+
+        allResults.thenAccept(results -> {
+            List<ReplicaTransactionsSummary> summaries = getSummaryOfTransactionsPerReplica();
+            checkThatReplicasAgreeAboutCommittedAndRolledBackTransactions(summaries);
+            // From results of executors
+            List<TransactionId> committedTransactions = getCommittedTransactionIdsFromResults(results);
+            List<TransactionId> rolledBackTransactions = getRolledBackTransactionIdsFromResults(results);
+
+            // Actual recorded results from replicas. It assumes that results are converged
+            List<TransactionId> actuallyCommitted = getCommittedTransactionsAccordingToReplicas(summaries);
+            List<TransactionId> actuallyRolledBack = getRolledBackTransactionsAccordingToReplicas(summaries);
+
+            if(!areTransactionListsEqual(actuallyCommitted, committedTransactions)) {
+                System.out.println("ERROR ! ! ! Executors do not have same results as actual results about committed transactions");
+
+                List<TransactionId> transactionsCommittedButNotSeenByExecutors = findDifference(actuallyCommitted, committedTransactions);
+                System.out.println("Transactions committed but not seen by executors: " + transactionsCommittedButNotSeenByExecutors);
+            }
+            else {
+                System.out.println("Executors and replicas agree on committed transactions");
+            }
+
+            if(!areTransactionListsEqual(actuallyRolledBack, rolledBackTransactions)) {
+                System.out.println("ERROR ! ! ! Executors do not have same results as actual results about rolled back transactions");
+
+                List<TransactionId> transactionsRolledBackButNotSeenByExecutors = findDifference(actuallyRolledBack, rolledBackTransactions);
+                System.out.println("Transactions rolled back but not seen by executors: " + transactionsRolledBackButNotSeenByExecutors);
+            }
+            else {
+                System.out.println("Executors and replicas agree on rolledback transactions");
+            }
         });
 
         allResults.thenAccept(results -> {
@@ -467,6 +530,16 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         }).get();
 
         executorService.awaitTermination(Math.max(5,(int)(iterations * 1.5)), TimeUnit.SECONDS);
+    }
+
+    private List<TransactionId> getCommittedTransactionIdsFromResults(List<CounterExecutorResults> results)
+    {
+        return results.stream().flatMap(r -> r.committed.stream()).distinct().collect(toList());
+    }
+
+    private List<TransactionId> getRolledBackTransactionIdsFromResults(List<CounterExecutorResults> results)
+    {
+        return results.stream().flatMap(r -> r.rolledBack.stream()).distinct().collect(toList());
     }
 
     public static Collection<CounterAndItsTable> persistInitialCounterValues(Session session, Collection<CounterAndItsTable> counters) {
@@ -544,7 +617,11 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                                                                                     iterationResult.incrementOfs.stream().map(incrementOf -> new CounterExpectedResult(incrementOf.keyspace, incrementOf.table, incrementOf.counterId, incrementOf.column, 1))
             ).collect(Collectors.groupingBy(CounterKey::fromResult, Collectors.reducing(CounterExpectedResult::merge))).values().stream().map(Optional::get).collect(toList());
 
-            return new CounterExecutorResults(name, counterExpectedResults);
+            List<TransactionId> successfullyCommittedTransactionsAccordingToExecutor = iterationResults.stream().filter(ir -> ir.successfullyCommitted).map(IterationResult::getTxId).collect(toList());
+            List<TransactionId> rolledBackTransactionsAccordingToExecutor = iterationResults.stream().filter(ir -> !ir.successfullyCommitted).map(IterationResult::getTxId).collect(toList());
+
+
+            return new CounterExecutorResults(name, counterExpectedResults, successfullyCommittedTransactionsAccordingToExecutor, rolledBackTransactionsAccordingToExecutor);
         }
 
         protected Collection<CounterAndItsTable> getCounters()
@@ -696,10 +773,10 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         protected IterationResult toIterationResult(TransactionState transactionState, IterationExpectations expectations, boolean successfullyCommitted, Session session, int iteration)
         {
             if(successfullyCommitted) {
-                return new IterationResult(iteration, successfullyCommitted, expectations.incrementOfs);
+                return new IterationResult(iteration, transactionState.id(), successfullyCommitted, expectations.incrementOfs);
             }
             else {
-                return new IterationResult(iteration, successfullyCommitted, Collections.emptyList());
+                return new IterationResult(iteration, transactionState.id(), successfullyCommitted, Collections.emptyList());
             }
         }
 
@@ -749,6 +826,157 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     @Before
     public void clearListsOfCommittedAndRolledBack() {
         getNodeProbesStream().forEach(nodeProbe -> nodeProbe.getMppProxy().clearLists());
+    }
+
+    private static class ReplicaTransactionsSummary {
+        private final String replicaName;
+
+        private final List<TransactionId> committed;
+
+        private final List<TransactionId> rolledBack;
+
+        public ReplicaTransactionsSummary(String replicaName, List<TransactionId> committed, List<TransactionId> rolledBack)
+        {
+            this.replicaName = replicaName;
+            this.committed = committed;
+            this.rolledBack = rolledBack;
+        }
+
+        public static ReplicaTransactionsSummary create(String replicaName, List<String> committed, List<String> rolledBack)
+        {
+            return new ReplicaTransactionsSummary(replicaName, transformToTransactionIds(committed), transformToTransactionIds(rolledBack));
+        }
+
+        public static List<TransactionId> transformToTransactionIds(List<String> strings) {
+            return strings.stream().map(s -> (TransactionId)new TransactionTimeUUID(UUID.fromString(s))).collect(toList());
+        }
+    }
+
+    public static class ReplicaTransactionConverganceResult {
+        private final String replicaName;
+
+        private final TransactionId transactionId;
+
+        private final boolean committed;
+
+        public ReplicaTransactionConverganceResult(String replicaName, TransactionId transactionId, boolean committed)
+        {
+            this.replicaName = replicaName;
+            this.transactionId = transactionId;
+            this.committed = committed;
+        }
+    }
+
+    public List<TransactionId> getCommittedTransactionsAccordingToReplicas(List<ReplicaTransactionsSummary> summaries) {
+        return getTransactionsAccordingToReplicas(summaries, true);
+    }
+
+    public List<TransactionId> getRolledBackTransactionsAccordingToReplicas(List<ReplicaTransactionsSummary> summaries) {
+        return getTransactionsAccordingToReplicas(summaries, false);
+    }
+
+    public List<TransactionId> getTransactionsAccordingToReplicas(List<ReplicaTransactionsSummary> summaries, boolean committed) {
+        List<TransactionId> allTransactionsSeenByReplicas = getAllTransactionIdsSeenByReplicas(summaries);
+        return allTransactionsSeenByReplicas.stream().map(transactionId -> {
+            List<Optional<ReplicaTransactionConverganceResult>> results = summaries.stream().map(getReplicaConverganceResult(transactionId)).collect(toList());
+
+            List<ReplicaTransactionConverganceResult> replicaConverganceResults = results.stream().filter(Optional::isPresent).map(Optional::get).collect(toList());
+            Assert.assertEquals(1, replicaConverganceResults.stream().map(r -> r.committed).distinct().count());
+
+            ReplicaTransactionConverganceResult converganceResult = replicaConverganceResults.iterator().next();
+            if (converganceResult.committed == committed)
+            {
+                return Optional.of(converganceResult.transactionId);
+            }
+            else
+            {
+                return Optional.<TransactionId>empty();
+            }
+        }).filter(Optional::isPresent).map(Optional::get).collect(toList());
+    }
+
+    public void checkThatReplicasAgreeAboutCommittedAndRolledBackTransactions(List<ReplicaTransactionsSummary> summaries) {
+        List<TransactionId> allTransactionsSeenByReplicas = getAllTransactionIdsSeenByReplicas(summaries);
+        System.out.println("Replicas have seen " + allTransactionsSeenByReplicas.size() + " transactions");
+
+        // Each transaction ID should be either COMMITTED or ROLLED back. Never both.
+        Optional<String> maybeDisconvergence = allTransactionsSeenByReplicas.stream().map(transactionId -> {
+            List<Optional<ReplicaTransactionConverganceResult>> results = summaries.stream().map(getReplicaConverganceResult(transactionId)).collect(toList());
+
+            List<ReplicaTransactionConverganceResult> replicaConverganceResults = results.stream().filter(Optional::isPresent).map(Optional::get).collect(toList());
+
+            Assert.assertTrue("Tx " + transactionId + " should have some convergance results", !replicaConverganceResults.isEmpty());
+
+
+            long count = replicaConverganceResults.stream().map(r -> r.committed).distinct().count();
+            if (count != 1)
+            {
+                // Some replicas didn't converge on status of that transaction ID.
+
+                List<String> replicasThatThinkTxCommitted = replicaConverganceResults.stream().filter(r -> r.committed).map(r -> r.replicaName).collect(toList());
+                List<String> replicasThatThinkTxRolledBack = replicaConverganceResults.stream().filter(r -> !r.committed).map(r -> r.replicaName).collect(toList());
+
+                String msg = String.format("There is disconvergence for transaction %s. Committed by: %s Rolled back by: %s", transactionId.unwrap().toString(),
+                                           replicasThatThinkTxCommitted,
+                                           replicasThatThinkTxRolledBack);
+                return Optional.of(msg);
+            }
+            else
+            {
+                return Optional.<String>empty();
+            }
+        }).filter(Optional::isPresent).map(Optional::get).reduce(String::concat);
+
+        Assert.assertTrue(maybeDisconvergence.orElse(""), !maybeDisconvergence.isPresent());
+        if(!maybeDisconvergence.isPresent()) {
+            System.out.println("Replicas agree on state of transactions");
+        }
+    }
+
+    private Function<ReplicaTransactionsSummary, Optional<ReplicaTransactionConverganceResult>> getReplicaConverganceResult(TransactionId transactionId)
+    {
+        return summary -> {
+            boolean committedInReplica = summary.committed.contains(transactionId);
+            boolean rolledBackInReplica = summary.rolledBack.contains(transactionId);
+
+            // If not committed nor rolled back then it is fine
+            if (!committedInReplica && !rolledBackInReplica)
+            {
+                return Optional.<ReplicaTransactionConverganceResult>empty();
+            }
+            else if (committedInReplica && !rolledBackInReplica)
+            {
+                // was committed
+                return Optional.of(new ReplicaTransactionConverganceResult(summary.replicaName, transactionId, true));
+            }
+            else if (!committedInReplica && rolledBackInReplica)
+            {
+                // was rolled back
+                return Optional.of(new ReplicaTransactionConverganceResult(summary.replicaName, transactionId, false));
+            }
+            else
+            {
+                throw new RuntimeException("Unexpected condition in replicas transaction status convergence check");
+            }
+        };
+    }
+
+    private List<TransactionId> getAllTransactionIdsSeenByReplicas(List<ReplicaTransactionsSummary> summaries)
+    {
+        return summaries.stream().flatMap(summary -> {
+            return Stream.concat(summary.committed.stream(), summary.rolledBack.stream());
+        }).distinct().collect(toList());
+    }
+
+    private List<ReplicaTransactionsSummary> getSummaryOfTransactionsPerReplica()
+    {
+        return getNodeProbesNamedStream().map(namedProbe -> {
+            NodeProbe nodeProbe = namedProbe.nodeProbe;
+            String [] committed1 = nodeProbe.getMppProxy().listOfCommittedTransactions();
+            List<String> committed = getListOf(committed1);
+            List<String> rolledBack = getListOf(nodeProbe.getMppProxy().listOfRolledBackTransactions());
+            return ReplicaTransactionsSummary.create(namedProbe.name, committed, rolledBack);
+        }).collect(toList());
     }
 
     private void displaySummaryOfCommits()
