@@ -216,11 +216,11 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
         UUID tx1Id = tx1.getTransactionId();
         UUID tx2Id = tx2.getTransactionId();
         // Wait for them in multi partition paxos, allow them to proceed when both of them are registered in index.
-        getNodeProbesStream().forEach(nodeProbe -> {
-            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(tx1Id.toString(), tx2Id.toString());
-        });
-
-        // 2. Transactions modify same piece of data.
+//        getNodeProbesStream().forEach(nodeProbe -> {
+//            nodeProbe.getMppProxy().storageProxyExtAddToWaitUntilAfterPrePrepared(tx1Id.toString(), tx2Id.toString());
+//        });
+//
+//        // 2. Transactions modify same piece of data.
         MppTestSchemaHelpers.Item itemForTx1 = item.copyWithDescription("tx 1 description");
 
         MppTestSchemaHelpers.Item itemForTx2 = item.copyWithPrice("tx 2 price");
@@ -279,7 +279,7 @@ public class MultiPartitionPaxosTest extends BaseClusterTest
             }
         }, executor);
 
-        Thread.sleep(10000);
+        Thread.sleep(5000);
         MppTestSchemaHelpers.Item foundItem = MppTestSchemaHelpers.Item.findItemById(item.itemId, sessionN1);
 
         System.out.println("Item is: " + foundItem);

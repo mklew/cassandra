@@ -159,6 +159,14 @@ public class MppTestSchemaHelpers
             SimpleStatement simpleStatement = new SimpleStatement("INSERT INTO mpptest.items (item_id, item_description, price) values (?, ?, ?)", item.itemId, item.description, item.price);
             simpleStatement.setConsistencyLevel(ConsistencyLevel.QUORUM);
             session.execute(simpleStatement);
+            try
+            {
+                Thread.sleep(100);
+            }
+            catch (InterruptedException e)
+            {
+                e.printStackTrace();
+            }
             return findItemById(item.itemId, session);
         }
 

@@ -22,6 +22,7 @@ import java.net.InetAddress;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +32,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -106,14 +109,67 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
+    public static class CommonStateHolder {
+        private final Set<TransactionId> acquiredTransactionIdsForRepair = new HashSet<>();
+
+        private final Set<TransactionId> transactionIdsForWhichRepairCompleted = new HashSet<>();
+
+        private final Lock lock = new ReentrantLock();
+
+        boolean acquireTransactionForRepair(TransactionId txId) {
+            lock.lock();
+            try {
+                if(transactionIdsForWhichRepairCompleted.contains(txId)) {
+                    // Transaction was already repaired and repair finished.
+                    return false;
+                }
+                if(acquiredTransactionIdsForRepair.contains(txId)) {
+                    // Transaction TxID was already acquired by someone else.
+                    return false;
+                }
+                else {
+                    acquiredTransactionIdsForRepair.add(txId);
+                    return true;
+                }
+
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        void transactionWithIdHasDoneRepairing(TransactionId txId) {
+            lock.lock();
+            try {
+                Preconditions.checkState(!transactionIdsForWhichRepairCompleted.contains(txId), "Apparently this transaction was already repaired by some one else, but it should be only acquired by single executor");
+                transactionIdsForWhichRepairCompleted.add(txId);
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+
+        boolean wasAlreadyRepaired(TransactionId txId) {
+            lock.lock();
+            try {
+                return transactionIdsForWhichRepairCompleted.contains(txId);
+            }
+            finally {
+                lock.unlock();
+            }
+        }
+    }
+
     public static class ReplicaInPhaseHolder
     {
         private ReplicaInPhase replicaInPhase;
         private TransitionResult transitionResult;
+        private CommonStateHolder commonState;
 
-        public ReplicaInPhaseHolder(ReplicaInPhase replicaInPhase)
+        public ReplicaInPhaseHolder(ReplicaInPhase replicaInPhase, CommonStateHolder commonState)
         {
             this.replicaInPhase = replicaInPhase;
+            this.commonState = commonState;
         }
 
         public ReplicaInPhase getReplicaInPhase()
@@ -134,6 +190,11 @@ public class StorageProxyMpPaxosExtensions
         public TransitionResult getTransitionResult()
         {
             return transitionResult;
+        }
+
+        public CommonStateHolder getCommonState()
+        {
+            return commonState;
         }
     }
 
@@ -553,6 +614,24 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
+    public static class ReplicaWaitsTillRepairIsDone extends ReplicaInPreparedPhase
+    {
+        private final TransactionId waitTillThisRepairIsDone;
+
+        protected ReplicaWaitsTillRepairIsDone(TransactionState transactionState,
+                                                   ClientState state,
+                                                   Replica replica,
+                                                   Optional<MpPaxosId> paxosId,
+                                                   MpPrepareCallback summary,
+                                                   UUID ballot,
+                                                   boolean timeOutProposalIfPartialResponses,
+                                                   TransactionId waitTillThisRepairIsDone)
+        {
+            super(transactionState, state, replica, paxosId, summary, ballot, timeOutProposalIfPartialResponses);
+            this.waitTillThisRepairIsDone = waitTillThisRepairIsDone;
+        }
+    }
+
     enum TransitionId
     {
         NOOP, TO_PRE_PREPARED, TO_PREPARED, TO_PROPOSED, TO_COMMITTED, TO_PREPARED_FROM_REPARING,
@@ -627,8 +706,9 @@ public class StorageProxyMpPaxosExtensions
     {
         Phase noPhase = Phase.NO_PHASE;
         Collection<Replica> allReplicas = replicaGroups.iterator().next().getAllReplicas();
+        CommonStateHolder commonState = new CommonStateHolder();
         allReplicas.forEach(replica -> {
-            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new BaseReplicaInPhase(transactionState, state, replica, noPhase));
+            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new BaseReplicaInPhase(transactionState, state, replica, noPhase), commonState);
             replica.setHolder(holder);
         });
         logger.debug("createMultiPartitionPaxosPhaseExecutor replicaGroups {}. TransactionState is {}", replicaGroups, transactionState);
@@ -648,10 +728,10 @@ public class StorageProxyMpPaxosExtensions
         logger.debug("createRepairInProgressPaxosExecutor for TxId {} using ballot {}", inProgressTransactionState.getTransactionId(), ballot);
         List<ReplicasGroupAndOwnedItems> replicasGroupAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(inProgressTransactionState);
         Map<InetAddress, Optional<MpPaxosId>> responsesByReplica = Collections.emptyMap(); // TODO [MPP] Maybe it will work.
-
+        CommonStateHolder commonState = new CommonStateHolder();
         Collection<Replica> allReplicas = replicasGroupAndOwnedItems.iterator().next().getAllReplicas();
         allReplicas.forEach(replica -> {
-            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new ReplicaInPreparedPhase(inProgressTransactionState, state, replica, Optional.empty(), null, ballot, false));
+            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new ReplicaInPreparedPhase(inProgressTransactionState, state, replica, Optional.empty(), null, ballot, false), commonState);
             replica.setHolder(holder);
         });
 
@@ -873,54 +953,79 @@ public class StorageProxyMpPaxosExtensions
 
             logger.debug("PreparePaxos. Ballot {} was accepted by replica {} TxId {}", ballot, inPhase.getReplica().getHostAddress(), inPhase.getTransactionState().getTransactionId());
 
-            if (inProgressNeedsToBeCompleted(inProgress, mostRecent) && !wasAlreadyRepaired(inPhase, inProgress) && !inProgressIsSelf(inPhase.getTransactionState(), inProgress.update))
+            if (inProgressNeedsToBeCompleted(inProgress, mostRecent) &&
+                !inProgressIsSelf(inPhase.getTransactionState(), inProgress.update) &&
+                !wasAlreadyRepaired(inPhase, inProgress))
             {
-                logger.debug("PreparePaxos. Found in progress proposal that needs to be completed. Proposal for TxId {}. TxId {}", inProgress.update.getTransactionId(), inPhase.getTransactionState().getTransactionId());
-                // This in progress transaction can be also for different replicas,
-                // therefore process needs to start over for that transaction.
-                // but the assumption is
-                // that in progress transaction was already in pre prepared phase,
-                // otherwise we wouldn't see it as in progress
-                //
-                // Therefore I need to nest multipartition paxos and initialize it, but jump to proposal phase.
-                // So I need to know for that new transaction:
-                // - replica groups - OK - from ForEachReplicaGroupOperations
-                // - transaction state - OK - from `inProgress`
-                // - client state - RATHER OK - I can only pass what I already have.
-                // - responses by replica - More less OK - works with empty, because it is not used later
-                // - summary - OK - I just got it
-                // - liveEndpoints - OK - I can find it.
-                // - requiredParticipants - OK
-                // - ballot - OK
 
-                ReplicaGroupsPhaseExecutor repairInProgressPaxosExecutor = createRepairInProgressPaxosExecutor(inProgress.update, inPhase.getState(), ballot);
-                // TODO [MPP] Run it in background ?
-                // TODO [MPP] tryToExecute must return some sensible result, or future.
+                if(inPhase.getReplica().getReplicaInPhaseHolder().getCommonState().acquireTransactionForRepair(inProgress.update.id())) {
+                    // This Replica acquired transaction to repair
+                    logger.debug("PreparePaxos. Found in progress proposal that needs to be completed. Proposal for TxId {}. TxId {}", inProgress.update.getTransactionId(), inPhase.getTransactionState().getTransactionId());
+                    logger.debug("PreparePaoxs. Replica {} and TxId {} has found in progress transaction {} and acquired it for repair.",
+                                 inPhase.getReplica().getHostAddress(), inPhase.getTransactionState().getTransactionId(),
+                                 inProgress.update.getTransactionId());
+                    // This in progress transaction can be also for different replicas,
+                    // therefore process needs to start over for that transaction.
+                    // but the assumption is
+                    // that in progress transaction was already in pre prepared phase,
+                    // otherwise we wouldn't see it as in progress
+                    //
+                    // Therefore I need to nest multipartition paxos and initialize it, but jump to proposal phase.
+                    // So I need to know for that new transaction:
+                    // - replica groups - OK - from ForEachReplicaGroupOperations
+                    // - transaction state - OK - from `inProgress`
+                    // - client state - RATHER OK - I can only pass what I already have.
+                    // - responses by replica - More less OK - works with empty, because it is not used later
+                    // - summary - OK - I just got it
+                    // - liveEndpoints - OK - I can find it.
+                    // - requiredParticipants - OK
+                    // - ballot - OK
 
-                // TODO [MPP] This Stage is incorrect, but I probably don't care.
-                CompletableFuture<?> futureWhenRepairIsDone = StorageProxy.performLocally(() -> {
-                    repairInProgressPaxosExecutor.tryToExecute();
-                });
+                    ReplicaGroupsPhaseExecutor repairInProgressPaxosExecutor = createRepairInProgressPaxosExecutor(inProgress.update, inPhase.getState(), ballot);
+                    // TODO [MPP] Run it in background ?
+                    // TODO [MPP] tryToExecute must return some sensible result, or future.
 
-                ReplicaInReparingInProgressPhase repairing = new ReplicaInReparingInProgressPhase(inPhase.getTransactionState(),
-                                                                                                  inPhase.getState(),
-                                                                                                  inPhase.getReplica(),
-                                                                                                  inPhase.getPaxosId(),
-                                                                                                  summary,
-                                                                                                  ballot, true,
-                                                                                                  repairInProgressPaxosExecutor);
+                    // TODO [MPP] This Stage is incorrect, but I probably don't care.
+                    CompletableFuture<?> futureWhenRepairIsDone = StorageProxy.performLocally(() -> {
+                        repairInProgressPaxosExecutor.tryToExecute();
+                    });
 
-                futureWhenRepairIsDone.handleAsync((smth, ex) -> {
-                    logger.debug("Nested in progress repair has completed with smth {} ex {}", String.valueOf(smth), String.valueOf(ex));
-                    if (repairing.repairInProgressPaxosExecutor.equals(repairInProgressPaxosExecutor))
-                    {
-                        logger.debug("Marking replicaGroupInReparingInProgressPhase as done");
-                        repairing.isRepairDone = true;
-                    }
-                    return null;
-                });
+                    ReplicaInReparingInProgressPhase repairing = new ReplicaInReparingInProgressPhase(inPhase.getTransactionState(),
+                                                                                                      inPhase.getState(),
+                                                                                                      inPhase.getReplica(),
+                                                                                                      inPhase.getPaxosId(),
+                                                                                                      summary,
+                                                                                                      ballot, true,
+                                                                                                      repairInProgressPaxosExecutor);
 
-                return new TransitionResultImpl(repairing, Phase.BEGIN_AND_REPAIR_PHASE, false);
+                    CommonStateHolder commonState = inPhase.getReplica().getReplicaInPhaseHolder().getCommonState();
+                    TransactionId inProgressTransactionIdToRepair = inProgress.update.id();
+
+                    futureWhenRepairIsDone.handleAsync((smth, ex) -> {
+                        logger.debug("Nested in progress repair in execution of TxId {} has completed with smth {} ex {}", inPhase.getTransactionState().getTransactionId(), String.valueOf(smth), String.valueOf(ex));
+                        commonState.transactionWithIdHasDoneRepairing(inProgressTransactionIdToRepair);
+                        if (repairing.repairInProgressPaxosExecutor.equals(repairInProgressPaxosExecutor))
+                        {
+                            logger.debug("Marking replicaGroupInReparingInProgressPhase as done");
+                            repairing.isRepairDone = true;
+                        }
+                        return null;
+                    });
+
+                    return new TransitionResultImpl(repairing, Phase.BEGIN_AND_REPAIR_PHASE, false);
+                }
+                else {
+                    // It knows that it has to wait for repair of transaction.
+                    ReplicaWaitsTillRepairIsDone waitsForRepairOfTx = new ReplicaWaitsTillRepairIsDone(inPhase.getTransactionState(),
+                                                     inPhase.getState(),
+                                                     inPhase.getReplica(),
+                                                     inPhase.getPaxosId(),
+                                                     summary,
+                                                     ballot, true,
+                                                     inProgress.update.id());
+                    return new TransitionResultImpl(waitsForRepairOfTx, Phase.BEGIN_AND_REPAIR_PHASE, false);
+                }
+
             }
             else
             {
@@ -945,41 +1050,61 @@ public class StorageProxyMpPaxosExtensions
 
     private static boolean wasAlreadyRepaired(ReplicaInPrePreparedPhase inPhase, MpCommit inProgress)
     {
-        if (ReplicaInPreparedPhase.class.isInstance(inPhase))
-        {
-            ReplicaInPreparedPhase inPreparedPhaseMaybeAfterRepair = (ReplicaInPreparedPhase) inPhase;
-            return inPreparedPhaseMaybeAfterRepair.txRepairedAlready.isPresent() &&
-                   inPreparedPhaseMaybeAfterRepair.txRepairedAlready.get().equals(inProgress.update.id());
-        }
-        else
-        {
-            return false;
-        }
+        return inPhase.getReplica().getReplicaInPhaseHolder().getCommonState().wasAlreadyRepaired(inProgress.update.id());
+
+//        if (ReplicaInPreparedPhase.class.isInstance(inPhase))
+//        {
+//            ReplicaInPreparedPhase inPreparedPhaseMaybeAfterRepair = (ReplicaInPreparedPhase) inPhase;
+//            return inPreparedPhaseMaybeAfterRepair.txRepairedAlready.isPresent() &&
+//                   inPreparedPhaseMaybeAfterRepair.txRepairedAlready.get().equals(inProgress.update.id());
+//        }
+//        else
+//        {
+//            return false;
+//        }
     }
 
     public static Transition transitionToPreparedFromReparing = replicaInPhase -> {
         // It just waits until nested repair is done.
-        ReplicaInReparingInProgressPhase inPhase = (ReplicaInReparingInProgressPhase) replicaInPhase;
-        if (inPhase.isRepairDone)
-        {
-            ReplicaInPhase otherReplicaInPhase = inPhase.repairInProgressPaxosExecutor.replicas.stream().filter(otherReplica -> otherReplica.equals(replicaInPhase.getReplica()))
-                                                                                               .findFirst().map(r -> r.getReplicaInPhaseHolder().getReplicaInPhase()).get();
 
-            ReplicaInPreparedPhase otherInPrepared = (ReplicaInPreparedPhase) otherReplicaInPhase;
+        if(ReplicaInReparingInProgressPhase.class.isInstance(replicaInPhase)) {
+            ReplicaInReparingInProgressPhase inPhase = (ReplicaInReparingInProgressPhase) replicaInPhase;
+            if (inPhase.isRepairDone)
+            {
+                ReplicaInPhase otherReplicaInPhase = inPhase.repairInProgressPaxosExecutor.replicas.stream().filter(otherReplica -> otherReplica.equals(replicaInPhase.getReplica()))
+                                                                                                   .findFirst().map(r -> r.getReplicaInPhaseHolder().getReplicaInPhase()).get();
 
-            ReplicaInPreparedPhase newInPhase = new ReplicaInPreparedPhase(
-                                                                          inPhase.getTransactionState(),
-                                                                          inPhase.getState(),
-                                                                          inPhase.getReplica(),
-                                                                          inPhase.getPaxosId(),
-                                                                          inPhase.summary,
-                                                                          otherInPrepared.ballot, true,
-                                                                          Optional.of(otherInPrepared.getTransactionState().id()));
-            return new TransitionResultImpl(newInPhase, Phase.PREPARE_PHASE, true);
+                ReplicaInPreparedPhase otherInPrepared = (ReplicaInPreparedPhase) otherReplicaInPhase;
+
+                ReplicaInPreparedPhase newInPhase = new ReplicaInPreparedPhase(
+                                                                              inPhase.getTransactionState(),
+                                                                              inPhase.getState(),
+                                                                              inPhase.getReplica(),
+                                                                              inPhase.getPaxosId(),
+                                                                              inPhase.summary,
+                                                                              otherInPrepared.ballot, true,
+                                                                              Optional.of(otherInPrepared.getTransactionState().id()));
+                return new TransitionResultImpl(newInPhase, Phase.PREPARE_PHASE, true);
+            }
+            else
+            {
+                return new TransitionResultImpl(inPhase, Phase.BEGIN_AND_REPAIR_PHASE, false);
+            }
         }
-        else
-        {
-            return new TransitionResultImpl(inPhase, Phase.BEGIN_AND_REPAIR_PHASE, false);
+        else if(ReplicaWaitsTillRepairIsDone.class.isInstance(replicaInPhase)) {
+            ReplicaWaitsTillRepairIsDone waitTill = (ReplicaWaitsTillRepairIsDone) replicaInPhase;
+            boolean success = waitTill.getReplica().getReplicaInPhaseHolder().getCommonState().wasAlreadyRepaired(waitTill.waitTillThisRepairIsDone);
+            if(success) {
+                return new TransitionResultImpl(waitTill, Phase.PREPARE_PHASE, true);
+            }
+            else {
+                return new TransitionResultImpl(waitTill, Phase.BEGIN_AND_REPAIR_PHASE, false);
+            }
+
+        }
+        else {
+            // Other replicas made this one, transition into this phase, it should be at least prepared
+            return new TransitionResultImpl(replicaInPhase, Phase.PREPARE_PHASE, true);
         }
     };
 
@@ -1015,6 +1140,7 @@ public class StorageProxyMpPaxosExtensions
                                               proposal);
         }
     }
+
 
     /**
      * Can transition to 'proposed', only from 'prepared'.
@@ -1059,11 +1185,11 @@ public class StorageProxyMpPaxosExtensions
         // TODO [MPP] Maybe I need to check for some error handling, but in principle it should work.
 
         Tracing.trace("CAS successful");
-        BaseReplicaInPhase newInPhase = new BaseReplicaInPhase(replicaInPhase.getTransactionState(),
-                                                               replicaInPhase.getState(),
-                                                               replicaInPhase.getReplica(),
-                                                               null);
-        return new TransitionResultImpl(newInPhase, Phase.AFTER_COMMIT_PHASE, true);
+//        BaseReplicaInPhase newInPhase = new BaseReplicaInPhase(replicaInPhase.getTransactionState(),
+//                                                               replicaInPhase.getState(),
+//                                                               replicaInPhase.getReplica(),
+//                                                               null);
+        return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true);
     };
 
     static
