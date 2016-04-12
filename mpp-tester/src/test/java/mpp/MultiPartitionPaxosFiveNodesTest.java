@@ -26,9 +26,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -381,11 +381,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     static final String ks2NamedCounter1_2 = "other counter 2";
 
     public static Collection<CounterAndItsTable> createSampleOfNamedCounters() {
-        CountersSchemaHelpers.NamedCounterData counterData = MppCountersTestSchema.countersNamedCounter1.createCounterData(ks1NamedCounter1_1);
-        CountersSchemaHelpers.NamedCounterData counterData2 = MppCountersTestSchema.countersNamedCounter1.createCounterData(ks1NamedCounter1_2);
-        CountersSchemaHelpers.NamedCounterData counterData3 = MppCountersTestSchema.countersNamedCounter2.createCounterData(ks1NamedCounter2_1);
-        CountersSchemaHelpers.NamedCounterData counterData4 = MppCountersTestSchema.otherCountersNamed.createCounterData(ks2NamedCounter1_1);
-        CountersSchemaHelpers.NamedCounterData counterData5 = MppCountersTestSchema.otherCountersNamed.createCounterData(ks2NamedCounter1_2);
+        String postfix = String.valueOf(System.currentTimeMillis());
+        CountersSchemaHelpers.NamedCounterData counterData = MppCountersTestSchema.countersNamedCounter1.createCounterData(ks1NamedCounter1_1 + postfix);
+        CountersSchemaHelpers.NamedCounterData counterData2 = MppCountersTestSchema.countersNamedCounter1.createCounterData(ks1NamedCounter1_2 + postfix);
+        CountersSchemaHelpers.NamedCounterData counterData3 = MppCountersTestSchema.countersNamedCounter2.createCounterData(ks1NamedCounter2_1 + postfix);
+        CountersSchemaHelpers.NamedCounterData counterData4 = MppCountersTestSchema.otherCountersNamed.createCounterData(ks2NamedCounter1_1 + postfix);
+        CountersSchemaHelpers.NamedCounterData counterData5 = MppCountersTestSchema.otherCountersNamed.createCounterData(ks2NamedCounter1_2 + postfix);
 
         CounterAndItsTable ks1NamedCounter1_1C = new CounterAndItsTable(counterData, MppCountersTestSchema.countersNamedCounter1);
         CounterAndItsTable ks1NamedCounter1_2C = new CounterAndItsTable(counterData2, MppCountersTestSchema.countersNamedCounter1);
@@ -462,6 +463,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             displaySummaryOfCommits();
         });
 
+        CountDownLatch latch = new CountDownLatch(1);
+
         allResults.thenAccept(results -> {
             List<ReplicaTransactionsSummary> summaries = getSummaryOfTransactionsPerReplica();
 
@@ -501,41 +504,50 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             else {
                 System.out.println("Executors and replicas agree on rolledback transactions");
             }
+            latch.countDown();
         });
 
         allResults.thenAccept(results -> {
-            results.forEach(expectedResult -> {
-                System.out.println("Checking expected results by executor: " + expectedResult.resultsFromExecutorName);
+            try
+            {
+                latch.await();
+                results.forEach(expectedResult -> {
+                    System.out.println("Checking expected results by executor: " + expectedResult.resultsFromExecutorName);
 
-                expectedResult.expectedCounts.forEach(expectedCounterCount -> {
+                    expectedResult.expectedCounts.forEach(expectedCounterCount -> {
 
-                    expectedCounterCount.counterColumnToExpectedCount.entrySet().forEach(kv -> {
-                        String columnName = kv.getKey();
-                        Integer expectedCounterValue = kv.getValue();
+                        expectedCounterCount.counterColumnToExpectedCount.entrySet().forEach(kv -> {
+                            String columnName = kv.getKey();
+                            Integer expectedCounterValue = kv.getValue();
 
-                        String cql = String.format("SELECT %s FROM %s.%s WHERE id = ?", columnName,
-                                                   expectedCounterCount.keyspace,
-                                                   expectedCounterCount.table);
+                            String cql = String.format("SELECT %s FROM %s.%s WHERE id = ?", columnName,
+                                                       expectedCounterCount.keyspace,
+                                                       expectedCounterCount.table);
 
-                        SimpleStatement statement = new SimpleStatement(cql, expectedCounterCount.counterId);
-                        statement.setConsistencyLevel(ConsistencyLevel.QUORUM);
+                            SimpleStatement statement = new SimpleStatement(cql, expectedCounterCount.counterId);
+                            statement.setConsistencyLevel(ConsistencyLevel.ALL);
 
-                        ResultSet counterQueryResult = anySession.execute(statement);
-                        int actualCounterValue = counterQueryResult.one().getInt(columnName);
+                            ResultSet counterQueryResult = anySession.execute(statement);
+                            int actualCounterValue = counterQueryResult.one().getInt(columnName);
 
-                        String msg = String.format("Expecting counter with ID %s from table %s.%s to have counter column %s with count=%s, actual count=%s",
-                                                      expectedCounterCount.counterId,
-                                                      expectedCounterCount.keyspace,
-                                                      expectedCounterCount.table,
-                                                      columnName,
-                                                      expectedCounterValue.toString(),
-                                                      String.valueOf(actualCounterValue));
+                            String msg = String.format("Expecting counter with ID %s from table %s.%s to have counter column %s with count=%s, actual count=%s",
+                                                       expectedCounterCount.counterId,
+                                                       expectedCounterCount.keyspace,
+                                                       expectedCounterCount.table,
+                                                       columnName,
+                                                       expectedCounterValue.toString(),
+                                                       String.valueOf(actualCounterValue));
 
-                        System.out.println(msg);
-                        Assert.assertEquals(msg, expectedCounterValue, Integer.valueOf(actualCounterValue));
+                            System.out.println(msg);
+                            Assert.assertEquals(msg, expectedCounterValue, Integer.valueOf(actualCounterValue));
+                        });
                     });
                 });
-            });
+            }
+            catch (InterruptedException e)
+            {
+                e.printStackTrace();
+            }
         }).get();
 
         executorService.awaitTermination(Math.max(5,(int)(iterations * 1.5)), TimeUnit.SECONDS);
@@ -622,9 +634,15 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         }
 
         private CounterExecutorResults computeResults() {
-            List<CounterExpectedResult> counterExpectedResults = iterationResults.stream().flatMap(iterationResult ->
-                                                                                    iterationResult.incrementOfs.stream().map(incrementOf -> new CounterExpectedResult(incrementOf.keyspace, incrementOf.table, incrementOf.counterId, incrementOf.column, 1))
-            ).collect(Collectors.groupingBy(CounterKey::fromResult, Collectors.reducing(CounterExpectedResult::merge))).values().stream().map(Optional::get).collect(toList());
+            List<CounterExpectedResult> counterExpectedResults = iterationResults
+             .stream()
+             .flatMap(iterationResult ->
+                      iterationResult.incrementOfs.stream()
+                                                  .map(incrementOf -> new CounterExpectedResult(incrementOf.keyspace,
+                                                                                                incrementOf.table,
+                                                                                                incrementOf.counterId,
+                                                                                                incrementOf.column, 1))
+             ).collect(Collectors.groupingBy(CounterKey::fromResult, Collectors.reducing(CounterExpectedResult::merge))).values().stream().map(Optional::get).collect(toList());
 
             List<TransactionId> successfullyCommittedTransactionsAccordingToExecutor = iterationResults.stream().filter(ir -> ir.successfullyCommitted).map(IterationResult::getTxId).collect(toList());
             List<TransactionId> rolledBackTransactionsAccordingToExecutor = iterationResults.stream().filter(ir -> !ir.successfullyCommitted).map(IterationResult::getTxId).collect(toList());
@@ -663,8 +681,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
             Pair<IterationExpectations, TransactionState> expectationsAndState = doInTransaction(transactionState, session);
             transactionState = expectationsAndState.right;
-//            Boolean committed = null;
-            Boolean gotException = null;
+            Boolean committed = null;
 
             try
             {
@@ -673,7 +690,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 Row one = resultSet.one();
                 UUID txId = one.getUUID("[tx_id]");
                 Preconditions.checkState(txId.equals(transactionState.getTransactionId()));
-                boolean committed = one.getBool("[committed]");
+                committed = one.getBool("[committed]");
 
                 if (committed) {
                     System.out.println("Transaction with ID " + txId + " was committed");
@@ -681,46 +698,44 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 else {
                     System.out.println("Transaction with ID " + txId + " was rolled back");
                 }
-                gotException = false;
             }
             catch (Exception e)
             {
                 System.err.println("Exception occurred during commit of transaction" + e);
-//                committed = false;
-                gotException = true;
+                committed = false;
             }
 
             // TODO [MPP] Check in JMX whether this transaction was really committed or not.
 
-            Stream<Boolean> committedOnReplica = getNodeProbesNamedStream().map(namedProbe -> {
-                NodeProbe nodeProbe = namedProbe.nodeProbe;
-                String[] committed1 = nodeProbe.getMppProxy().listOfCommittedTransactions();
-                List<String> committedList = getListOf(committed1);
-                List<String> rolledBack = getListOf(nodeProbe.getMppProxy().listOfRolledBackTransactions());
+//            Stream<Boolean> committedOnReplica = getNodeProbesNamedStream().map(namedProbe -> {
+//                NodeProbe nodeProbe = namedProbe.nodeProbe;
+//                String[] committed1 = nodeProbe.getMppProxy().listOfCommittedTransactions();
+//                List<String> committedList = getListOf(committed1);
+//                List<String> rolledBack = getListOf(nodeProbe.getMppProxy().listOfRolledBackTransactions());
+//
+//                if (committedList.contains(transactionId.toString()) || rolledBack.contains(transactionId.toString()))
+//                {
+//                    // then it is a replica for that transaction
+//                    if (committedList.contains(transactionId.toString()))
+//                    {
+//                        return Optional.of(true);
+//                    }
+//                    else
+//                    {
+//                        return Optional.of(false);
+//                    }
+//                }
+//                else
+//                {
+//                    return Optional.<Boolean>empty();
+//                }
+//            }).filter(Optional::isPresent).map(Optional::get);
 
-                if (committedList.contains(transactionId.toString()) || rolledBack.contains(transactionId.toString()))
-                {
-                    // then it is a replica for that transaction
-                    if (committedList.contains(transactionId.toString()))
-                    {
-                        return Optional.of(true);
-                    }
-                    else
-                    {
-                        return Optional.of(false);
-                    }
-                }
-                else
-                {
-                    return Optional.<Boolean>empty();
-                }
-            }).filter(Optional::isPresent).map(Optional::get);
-
-            Set<Boolean> shouldConvergeOnTransactionResult = committedOnReplica.collect(Collectors.toSet());
-            if(!gotException)  {
-                Assert.assertEquals("Transaction with ID " + transactionId.toString() + " should be either committed or rolled back", 1, shouldConvergeOnTransactionResult.size());
-                Boolean committed = shouldConvergeOnTransactionResult.iterator().next();
-                IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, committed, session, iteration);
+//            Set<Boolean> shouldConvergeOnTransactionResult = committedOnReplica.collect(Collectors.toSet());
+            if(committed)  {
+//                Assert.assertEquals("Transaction with ID " + transactionId.toString() + " should be either committed or rolled back", 1, shouldConvergeOnTransactionResult.size());
+//                Boolean committed = shouldConvergeOnTransactionResult.iterator().next();
+                IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, true, session, iteration);
                 iterationResults.add(iterationResult);
             }
             else {
