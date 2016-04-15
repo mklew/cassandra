@@ -231,10 +231,6 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         private final String counterId;
 
-//        private final String counterColumn;
-//
-//        private final int expectedCount;
-//
         private final Map<String, Integer> counterColumnToExpectedCount;
 
         private CounterExpectedResult(String keyspace, String table, String counterId, String counterColumn, int expectedCount)
@@ -736,34 +732,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
             // TODO [MPP] Check in JMX whether this transaction was really committed or not.
 
-//            Stream<Boolean> committedOnReplica = getNodeProbesNamedStream().map(namedProbe -> {
-//                NodeProbe nodeProbe = namedProbe.nodeProbe;
-//                String[] committed1 = nodeProbe.getMppProxy().listOfCommittedTransactions();
-//                List<String> committedList = getListOf(committed1);
-//                List<String> rolledBack = getListOf(nodeProbe.getMppProxy().listOfRolledBackTransactions());
-//
-//                if (committedList.contains(transactionId.toString()) || rolledBack.contains(transactionId.toString()))
-//                {
-//                    // then it is a replica for that transaction
-//                    if (committedList.contains(transactionId.toString()))
-//                    {
-//                        return Optional.of(true);
-//                    }
-//                    else
-//                    {
-//                        return Optional.of(false);
-//                    }
-//                }
-//                else
-//                {
-//                    return Optional.<Boolean>empty();
-//                }
-//            }).filter(Optional::isPresent).map(Optional::get);
-
-//            Set<Boolean> shouldConvergeOnTransactionResult = committedOnReplica.collect(Collectors.toSet());
             if(committed)  {
-//                Assert.assertEquals("Transaction with ID " + transactionId.toString() + " should be either committed or rolled back", 1, shouldConvergeOnTransactionResult.size());
-//                Boolean committed = shouldConvergeOnTransactionResult.iterator().next();
                 IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, true, session, iteration);
                 iterationResults.add(iterationResult);
             }
@@ -775,42 +744,6 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             session.close();
         }
     }
-
-//    private class Counter1IncExecutor extends CounterExecutor {
-//
-//        private Counter1IncExecutor(int iterations, String name, Collection<CounterAndItsTable> countersThatExist)
-//        {
-//            super(iterations, name, countersThatExist);
-//        }
-//
-//        protected IterationResult toIterationResult(TransactionState transactionState, IterationExpectations expectations, boolean successfullyCommitted, Session session, int iteration)
-//        {
-//            if(successfullyCommitted) {
-//                return new IterationResult(iteration, successfullyCommitted, expectations.incrementOfs);
-//            }
-//            else {
-//                return new IterationResult(iteration, successfullyCommitted, Collections.emptyList());
-//            }
-//        }
-//
-//        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session)
-//        {
-//            // For each counter increment counter 1 table
-//            List<IncrementOf> expectedIncrements = getCounters().stream().map(counterAndTable -> {
-//                counterAndTable.counter.counter1 += 1;
-//                return new IncrementOf(counterAndTable.counter.id.toString(), "counter1");
-//            }).collect(toList());
-//
-//            // Persist changes using transaction
-//            TransactionState changedTransactionState = getCounters().stream().map(counterAndTable -> {
-//                return counterAndTable.persistUsingTransaction(transactionState, session);
-//            }).reduce(TransactionState::merge).get();
-//
-//            IterationExpectations iterationExpectations = new IterationExpectations(expectedIncrements);
-//
-//            return Pair.create(iterationExpectations, changedTransactionState);
-//        }
-//    }
 
     private class CounterColumnIncrementerExecutor extends CounterExecutor {
 
