@@ -476,9 +476,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 System.out.println("Replicas have seen extra transactions: " + difference);
             }
 
+            System.out.println("before check that replicas agree");
             checkThatReplicasAgreeAboutCommittedAndRolledBackTransactions(summaries);
             // From results of executors
+            System.out.println("before committed transaction ids from results");
             List<TransactionId> committedTransactions = getCommittedTransactionIdsFromResults(results);
+            System.out.println("before get rolled back transactio ids from results");
             List<TransactionId> rolledBackTransactions = getRolledBackTransactionIdsFromResults(results);
 
             // Actual recorded results from replicas. It assumes that results are converged
@@ -505,7 +508,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 System.out.println("Executors and replicas agree on rolledback transactions");
             }
             latch.countDown();
-        });
+        }).get();
 
         allResults.thenAccept(results -> {
             try
@@ -559,6 +562,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         }).get();
 
         executorService.awaitTermination(Math.max(5,(int)(iterations * 1.5)), TimeUnit.SECONDS);
+        anySession.close();
     }
 
     private List<TransactionId> getCommittedTransactionIdsFromResults(List<CounterExecutorResults> results)
@@ -634,6 +638,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         public void prepare() {
             Session session = getAnySession();
             this.counters = counters.stream().map(counter -> counter.copy(session)).collect(toList());
+            session.close();
         }
 
         public CompletableFuture<CounterExecutorResults> getCounterExecutorResultsFuture()
@@ -767,8 +772,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 iterationResults.add(iterationResult);
             }
 
-
-
+            session.close();
         }
     }
 
@@ -835,7 +839,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session)
         {
             // For each counter increment counter 1 table
-            expectedCount += 1;
+            expectedCount = currentCount + 1;
             List<IncrementOf> expectedIncrements = getCounters().stream().map(counterAndTable -> {
                 // TODO [MPP] Stupid version first.
                 if ("counter1".equals(columnName))
@@ -885,7 +889,10 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             // We can also check that all counters are in sync, because there is a single counter executor that increments single counter column
             Set<Integer> setOfCounterValues = getCounters().stream().map(counter -> getCounterValue(counter)).collect(Collectors.toSet());
 
-            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName + " has partially committed results");
+            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+                                                                     + " has partially committed results. Resulta are " + setOfCounterValues);
+
+            currentCount = setOfCounterValues.iterator().next();
 
             return getCounters().stream().allMatch(counter -> {
                 int currentCounterColumnValue = getCounterValue(counter);
