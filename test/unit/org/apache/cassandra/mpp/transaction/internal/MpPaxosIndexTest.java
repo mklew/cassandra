@@ -38,6 +38,7 @@ import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -347,6 +348,10 @@ public class MpPaxosIndexTest
         return transactionState;
     }
 
+    private TransactionState newTransactionStateForReadOnly(TransactionItem item) {
+        return TransactionStateUtils.createReadOnlyTransaction(item.getToken(), item.getKsName(), item.getCfName());
+    }
+
     @Test
     public void testThatTxCanProceedIfOtherGetsRolledBack() {
         final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
@@ -409,6 +414,24 @@ public class MpPaxosIndexTest
         final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
         Assert.assertTrue("Tx4 joins Tx1, Tx2, Tx3 in same round", r4.isPresent());
         Assert.assertEquals(r4, r1);
+    }
+
+    @Test
+    public void acquireAndFindPaxosIdShouldReturnFirstPaxosIdFound() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+
+        TransactionState readTi1Tx = newTransactionStateForReadOnly(ti1);
+
+        final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
+        Assert.assertTrue("Tx1 starts its own round", r1.isPresent());
+
+        Optional<MpPaxosId> mpPaxosId = mpPaxosIndex.acquireAndFindPaxosId(readTi1Tx);
+        Assert.assertEquals(mpPaxosId, r1);
+
+        Assert.assertEquals(mpPaxosId, mpPaxosIndex.acquireAndFindPaxosId(newTransactionStateForReadOnly(ti2)));
+        Assert.assertEquals(mpPaxosId, mpPaxosIndex.acquireAndFindPaxosId(newTransactionStateForReadOnly(ti3)));
+
+        Assert.assertFalse(mpPaxosIndex.acquireAndFindPaxosId(newTransactionStateForReadOnly(ti4)).isPresent());
     }
 
     @Test

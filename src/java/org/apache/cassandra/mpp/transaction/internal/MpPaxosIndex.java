@@ -434,7 +434,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
                     final TransactionState txStateOfRolledback = par.getTransactionState();
                     logger.info("rollbackParticipantsDueToTx. Transaction with ID {} caused transaction with ID {} to rollback",
-                                transactionStateThatCausedRollbackOf.getTransactionId(),
+                                transactionStateThatCausedRollbackOf != null ? transactionStateThatCausedRollbackOf.getTransactionId() : "[null id]",
                                 txStateOfRolledback.getTransactionId());
 
                     if (allLocksForParticipantsToRollbackWereAcquired || transactionStateThatCausedRollbackOf.hasExactlySameItems(txStateOfRolledback))
@@ -977,9 +977,21 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     private Optional<MpPaxosId> findPaxosIdOfMaybeAlreadyRegisteredParticipant(TransactionState transactionState, List<TransactionItem> items)
     {
-        return findParticipant(items.iterator().next(), transactionState)
-                                                 .flatMap(MpPaxosParticipant::getPaxosId)
-                                                 .map(id -> (MpPaxosId) new MpPaxosIdImpl(id));
+        if(!transactionState.isReadTransaction()) {
+            return findParticipant(items.iterator().next(), transactionState)
+                   .flatMap(MpPaxosParticipant::getPaxosId)
+                   .map(id -> (MpPaxosId) new MpPaxosIdImpl(id));
+        }
+        else {
+            Preconditions.checkArgument(items.size() == 1, "TransactionState for read should have single item, but had " + items.size() + " and they are " + items);
+            TransactionItem item = items.iterator().next();
+            MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe().get(item);
+            if(mppPaxosRoundPointers != null) {
+                return mppPaxosRoundPointers.getParticipantsUnsafe().stream().filter(p -> p.isParticipatingInPaxosRound()).filter(p -> p.getPaxosId().isPresent())
+                                            .map(p -> p.getPaxosId().get()).map(id -> (MpPaxosId) new MpPaxosIdImpl(id)).findFirst();
+            }
+            else return Optional.empty();
+        }
     }
 
     /**
