@@ -753,6 +753,10 @@ public class StorageProxyMpPaxosExtensions
         return replicaGroups.stream().map(StorageProxyMpPaxosExtensions::getMaximumPhaseSharedByQuorum).sorted().findFirst().get();
     }
 
+    public enum PhaseExecutorResult {
+        FINISHED, ROLLED_BACK;
+    }
+
     public static class ReplicaGroupsPhaseExecutor
     {
 
@@ -760,6 +764,8 @@ public class StorageProxyMpPaxosExtensions
         Phase isDoneWhen;
 
         Collection<ReplicaGroupInPhaseHolder> replicasInPhase;
+
+        private PhaseExecutorResult phaseExecutorResult = null;
 
         public ReplicaGroupsPhaseExecutor(Phase isDoneWhen, Collection<ReplicaGroupInPhaseHolder> replicasInPhase, Collection<Replica> allReplicas)
         {
@@ -788,7 +794,11 @@ public class StorageProxyMpPaxosExtensions
             return areInSamePhase() && (findMinimumPhaseAmongAllReplicaGroups() == isDoneWhen);
         }
 
-        void runTransitionsForEachReplica()
+        /**
+         *
+         * @return {@code true if has to rollback}
+         */
+        boolean runTransitionsForEachReplica()
         {
             List<ReplicasGroup> replicaGroups = replicasInPhase.stream().map(h -> h.getReplicaGroup().getReplicaGroup().getReplicasGroup()).collect(Collectors.toList());
 
@@ -796,18 +806,26 @@ public class StorageProxyMpPaxosExtensions
             // TODO [MPP] This parallel stream might be a problem.
             replicas.stream().forEach(replica -> {
                 Phase nextPhaseForReplica = findNextPhaseForReplica(replica, replicaGroups);
-                TransitionId transitionId = transitionToPhase(replica.getPhase(), nextPhaseForReplica);
+                Phase currentPhase = replica.getPhase();
+                TransitionId transitionId = transitionToPhase(currentPhase, nextPhaseForReplica);
                 logger.debug("Replica {} is in phase '{}' and next expected phase is {}. It will transition using {}",
                              replica.getHostAddress(),
-                             replica.getPhase(),
+                             currentPhase,
                              nextPhaseForReplica,
                              transitionId);
 
                 Transition transitionForReplica = findTransitionByTransitionId(transitionId);
                 ReplicaInPhaseHolder holder = replica.getReplicaInPhaseHolder();
                 ReplicaInPhase replicaInPhase = holder.getReplicaInPhase();
-                TransitionResult transitionResult = transitionForReplica.transition(replicaInPhase);
-                holder.setTransitionResult(transitionResult);
+                // Run transition on replica
+                try {
+                    TransitionResult transitionResult = transitionForReplica.transition(replicaInPhase);
+                    holder.setTransitionResult(transitionResult);
+                }
+                catch (WriteTimeoutException timeout) {
+                    logger.error("Timeout occurred for replica {}. It will transition it to same phase as before: {}", replica.getHostAddress(), currentPhase, timeout);
+                    holder.setTransitionResult(new TransitionResultImpl(replica.getReplicaInPhaseHolder().getReplicaInPhase(), currentPhase, false));
+                }
             });
 
             logger.debug("Transitions for replica groups are done. Time to evaluate responses");
@@ -826,7 +844,7 @@ public class StorageProxyMpPaxosExtensions
             // For each replica group
             Map<Replica, Phase> replicaToProposedPhase = new HashMap<>();
 
-            replicasInPhase.forEach(replicaGroupInPhaseHolder -> {
+            boolean existsReplicaGroupWhichHasQuorumOfRollbacks = replicasInPhase.stream().map(replicaGroupInPhaseHolder -> {
                 ReplicaGroupInPhase replicaGroup = replicaGroupInPhaseHolder.getReplicaGroup();
                 ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems = replicaGroup.getReplicaGroup();
                 ReplicasGroup replicasGroup = replicasGroupAndOwnedItems.getReplicasGroup();
@@ -834,32 +852,52 @@ public class StorageProxyMpPaxosExtensions
                 List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
 
                 List<TransitionResult> transitionResults = allReplicasInThatGroup.stream().map(Replica::getReplicaInPhaseHolder).map(x -> x.getTransitionResult()).collect(Collectors.toList());
-                Phase quorumPhaseAfterTransition = getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
+                return getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
+            }).filter(Phase.ROLLBACK_PHASE::equals).findAny().isPresent();
 
-                List<Replica> successfullyTransitioned = allReplicasInThatGroup.stream().filter(replica -> replica.getReplicaInPhaseHolder().getTransitionResult().wasTransitionSuccessful()).collect(Collectors.toList());
+            if(existsReplicaGroupWhichHasQuorumOfRollbacks) {
+                // TODO [MPP] If there is a replica group from which quorum of replicas transitioned into rollback phase, then we need to rollback whole transaction.
+                return true;
+            }
+            else {
+                // TODO [MPP] Continue as before
+                replicasInPhase.forEach(replicaGroupInPhaseHolder -> {
+                    ReplicaGroupInPhase replicaGroup = replicaGroupInPhaseHolder.getReplicaGroup();
+                    ReplicasGroupAndOwnedItems replicasGroupAndOwnedItems = replicaGroup.getReplicaGroup();
+                    ReplicasGroup replicasGroup = replicasGroupAndOwnedItems.getReplicasGroup();
 
-                // Phase of replica that successfully transitioned will be set to minimum quorum phase among replica groups it belongs to
-                successfullyTransitioned.forEach(replica -> {
-                    Phase phase = replicaToProposedPhase.get(replica);
-                    if (phase == null || phase.ordinal() > quorumPhaseAfterTransition.ordinal())
-                    {
-                        replicaToProposedPhase.put(replica, quorumPhaseAfterTransition);
-                    }
+                    List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+
+                    List<TransitionResult> transitionResults = allReplicasInThatGroup.stream().map(Replica::getReplicaInPhaseHolder).map(x -> x.getTransitionResult()).collect(Collectors.toList());
+                    Phase quorumPhaseAfterTransition = getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
+
+                    List<Replica> successfullyTransitioned = allReplicasInThatGroup.stream().filter(replica -> replica.getReplicaInPhaseHolder().getTransitionResult().wasTransitionSuccessful()).collect(Collectors.toList());
+
+                    // Phase of replica that successfully transitioned will be set to minimum quorum phase among replica groups it belongs to
+                    successfullyTransitioned.forEach(replica -> {
+                        Phase phase = replicaToProposedPhase.get(replica);
+                        if (phase == null || phase.ordinal() > quorumPhaseAfterTransition.ordinal())
+                        {
+                            replicaToProposedPhase.put(replica, quorumPhaseAfterTransition);
+                        }
+                    });
                 });
-            });
 
 
-            replicaToProposedPhase.forEach((replica, phase) -> {
-                TransitionResult transitionResult = replica.getReplicaInPhaseHolder().getTransitionResult();
+                replicaToProposedPhase.forEach((replica, phase) -> {
+                    TransitionResult transitionResult = replica.getReplicaInPhaseHolder().getTransitionResult();
 
-                replica.getReplicaInPhaseHolder().setReplicaInPhase(transitionResult.getReplicaInPhase());
-                replica.setPhase(phase);
-            });
+                    replica.getReplicaInPhaseHolder().setReplicaInPhase(transitionResult.getReplicaInPhase());
+                    replica.setPhase(phase);
+                });
+            }
 
             // After sorting out transition results, clear them
             replicas.forEach(replica -> {
                 replica.getReplicaInPhaseHolder().setTransitionResult(null);
             });
+
+            return false;
         }
 
         public void tryToExecute()
@@ -875,15 +913,23 @@ public class StorageProxyMpPaxosExtensions
             {
                 Phase minimumPhaseAmongAllReplicaGroups = findMinimumPhaseAmongAllReplicaGroups();
                 logger.debug("Current groups minimum phase is {}", minimumPhaseAmongAllReplicaGroups);
-                runTransitionsForEachReplica();
+                boolean hasToRollback = runTransitionsForEachReplica();
+
+                if(hasToRollback)
+                {
+                    logger.debug("Phase executor for transaction {} has to roll back", txId);
+                    phaseExecutorResult = PhaseExecutorResult.ROLLED_BACK;
+                    return;
+                }
 
                 if (isDone())
                 {
+                    phaseExecutorResult = PhaseExecutorResult.FINISHED;
                     return;
                 }
 
                 Phase phaseAfterTransistion = findMinimumPhaseAmongAllReplicaGroups();
-                logger.debug("Phase after transitions is {} TxID {}", phaseAfterTransistion, txId);
+                logger.debug("Minimum phase after transitions is {} TxID {}", phaseAfterTransistion, txId);
                 if (phaseAfterTransistion.ordinal() <= minimumPhaseAmongAllReplicaGroups.ordinal())
                 {
                     logger.debug("Phase after transition is not the next phase. Will try again after sleep");
@@ -894,6 +940,11 @@ public class StorageProxyMpPaxosExtensions
             logger.error("MultiPartitionPaxosTimeoutException timeout occurred. TxID {}", txId);
             throw new MultiPartitionPaxosTimeoutException("Timeout occured. TxID is: " + txId);
             //throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, 0);
+        }
+
+        public PhaseExecutorResult getPhaseExecutorResult()
+        {
+            return phaseExecutorResult;
         }
     }
 
@@ -932,7 +983,8 @@ public class StorageProxyMpPaxosExtensions
 
         if (summary != null && summary.wasRolledBack())
         {
-            throw new TransactionRolledBackException(inPhase.getTransactionState());
+//            throw new TransactionRolledBackException(inPhase.getTransactionState());
+            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
         }
 
         UUID ballot = createBallot(inPhase.getState(), summary);
@@ -987,8 +1039,22 @@ public class StorageProxyMpPaxosExtensions
                     // TODO [MPP] tryToExecute must return some sensible result, or future.
 
                     // TODO [MPP] This Stage is incorrect, but I probably don't care.
+                    CompletableFuture<PhaseExecutorResult> repairResult = new CompletableFuture<>();
+
                     CompletableFuture<?> futureWhenRepairIsDone = StorageProxy.performLocally(() -> {
-                        repairInProgressPaxosExecutor.tryToExecute();
+                        try {
+                            repairInProgressPaxosExecutor.tryToExecute();
+                            PhaseExecutorResult phaseExecutorResult = repairInProgressPaxosExecutor.getPhaseExecutorResult();
+                            repairResult.complete(phaseExecutorResult);
+                        } catch (TransactionRolledBackException ex)
+                        {
+                            repairResult.complete(PhaseExecutorResult.ROLLED_BACK);
+                        }
+                        catch (Exception e) {
+                            repairResult.completeExceptionally(e);
+                            logger.error("Error caught in during repair of {}", inProgress.update.getTransactionId(), e);
+                            throw e;
+                        }
                     });
 
                     ReplicaInReparingInProgressPhase repairing = new ReplicaInReparingInProgressPhase(inPhase.getTransactionState(),
@@ -1002,8 +1068,8 @@ public class StorageProxyMpPaxosExtensions
                     CommonStateHolder commonState = inPhase.getReplica().getReplicaInPhaseHolder().getCommonState();
                     TransactionId inProgressTransactionIdToRepair = inProgress.update.id();
 
-                    futureWhenRepairIsDone.handleAsync((smth, ex) -> {
-                        logger.debug("Nested in progress repair in execution of TxId {} has completed with smth {} ex {}", inPhase.getTransactionState().getTransactionId(), String.valueOf(smth), String.valueOf(ex));
+                    repairResult.handleAsync((result, ex) -> {
+                        logger.debug("Nested in progress repair in execution of TxId {} has completed with smth {} ex {}", inPhase.getTransactionState().getTransactionId(), String.valueOf(result), String.valueOf(ex));
                         commonState.transactionWithIdHasDoneRepairing(inProgressTransactionIdToRepair);
                         if (repairing.repairInProgressPaxosExecutor.equals(repairInProgressPaxosExecutor))
                         {
@@ -1155,25 +1221,28 @@ public class StorageProxyMpPaxosExtensions
 
 
         List<InetAddress> participants = Collections.singletonList(replicaInPhase.getReplica().getHost());
-        boolean proposed = proposePaxos(proposal, participants, 1, inPrepared.timeOutProposalIfPartialResponses, consistencyForPaxos, null);
+        try {
+            boolean proposed = proposePaxos(proposal, participants, 1, inPrepared.timeOutProposalIfPartialResponses, consistencyForPaxos, null);
+            logger.debug("PaxosProposed response is {} for replica {}", proposed, replicaInPhase.getReplica());
 
-        logger.debug("PaxosProposed response is {} for replica {}", proposed, replicaInPhase.getReplica());
+            if (proposed)
+            {
+                ReplicaInPhase newInPhase = ReplicaInProposedPhase.fromInPrepared(inPrepared, proposal);
+                return new TransitionResultImpl(newInPhase, Phase.PROPOSE_PHASE, true);
+            }
+            else
+            {
 
-        if (proposed)
-        {
-            ReplicaInPhase newInPhase = ReplicaInProposedPhase.fromInPrepared(inPrepared, proposal);
-            return new TransitionResultImpl(newInPhase, Phase.PROPOSE_PHASE, true);
-        }
-        else
-        {
-
-            ReplicaInPrePreparedPhase newInPhase = new ReplicaInPrePreparedPhase(
-                                                                                inPrepared.getTransactionState(),
-                                                                                inPrepared.getState(),
-                                                                                inPrepared.getReplica(),
-                                                                                inPrepared.getPaxosId(),
-                                                                                inPrepared.getSummary());
-            return new TransitionResultImpl(newInPhase, Phase.PRE_PREPARE_PHASE, false);
+                ReplicaInPrePreparedPhase newInPhase = new ReplicaInPrePreparedPhase(
+                                                                                    inPrepared.getTransactionState(),
+                                                                                    inPrepared.getState(),
+                                                                                    inPrepared.getReplica(),
+                                                                                    inPrepared.getPaxosId(),
+                                                                                    inPrepared.getSummary());
+                return new TransitionResultImpl(newInPhase, Phase.PRE_PREPARE_PHASE, false);
+            }
+        } catch (TransactionRolledBackException e) {
+            return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false);
         }
     };
 
@@ -1203,6 +1272,7 @@ public class StorageProxyMpPaxosExtensions
         nextPhaseIs.put(Phase.PREPARE_PHASE, Phase.PROPOSE_PHASE);
         nextPhaseIs.put(Phase.PROPOSE_PHASE, Phase.COMMIT_PHASE);
         nextPhaseIs.put(Phase.COMMIT_PHASE, Phase.AFTER_COMMIT_PHASE);
+        nextPhaseIs.put(Phase.ROLLBACK_PHASE, Phase.ROLLBACK_PHASE);
     }
 
     /**
@@ -1214,6 +1284,12 @@ public class StorageProxyMpPaxosExtensions
     {
         if (fromPhase == toPhase)
         {
+            return TransitionId.NOOP;
+        }
+        else if(toPhase == Phase.ROLLBACK_PHASE) {
+            return TransitionId.NOOP;
+        }
+        else if(fromPhase == Phase.ROLLBACK_PHASE) {
             return TransitionId.NOOP;
         }
         else if (fromPhase == Phase.NO_PHASE && toPhase == Phase.PRE_PREPARE_PHASE)
@@ -1251,6 +1327,11 @@ public class StorageProxyMpPaxosExtensions
             // ignoring current phase, because it just has to go back couple of phases.
             return TransitionId.TO_PREPARED;
 //            return transitionToPrepared;
+        }
+        else if(fromPhase == Phase.AFTER_COMMIT_PHASE)
+        {
+            // There is nothing else to do after commit phase so just return NOOP
+            return TransitionId.NOOP;
         }
         else
         {

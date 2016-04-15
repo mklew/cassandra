@@ -99,9 +99,10 @@ public class CommitTransactionStatement implements CQLStatement
         System.out.println("CommitTransactionStatement transactionState is " + transactionState);
 
         try {
-            MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency(), options, clientState);
-            return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(true, transactionState.id()));
-        } catch (TransactionRolledBackException rolledBack)
+            boolean committed = MppServicesLocator.getInstance().commitTransaction(transactionState, options.getConsistency(), options, clientState);
+            return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(committed, transactionState.id()));
+        }
+        catch (TransactionRolledBackException rolledBack)
         {
             logger.warn("Transaction was rolled back " + rolledBack.getMessage(), rolledBack);
             return MppServiceUtils.transformResultSetToResultMessage(buildTxResultSet(false, rolledBack.getRolledBackTransaction().id()));

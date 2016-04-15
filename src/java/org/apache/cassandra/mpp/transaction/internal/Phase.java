@@ -25,6 +25,7 @@ package org.apache.cassandra.mpp.transaction.internal;
 public enum Phase
 {
     NO_PHASE,
+    ROLLBACK_PHASE,
     PRE_PREPARE_PHASE,
     BEGIN_AND_REPAIR_PHASE,
     PREPARE_PHASE,

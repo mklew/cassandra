@@ -134,7 +134,7 @@ public class ForEachReplicaGroupOperations
             final Keyspace keyspace = Keyspace.open(ti.getKsName());
             List<InetAddress> allReplicas = StorageProxy.getLiveSortedEndpoints(keyspace, ti.getToken());
             final AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-            logger.info("ReadTransactionDataService transaction items to replicas. All replicas are {}", allReplicas);
+//            logger.info("ReadTransactionDataService transaction items to replicas. All replicas are {}", allReplicas);
             // TODO [MPP] I noticed that Write goes for natural + pending while reads are done just against natural using getLiveSortedEndpoints method in AbstractReadExecutor
 //            final ArrayList<InetAddress> naturalEndpoints = replicationStrategy.getNaturalEndpoints(ti.getToken());
 //            final Collection<InetAddress> pending = StorageService.instance.getTokenMetadata().pendingEndpointsFor(ti.getToken(), ti.getKsName());

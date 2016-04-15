@@ -66,7 +66,7 @@ public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex, 
      * @param options
      * @param clientState
      */
-    void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState);
+    boolean commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState);
 
     /**
      * This has to message all nodes that took part in transaction and tell them to get rid of private memtables

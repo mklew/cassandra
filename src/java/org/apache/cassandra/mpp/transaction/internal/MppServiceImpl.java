@@ -156,7 +156,7 @@ public class MppServiceImpl implements MppService
      * @param options
      * @param clientState
      */
-    public void commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState)
+    public boolean commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState)
     {
         logger.info("Commit transaction called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
 
@@ -165,7 +165,20 @@ public class MppServiceImpl implements MppService
 
         try
         {
-            multiPartitionPaxosPhaseExecutor.tryToExecute();
+            multiPartitionPaxosPhaseExecutor.tryToExecute(); // This is BLOCKING
+            StorageProxyMpPaxosExtensions.PhaseExecutorResult executorResult = multiPartitionPaxosPhaseExecutor.getPhaseExecutorResult();
+            Preconditions.checkState(executorResult != null, "When executor finished, it cannot have NULL phaseExecutorResult");
+            if(StorageProxyMpPaxosExtensions.PhaseExecutorResult.FINISHED == executorResult) {
+                return true;
+            }
+            else if (StorageProxyMpPaxosExtensions.PhaseExecutorResult.ROLLED_BACK == executorResult) {
+                rollbackTransactionInternal(transactionState, replicasAndOwnedItems);
+                return false;
+            }
+            else
+            {
+                throw new RuntimeException("INTERNAL CODING ERROR - Not exepcted PhaseExecutorResult " + executorResult);
+            }
         }
         catch (TransactionRolledBackException e)
         {
@@ -235,6 +248,7 @@ public class MppServiceImpl implements MppService
     }
 
     public void rollbackTransactionInternal(TransactionState transactionState, List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems) {
+        logger.debug("rollbackTransactionInternal tx id {}", transactionState.getTransactionId());
         MessageOut<TransactionState> message = new MessageOut<>(MessagingService.Verb.MP_ROLLBACK, transactionState, TransactionStateSerializer.instance);
         for (ReplicasGroupAndOwnedItems replicasAndOwnedItem : replicasAndOwnedItems)
         {
