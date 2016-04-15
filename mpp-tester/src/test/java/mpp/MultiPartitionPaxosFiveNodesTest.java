@@ -1074,6 +1074,60 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     }
 
     @Test
+    public void testSelectWithMultiPartitionPaxosWhenThereIsInProgressProposal() {
+        try(Session session = getAnySession()) {
+            CountersSchemaHelpers.CounterData counterData = MppCountersTestSchema.stopAfterProposedTable.createCounterData(UUIDs.random(), 1, 1, 1, 1, 1);
+            CounterAndItsTable counterAndItsTable = new CounterAndItsTable(counterData, MppCountersTestSchema.stopAfterProposedTable);
+            counterAndItsTable.persist(session, ConsistencyLevel.QUORUM);
+
+            TransactionState transactionState = beginTransaction(session);
+
+            // Modifications within transaction
+            counterAndItsTable.counter.setCounter1(1);
+            counterAndItsTable.counter.setCounter2(2);
+            counterAndItsTable.counter.setCounter3(3);
+            counterAndItsTable.counter.setCounter4(4);
+            counterAndItsTable.counter.setCounter5(5);
+
+            transactionState = counterAndItsTable.persistUsingTransaction(transactionState, session);
+
+            try {
+                // It should fail, because of special table name "stop_after_proposed", but before it fails it should propose that transaction
+                // successfully.
+                ResultSet rows = commitTransaction(session, transactionState);
+                System.out.println("Commit transaction results" + rows);
+            }
+            catch (Exception e) {
+                System.out.println("Commit transaction exception" + e);
+            }
+
+            // After transaction was stopped, query should return counter with data: 1,1,1,1,1
+            counterAndItsTable.refresh(session);
+            Assert.assertEquals("It should have failed on commit", 1, counterAndItsTable.counter.counter1);
+            Assert.assertEquals("It should have failed on commit", 1, counterAndItsTable.counter.counter2);
+            Assert.assertEquals("It should have failed on commit", 1, counterAndItsTable.counter.counter3);
+            Assert.assertEquals("It should have failed on commit", 1, counterAndItsTable.counter.counter4);
+            Assert.assertEquals("It should have failed on commit", 1, counterAndItsTable.counter.counter5);
+
+            // But doing Select with CL=LOCAL_TRANSACTIONAL it should finish transaction and return with modified state.
+
+            SimpleStatement selectCounterById = new SimpleStatement(String.format("SELECT * FROM %s.%s WHERE id = ?", counterAndItsTable.table.keyspaceName,
+                                                                                  counterAndItsTable.table.tableName), counterAndItsTable.counter.id);
+            selectCounterById.setConsistencyLevel(ConsistencyLevel.LOCAL_TRANSACTIONAL);
+            ResultSet resultSet = session.execute(selectCounterById);
+
+            List<CountersSchemaHelpers.CounterData> nameds = counterAndItsTable.table.readRows(resultSet);
+            CountersSchemaHelpers.CounterData actualCounterDataAfterTransactionWasFinished = nameds.iterator().next();
+
+            Assert.assertEquals(1, actualCounterDataAfterTransactionWasFinished.counter1);
+            Assert.assertEquals(2, actualCounterDataAfterTransactionWasFinished.counter2);
+            Assert.assertEquals(3, actualCounterDataAfterTransactionWasFinished.counter3);
+            Assert.assertEquals(4, actualCounterDataAfterTransactionWasFinished.counter4);
+            Assert.assertEquals(5, actualCounterDataAfterTransactionWasFinished.counter5);
+        }
+    }
+
+    @Test
     public void testInsertData() {
         CountersSchemaHelpers.CounterData counterData1 = createCounter1();
         CountersSchemaHelpers.CounterData counterData2 = createCounter2();

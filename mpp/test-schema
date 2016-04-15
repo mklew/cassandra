@@ -23,6 +23,8 @@ create table mpptest_counters.counter3 (id uuid, counter1 int, counter2 int, cou
 
 create table mpptest_counters.counter4 (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
 
+create table mpptest_counters.stop_after_proposed (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
 create table mpptest_counters.named_counters_counter1 (id text, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
 
 create table mpptest_counters.named_counters_counter2 (id text, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
