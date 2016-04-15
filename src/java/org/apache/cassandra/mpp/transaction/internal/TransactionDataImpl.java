@@ -208,39 +208,45 @@ public class TransactionDataImpl implements TransactionData
     public void applyAllMutations(long applyTimestamp, Function<PartitionUpdate, Boolean> predicate)
     {
         logger.info("applyAllMutations timestamp {}", applyTimestamp);
-        Preconditions.checkArgument(!hasBeenApplied, "Cannot apply same transaction data twice");
-        List<Mutation> materializeMutations = ksToKeyToMutation.entrySet().stream().map(Map.Entry::getValue).flatMap(m -> m.entrySet().stream().map(Map.Entry::getValue))
-                                 .map(Mutation::copy) // copy, to refresh createdAt which is used to determine rpc timeout
-                                 .map(m -> {
-                                     // Update timestamps of all partition updates
-                                     m.getPartitionUpdates().forEach(pu -> pu.updateAllTimestamp(applyTimestamp));
-                                     return m;
-                                 })
-                                 .map(m -> {
-                                     Set<UUID> cfIds = m.getPartitionUpdates().stream().filter(pu -> !predicate.apply(pu)).map(pu -> pu.metadata().cfId).collect(Collectors.toSet());
-                                     if (!cfIds.isEmpty())
-                                     {
-                                         logger.debug("applyAllMutations without cfIds {}", cfIds);
-                                         return m.without(cfIds);
-                                     }
-                                     else
-                                     {
-                                         return m;
-                                     }
-                                 }).collect(Collectors.toList());
+        if(hasBeenApplied) {
+            logger.info("skipping application of mutations, because they were already applied");
+        }
+        else {
+            Preconditions.checkArgument(!hasBeenApplied, "Cannot apply same transaction data twice");
+            List<Mutation> materializeMutations = ksToKeyToMutation.entrySet().stream().map(Map.Entry::getValue).flatMap(m -> m.entrySet().stream().map(Map.Entry::getValue))
+                                                  .map(Mutation::copy) // copy, to refresh createdAt which is used to determine rpc timeout
+                                                  .map(m -> {
+                                                      // Update timestamps of all partition updates
+                                                      m.getPartitionUpdates().forEach(pu -> pu.updateAllTimestamp(applyTimestamp));
+                                                      return m;
+                                                  })
+                                                  .map(m -> {
+                                                      Set<UUID> cfIds = m.getPartitionUpdates().stream().filter(pu -> !predicate.apply(pu)).map(pu -> pu.metadata().cfId).collect(Collectors.toSet());
+                                                      if (!cfIds.isEmpty())
+                                                      {
+                                                          logger.debug("applyAllMutations without cfIds {}", cfIds);
+                                                          return m.without(cfIds);
+                                                      }
+                                                      else
+                                                      {
+                                                          return m;
+                                                      }
+                                                  }).collect(Collectors.toList());
 
-        materializeMutations
-                         .forEach(mutation -> {
-                             logger.debug("applyAllMutations applying mutation on keyspace. Mutation key {}", mutation.key());
-                             mutation.getPartitionUpdates().forEach(pu -> {
-                                 logger.debug("Mutation details. PartitionUpdate data size {}, rowCount {}, hasRows {} tableName {}", pu.dataSize(), pu.rowCount(), pu.hasRows(), pu.metadata().cfName);
-                             });
-                             Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true);
-                         });
+            materializeMutations
+            .forEach(mutation -> {
+                logger.debug("applyAllMutations applying mutation on keyspace. Mutation key {}", mutation.key());
+                mutation.getPartitionUpdates().forEach(pu -> {
+                    logger.debug("Mutation details. PartitionUpdate data size {}, rowCount {}, hasRows {} tableName {}", pu.dataSize(), pu.rowCount(), pu.hasRows(), pu.metadata().cfName);
+                });
+                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true);
+            });
 
-        // Mutations happen in different thread so this method returns before actually doing mutations.
-        // It is done same way for paxos and others therefore it should be enough and should not fail.
-        hasBeenApplied = true;
+            // Mutations happen in different thread so this method returns before actually doing mutations.
+            // It is done same way for paxos and others therefore it should be enough and should not fail.
+            hasBeenApplied = true;
+        }
+
     }
 
     public void freeze()
