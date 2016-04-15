@@ -775,7 +775,9 @@ public class StorageProxyMpPaxosExtensions
                                                                              .collect(Collectors.toList());
 
         // TODO [MPP] It might be done if we see that transaction was rolled back.
-        return new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases, replicasGroupAndOwnedItems.iterator().next().getAllReplicas());
+        ReplicaGroupsPhaseExecutor replicaGroupsPhaseExecutor = new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases, replicasGroupAndOwnedItems.iterator().next().getAllReplicas());
+        replicaGroupsPhaseExecutor.setIsRepairing(true);
+        return replicaGroupsPhaseExecutor;
     }
 
     public static Phase findMinimumPhaseAmongAllReplicaGroups(Collection<ReplicasGroup> replicaGroups)
@@ -796,6 +798,7 @@ public class StorageProxyMpPaxosExtensions
         Collection<ReplicaGroupInPhaseHolder> replicasInPhase;
 
         private PhaseExecutorResult phaseExecutorResult = null;
+        private boolean isRepairing = false;
 
         public ReplicaGroupsPhaseExecutor(Phase isDoneWhen, Collection<ReplicaGroupInPhaseHolder> replicasInPhase, Collection<Replica> allReplicas)
         {
@@ -943,6 +946,14 @@ public class StorageProxyMpPaxosExtensions
             {
                 Phase minimumPhaseAmongAllReplicaGroups = findMinimumPhaseAmongAllReplicaGroups();
                 logger.debug("Current groups minimum phase is {}", minimumPhaseAmongAllReplicaGroups);
+
+                // for testing purposes, it stops execution after transaction was proposed leaving it saved as "in progress"
+                if(Phase.PROPOSE_PHASE == minimumPhaseAmongAllReplicaGroups &&
+                   txForTestingInProgress(replicasInPhase.iterator().next().getReplicaGroup().getTransactionState())) {
+                    phaseExecutorResult = PhaseExecutorResult.FINISHED;
+                    return;
+                }
+
                 boolean hasToRollback = runTransitionsForEachReplica();
 
                 if(hasToRollback)
@@ -972,9 +983,29 @@ public class StorageProxyMpPaxosExtensions
             //throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, 0);
         }
 
+        private boolean txForTestingInProgress(TransactionState transactionState)
+        {
+            return !isRepairing && transactionState.getTransactionItems().size() == 1 && "stop_after_proposed".equals(transactionState.getTransactionItems().iterator().next().getCfName());
+        }
+
         public PhaseExecutorResult getPhaseExecutorResult()
         {
             return phaseExecutorResult;
+        }
+
+        public void setIsRepairing(boolean isRepairing)
+        {
+            this.isRepairing = isRepairing;
+        }
+
+        public boolean isRepairing()
+        {
+            return isRepairing;
+        }
+
+        public void setRepairing(boolean isRepairing)
+        {
+            this.isRepairing = isRepairing;
         }
     }
 
