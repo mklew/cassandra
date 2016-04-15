@@ -723,6 +723,36 @@ public class StorageProxyMpPaxosExtensions
         return new ReplicaGroupsPhaseExecutor(Phase.AFTER_COMMIT_PHASE, inPhases, replicaGroups.iterator().next().getAllReplicas());
     }
 
+    public static ReplicaGroupsPhaseExecutor createMultiPartitionPaxosPhaseExecutorForRead(List<ReplicasGroupAndOwnedItems> replicaGroups, TransactionState transactionState, ClientState state)
+    {
+        /**
+         *      This transaction does not propose any values.
+                It has no data
+                Does preprepare phase makes sense?
+                - making data consistent - No
+                - joing paxos round - Yes
+                - creating paxos round - No     -
+         */
+        Phase startFromPrePreparePhase = Phase.PRE_PREPARE_PHASE;
+        Collection<Replica> allReplicas = replicaGroups.iterator().next().getAllReplicas();
+        CommonStateHolder commonState = new CommonStateHolder();
+        allReplicas.forEach(replica -> {
+            ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new ReplicaInPrePreparedPhase(transactionState, state, replica, Optional.<MpPaxosId>empty(), null), commonState);
+            replica.setHolder(holder);
+        });
+        logger.debug("createMultiPartitionPaxosPhaseExecutor replicaGroups {}. TransactionState is {}", replicaGroups, transactionState);
+        List<ReplicaGroupInPhaseHolder> inPhases = replicaGroups.stream()
+                                                                .map(rg -> {
+
+                                                                    return new BaseReplicaGroupInPhase(rg, transactionState, state, startFromPrePreparePhase);
+                                                                })
+                                                                .map(ReplicaGroupInPhaseHolder::new)
+                                                                .collect(Collectors.toList());
+
+        // Reading should finish after it successfully transitions into prepare phase, that happens after repair phase has finished.
+        return new ReplicaGroupsPhaseExecutor(Phase.PREPARE_PHASE, inPhases, replicaGroups.iterator().next().getAllReplicas());
+    }
+
     public static ReplicaGroupsPhaseExecutor createRepairInProgressPaxosExecutor(TransactionState inProgressTransactionState, ClientState state, UUID ballot)
     {
         logger.debug("createRepairInProgressPaxosExecutor for TxId {} using ballot {}", inProgressTransactionState.getTransactionId(), ballot);
@@ -983,7 +1013,6 @@ public class StorageProxyMpPaxosExtensions
 
         if (summary != null && summary.wasRolledBack())
         {
-//            throw new TransactionRolledBackException(inPhase.getTransactionState());
             return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
         }
 

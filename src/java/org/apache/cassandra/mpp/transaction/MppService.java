@@ -122,4 +122,6 @@ public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex, 
     void multiPartitionPaxosCommitPhase(TransactionState transactionState, long ballot);
 
     void submitHints(List<MppHint> hints);
+
+    void transactionalRead(TransactionState transactionState, ConsistencyLevel consistencyLevel, ClientState state);
 }

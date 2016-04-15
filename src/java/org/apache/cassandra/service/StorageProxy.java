@@ -123,7 +123,10 @@ import org.apache.cassandra.metrics.ClientRequestMetrics;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.metrics.ViewWriteMetrics;
+import org.apache.cassandra.mpp.MppServicesLocator;
 import org.apache.cassandra.mpp.transaction.MppServiceUtils;
+import org.apache.cassandra.mpp.transaction.client.TransactionState;
+import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.net.CompactEndpointSerializationHelper;
 import org.apache.cassandra.net.IAsyncCallback;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
@@ -1656,9 +1659,43 @@ public class StorageProxy implements StorageProxyMBean
             throw new IsBootstrappingException();
         }
 
-        return consistencyLevel.isSerialConsistency()
-             ? readWithPaxos(group, consistencyLevel, state)
-             : readRegular(group, consistencyLevel);
+        if(consistencyLevel.isTransactionalConsistency()) {
+            return readWithMultiPartitionPaxos(group, consistencyLevel, state);
+        }
+        else {
+            return consistencyLevel.isSerialConsistency()
+                   ? readWithPaxos(group, consistencyLevel, state)
+                   : readRegular(group, consistencyLevel);
+        }
+    }
+
+    private static PartitionIterator readWithMultiPartitionPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state)
+    {
+        assert state != null;
+        if (group.commands.size() > 1)
+            throw new InvalidRequestException("TRANSACTIONAL/LOCAL_TRANSACTIONAL consistency may only be requested for one partition at a time");
+
+        PartitionIterator result = null;
+
+        SinglePartitionReadCommand command = group.commands.get(0);
+        CFMetaData metadata = command.metadata();
+        DecoratedKey key = command.partitionKey();
+
+        Pair<String, String> ksAndCFName = metadata.ksAndCFName;
+        String ksName = ksAndCFName.left;
+        String cfName = ksAndCFName.right;
+        Token token = key.getToken();
+
+        TransactionState txState = TransactionStateUtils.createReadOnlyTransaction(token, ksName, cfName);
+        MppServicesLocator.getInstance().transactionalRead(txState, consistencyLevel, state);
+
+        final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
+                                                             ? ConsistencyLevel.LOCAL_QUORUM
+                                                             : ConsistencyLevel.QUORUM;
+
+        result = fetchRows(group.commands, consistencyForCommitOrFetch);
+
+        return result;
     }
 
     private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state)

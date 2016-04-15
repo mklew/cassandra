@@ -186,35 +186,25 @@ public class MppServiceImpl implements MppService
 //            rollbackTransactionInternal(e.getRolledBackTransaction(), replicasAndOwnedItems);
             throw e;
         }
+    }
 
-//        ReplicasGroupsOperationCallback replicasOperationsCallback = new ReplicasGroupsOperationCallback(replicasAndOwnedItems);
-//        List<MpPrePrepareMpPaxosCallback> callbacksForPhase1 = replicasAndOwnedItems.stream().parallel().map(replicaGroupWithItems -> {
-//
-//            return prePrepareReplicaGroup(transactionState, replicaGroupWithItems, replicasOperationsCallback);
-//        }).collect(Collectors.toList());
-//
-//        callbacksForPhase1.forEach(callbackForPrePrepare -> {
-//            callbackForPrePrepare.await();
-//
-//            callbackForPrePrepare.getResponsesByReplica().entrySet().stream().forEach(kv -> {
-//                logger.debug("Replica {} has pre preared paxos id {}", kv.getKey(), kv.getValue().map(id -> id.getPaxosId().toString()).orElse("undefined"));
-//            });
-//        });
-//
-//        replicasOperationsCallback.await(); // await for phase 1
-//        logger.info("Commit transaction has successfully pre prepared all replicas groups");
-        // we continue when we have all quorums
-//        callbacksForPhase1.stre
+    public void transactionalRead(TransactionState transactionState, ConsistencyLevel consistencyLevel, ClientState state)
+    {
+        logger.info("Transactional read called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
+        Preconditions.checkArgument(transactionState.isReadTransaction(), "Transaction should be read transaction");
+        Preconditions.checkArgument(transactionState.getTransactionItems().size() == 1, "Read transaction should be for single transaction item");
 
-        // For each replica group
-            // 1. MppPrePrepareRequest - successfully register in MpPaxosIndex.
-                // 1.1 each quorum of replicas should respond with paxos id
-                // 1.2 each replica should make their transaction state consistent using MppService#makeTransactionDataConsistent ( this could happen later)
-            // 2. MppPrepareRequest
-                // send: (generated ballot + transaction state)
-                // given transaction state, paxos id should be found in index. Else transaction was rolled back
-                // access mp index -> find paxos id -> access MP Paxos State in system keyspace and find mp paxos state
+        List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
+        StorageProxyMpPaxosExtensions.ReplicaGroupsPhaseExecutor multiPartitionPaxosPhaseExecutorForRead = StorageProxyMpPaxosExtensions.createMultiPartitionPaxosPhaseExecutorForRead(replicasAndOwnedItems, transactionState, state);
 
+        try {
+            multiPartitionPaxosPhaseExecutorForRead.tryToExecute();
+            StorageProxyMpPaxosExtensions.PhaseExecutorResult executorResult = multiPartitionPaxosPhaseExecutorForRead.getPhaseExecutorResult();
+            logger.info("MultiPartitionPhaseExecutor has finished executing for transactionState {} with result {}", transactionState, executorResult);
+        }
+        catch (TransactionRolledBackException e) {
+            logger.warn("MultiPartitionPhaseExecutor for READING has finished for transactionState {} with exception", transactionState, e);
+        }
     }
 
     public MpPrePrepareMpPaxosCallback prePrepareReplicaGroup(TransactionState transactionState, ReplicasGroupAndOwnedItems replicaGroupWithItems, ReplicasGroupsOperationCallback replicasOperationsCallback)
