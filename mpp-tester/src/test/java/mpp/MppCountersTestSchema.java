@@ -20,6 +20,7 @@ package mpp;
 
 import java.util.UUID;
 
+import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.Session;
 
 /**
@@ -47,7 +48,7 @@ public class MppCountersTestSchema
     public static CountersSchemaHelpers.CounterData inititateCounterData(CountersSchemaHelpers.CounterTable counterTable, UUID counterId, Session session) {
 
         CountersSchemaHelpers.CounterData data = CountersSchemaHelpers.CounterData.newUsingId(counterId);
-        counterTable.persist(data, session);
+        counterTable.persist(data, session, ConsistencyLevel.ALL);
         return counterTable.findById(counterId, session).get();
     }
 }

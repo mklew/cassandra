@@ -141,12 +141,12 @@ public class CountersSchemaHelpers
             this.tableName = tableName;
         }
 
-        public void persist(CD counterData, Session session) {
+        public void persist(CD counterData, Session session, ConsistencyLevel consistencyLevel) {
             String cql = getCql();
-            executeCqlWithCounterData(counterData, session, cql);
+            executeCqlWithCounterData(counterData, session, cql, consistencyLevel);
         }
 
-        private ResultSet executeCqlWithCounterData(CD counterData, Session session, String cql)
+        private ResultSet executeCqlWithCounterData(CD counterData, Session session, String cql, ConsistencyLevel consistencyLevel)
         {
             SimpleStatement simpleStatement = new SimpleStatement(cql, counterData.getId(),
                                                                   counterData.counter1,
@@ -154,7 +154,7 @@ public class CountersSchemaHelpers
                                                                   counterData.counter3,
                                                                   counterData.counter4,
                                                                   counterData.counter5);
-            simpleStatement.setConsistencyLevel(ConsistencyLevel.ALL);
+            simpleStatement.setConsistencyLevel(consistencyLevel);
             return session.execute(simpleStatement);
         }
 
@@ -226,7 +226,7 @@ public class CountersSchemaHelpers
 
         public TransactionState persistUsingTransaction(TransactionState transactionState, CD counterData, Session session) {
             String cql = String.format("INSERT INTO %s.%s (id, counter1, counter2, counter3, counter4, counter5 ) VALUES (?, ?, ?, ?, ?, ?) USING TRANSACTION %s", keyspaceName, tableName, transactionState.getTransactionId());
-            ResultSet resultSet = executeCqlWithCounterData(counterData, session, cql);
+            ResultSet resultSet = executeCqlWithCounterData(counterData, session, cql, consistencyLevel);
             return transactionState.merge(MppTestingUtilities.mapResultToTransactionState(resultSet));
         }
 

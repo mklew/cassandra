@@ -80,8 +80,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             return table.persistUsingTransaction(transactionState, counter, session);
         }
 
+        public void persist(Session session, ConsistencyLevel consistencyLevel) {
+            table.persist(counter, session, consistencyLevel);
+        }
+
         public void persist(Session session) {
-            table.persist(counter, session);
+            table.persist(counter, session, ConsistencyLevel.ALL);
         }
 
         public void refresh(Session session)
@@ -1036,6 +1040,37 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
             System.out.println(info);
         });
+    }
+
+    @Test
+    public void testSelectWithMultiPartitionPaxosShouldReturnDataWhenThereAreNoInProgressTransactions() {
+        try(Session session = getAnySession()) {
+            String postfix = String.valueOf(System.currentTimeMillis());
+            CountersSchemaHelpers.NamedCounterData counterData = MppCountersTestSchema.countersNamedCounter1.createCounterData(ks1NamedCounter1_1 + postfix);
+            CounterAndItsTable counterAndItsTable = new CounterAndItsTable(counterData, MppCountersTestSchema.countersNamedCounter1);
+            // Initial data, all ones
+            counterAndItsTable.counter.setCounter1(1);
+            counterAndItsTable.counter.setCounter2(1);
+            counterAndItsTable.counter.setCounter3(1);
+            counterAndItsTable.counter.setCounter4(1);
+            counterAndItsTable.counter.setCounter5(1);
+            counterAndItsTable.persist(session, ConsistencyLevel.QUORUM);
+
+            // Do normal select, but use ConsistencyLevel=LOCAL_TRANSACTIONAL or TRANSACTIONAL
+            SimpleStatement selectCounterById = new SimpleStatement(String.format("SELECT * FROM %s.%s WHERE id = ?", counterAndItsTable.table.keyspaceName,
+                                                                                counterAndItsTable.table.tableName), counterAndItsTable.counter.id);
+            selectCounterById.setConsistencyLevel(ConsistencyLevel.LOCAL_TRANSACTIONAL);
+            ResultSet resultSet = session.execute(selectCounterById);
+
+            List<CountersSchemaHelpers.NamedCounterData> nameds = counterAndItsTable.table.readRows(resultSet);
+            CountersSchemaHelpers.NamedCounterData actualCounterData = nameds.iterator().next();
+
+            Assert.assertEquals(actualCounterData.counter1, 1);
+            Assert.assertEquals(actualCounterData.counter2, 1);
+            Assert.assertEquals(actualCounterData.counter3, 1);
+            Assert.assertEquals(actualCounterData.counter4, 1);
+            Assert.assertEquals(actualCounterData.counter5, 1);
+        }
     }
 
     @Test

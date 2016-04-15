@@ -88,7 +88,7 @@ public class TransactionStateSerializerTest
     }
 
     @Test
-    public void shouldCreateReadOnlyTransactionUsingMinValueLong() throws IOException
+    public void shouldCreateReadOnlyTransactionUsingSpecialId() throws IOException
     {
         UUID uuid = UUIDs.startOf(new DateTime().plusYears(1).plusDays(1).getMillis());
         TransactionState transactionState = new TransactionState(uuid, Collections.singletonList(TransactionItemSerializerTest.getTransactionItem()));
