@@ -406,7 +406,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         // TODO [MPP] Returning only single executor to test if test works just as single transaction inserting some other data.
 //        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
-        return Arrays.asList(counter1Executor, counter2Executor);
+        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor);
 //        return Arrays.asList(counter1Executor);
     }
 
@@ -436,7 +437,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
     @Test
     public void runTestUsingCounters() throws Throwable {
-        int iterations = 3;
+        int iterations = 10;
         // There counters exist from previous test because they use named keys. Need to reset them
         Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
         Session anySession = getAnySession();
@@ -459,13 +460,11 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         // Acutal execution on seperate thead pool
         counterExecutors.forEach(counterExecutor -> executorService.execute(counterExecutor));
 
-        allResults.thenAccept(results -> {
-            displaySummaryOfCommits();
-        });
-
         CountDownLatch latch = new CountDownLatch(1);
 
         allResults.thenAccept(results -> {
+            displaySummaryOfCommits();
+
             List<ReplicaTransactionsSummary> summaries = getSummaryOfTransactionsPerReplica();
 
             List<TransactionId> allTransactionsSeenByReplicas = getAllTransactionIdsSeenByReplicas(summaries);
@@ -511,6 +510,14 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             try
             {
                 latch.await();
+
+                System.out.println("Counters after operations");
+                counters.stream().map(counter -> {
+                    counter.refresh(anySession);
+
+                    return counter.counter.toString();
+                }).forEach(System.out::println);
+
                 results.forEach(expectedResult -> {
                     System.out.println("Checking expected results by executor: " + expectedResult.resultsFromExecutorName);
 
@@ -674,6 +681,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         private void runIteration(int iteration)
         {
             Session session = getAnySession();
+            getCounters().forEach(counter -> counter.refresh(session));
+
             TransactionState transactionState = beginTransaction(session);
             UUID transactionId = transactionState.getTransactionId();
 

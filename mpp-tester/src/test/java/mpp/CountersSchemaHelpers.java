@@ -89,6 +89,18 @@ public class CountersSchemaHelpers
         {
             this.counter5 = counter5;
         }
+
+        public String toString()
+        {
+            return "CounterData{" +
+                   "id=" + id +
+                   ", counter1=" + counter1 +
+                   ", counter2=" + counter2 +
+                   ", counter3=" + counter3 +
+                   ", counter4=" + counter4 +
+                   ", counter5=" + counter5 +
+                   '}';
+        }
     }
 
     public static class CounterData extends BaseCounterData<UUID> {
