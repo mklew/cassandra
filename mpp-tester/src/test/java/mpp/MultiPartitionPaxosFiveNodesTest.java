@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -678,6 +679,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         protected abstract Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session);
 
+        protected abstract boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session);
+
         private void runIteration(int iteration)
         {
             Session session = getAnySession();
@@ -713,6 +716,18 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 System.err.println("Exception occurred during commit of transaction" + e);
                 committed = false;
             }
+
+            // Ignoring result of commitTransaction and checking it with query.
+            // TODO this should only happen when timeout occurred, if there is no timeout then result of commitTransaction should be valid
+
+            boolean reallyCommitted = checkIfItReallyWasCommitted(transactionState, session);
+
+            if(committed != reallyCommitted)
+            {
+                // log it
+                System.out.println("Wrong commit result. Transaction with ID " + transactionState.getTransactionId() + " returned with committed=" + committed + " but in reality after checking with query it is committed=" + reallyCommitted);
+            }
+            committed = reallyCommitted;
 
             // TODO [MPP] Check in JMX whether this transaction was really committed or not.
 
@@ -797,6 +812,10 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         private final String columnName;
 
+        private int currentCount = 0;
+
+        private int expectedCount = 0;
+
         private CounterColumnIncrementerExecutor(int iterations, String name, Collection<CounterAndItsTable> countersThatExist, String columnName)
         {
             super(iterations, name, countersThatExist);
@@ -816,27 +835,28 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session)
         {
             // For each counter increment counter 1 table
+            expectedCount += 1;
             List<IncrementOf> expectedIncrements = getCounters().stream().map(counterAndTable -> {
                 // TODO [MPP] Stupid version first.
                 if ("counter1".equals(columnName))
                 {
-                    counterAndTable.counter.counter1 += 1;
+                    counterAndTable.counter.counter1 = expectedCount;
                 }
                 else if ("counter2".equals(columnName))
                 {
-                    counterAndTable.counter.counter2 += 1;
+                    counterAndTable.counter.counter2 = expectedCount;
                 }
                 else if ("counter3".equals(columnName))
                 {
-                    counterAndTable.counter.counter3 += 1;
+                    counterAndTable.counter.counter3 = expectedCount;
                 }
                 else if ("counter4".equals(columnName))
                 {
-                    counterAndTable.counter.counter4 += 1;
+                    counterAndTable.counter.counter4 = expectedCount;
                 }
                 else if ("counter5".equals(columnName))
                 {
-                    counterAndTable.counter.counter5 += 1;
+                    counterAndTable.counter.counter5 = expectedCount;
                 }
                 else
                 {
@@ -853,6 +873,52 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             IterationExpectations iterationExpectations = new IterationExpectations(expectedIncrements);
 
             return Pair.create(iterationExpectations, changedTransactionState);
+        }
+
+        protected boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session)
+        {
+            // if we do query on counters and their counter matches expected counter, then transaction was committed.
+            //
+
+            getCounters().forEach(counter -> counter.refresh(session));
+
+            // We can also check that all counters are in sync, because there is a single counter executor that increments single counter column
+            Set<Integer> setOfCounterValues = getCounters().stream().map(counter -> getCounterValue(counter)).collect(Collectors.toSet());
+
+            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName + " has partially committed results");
+
+            return getCounters().stream().allMatch(counter -> {
+                int currentCounterColumnValue = getCounterValue(counter);
+
+                return currentCounterColumnValue == expectedCount;
+            });
+        }
+
+        int getCounterValue(CounterAndItsTable<?,?,?> counterAndTable) {
+            if ("counter1".equals(columnName))
+            {
+                return counterAndTable.counter.counter1;
+            }
+            else if ("counter2".equals(columnName))
+            {
+                return counterAndTable.counter.counter2;
+            }
+            else if ("counter3".equals(columnName))
+            {
+                return counterAndTable.counter.counter3;
+            }
+            else if ("counter4".equals(columnName))
+            {
+                return counterAndTable.counter.counter4;
+            }
+            else if ("counter5".equals(columnName))
+            {
+                return counterAndTable.counter.counter5;
+            }
+            else
+            {
+                throw new RuntimeException("BAAD column name");
+            }
         }
     }
 
@@ -962,7 +1028,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         Assert.assertTrue(maybeDisconvergence.orElse(""), !maybeDisconvergence.isPresent());
         if(!maybeDisconvergence.isPresent()) {
-            System.out.println("Replicas agree on state of transactions");
+            System.out.println("Replicas DO NOT agree on state of transactions");
         }
     }
 
