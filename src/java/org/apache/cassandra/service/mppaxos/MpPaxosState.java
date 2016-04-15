@@ -77,16 +77,16 @@ public class MpPaxosState
                         Tracing.trace("Promising ballot {}", toPrepare.ballot);
                         SystemKeyspaceMultiPartitionPaxosExtensions.savePaxosPromise(toPrepare, paxosId);
                         boolean promised = true;
-                        boolean notRolledBack = false;
-                        return new MpPrepareResponse(promised, notRolledBack, state.accepted, state.mostRecentCommit);
+                        boolean rolledBack = false;
+                        return new MpPrepareResponse(promised, rolledBack, state.accepted, state.mostRecentCommit);
                     }
                     else
                     {
                         Tracing.trace("Promise rejected; {} is not sufficiently newer than {}", toPrepare, state.promised);
                         // return the currently promised ballot (not the last accepted one) so the coordinator can make sure it uses newer ballot next time (#5667)
                         boolean notPromised = false;
-                        boolean notRolledBack = false;
-                        return new MpPrepareResponse(notPromised, notRolledBack, state.promised, state.mostRecentCommit);
+                        boolean rolledBack = false;
+                        return new MpPrepareResponse(notPromised, rolledBack, state.promised, state.mostRecentCommit);
                     }
                 }
                 finally
