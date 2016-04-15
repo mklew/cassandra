@@ -28,10 +28,12 @@ import java.util.UUID;
 
 import com.google.common.base.Preconditions;
 
+import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.joda.time.DateTime;
 
 
 /**
@@ -104,6 +106,21 @@ public class TransactionState implements Serializable
                "transactionId=" + transactionId +
                ", transactionItems=" + transactionItems +
                '}';
+    }
+
+    /**
+     * This is a nice hack to encode meaning "I want to read transaction" by creating UUID
+     * like that:
+     *  {@code UUID uuid = UUIDs.startOf(new DateTime().plusYears(1).plusDays(1).getMillis()); }
+     *
+     *  So timestamp in 1 year plus 1 day in the future. I choose these dates arbitrarly.
+     *
+     * @return
+     */
+    public boolean isReadTransaction()
+    {
+        long timestamp = UUIDs.unixTimestamp(transactionId);
+        return new DateTime(timestamp).minusYears(1).isAfterNow();
     }
 
     public Murmur3Partitioner.LongToken singleToken()

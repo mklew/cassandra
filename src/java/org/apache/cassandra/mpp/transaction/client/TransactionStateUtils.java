@@ -25,13 +25,16 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.SystemClock;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionItemDto;
 import org.apache.cassandra.mpp.transaction.client.dto.TransactionStateDto;
 import org.apache.cassandra.utils.UUIDGen;
+import org.joda.time.DateTime;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -87,5 +90,21 @@ public class TransactionStateUtils
         return ti -> new TransactionItem(new Murmur3Partitioner.LongToken(ti.getToken()),
                                        ti.getKsName(),
                                        ti.getCfName());
+    }
+
+    public static UUID createReadOnlyTransactionIdRaw() {
+        return UUIDs.startOf(new DateTime().plusYears(1).plusDays(1).getMillis());
+    }
+
+    public static TransactionState createReadOnlyTransaction(Token token, String ksName, String cfName)
+    {
+        TransactionItem transactionItem = new TransactionItem(token, ksName, cfName);
+
+        UUID uuid = createReadOnlyTransactionIdRaw();
+
+        TransactionState transactionState = new TransactionState(uuid, Collections.singletonList(transactionItem));
+        assert transactionState.isReadTransaction();
+
+        return transactionState;
     }
 }

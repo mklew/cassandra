@@ -19,17 +19,22 @@
 package org.apache.cassandra.mpp.transaction.serialization;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.UUID;
 
 import org.junit.Test;
 
+import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
 import org.apache.cassandra.net.MessagingService;
+import org.joda.time.DateTime;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -40,7 +45,7 @@ public class TransactionStateSerializerTest
     final int version = MessagingService.VERSION_30;
 
 
-    @Test(expected = AssertionError.class)
+    @Test
     public void shouldFailSerializingEmptyTransactionState() {
         final TransactionState transactionState = TransactionStateUtils.newTransactionState();
 
@@ -52,7 +57,8 @@ public class TransactionStateSerializerTest
         }
         catch (IOException e)
         {
-            fail();
+//            fail();
+            // No longer true, because MpCommit has empty transaction if MpCommit is empty.
         }
     }
 
@@ -79,6 +85,23 @@ public class TransactionStateSerializerTest
         transactionState.addTxItem(TransactionItemSerializerTest.getTransactionItem());
 
         testSerialization(transactionState);
+    }
+
+    @Test
+    public void shouldCreateReadOnlyTransactionUsingMinValueLong() throws IOException
+    {
+        UUID uuid = UUIDs.startOf(new DateTime().plusYears(1).plusDays(1).getMillis());
+        TransactionState transactionState = new TransactionState(uuid, Collections.singletonList(TransactionItemSerializerTest.getTransactionItem()));
+
+        assertTrue("should be read only transaction", transactionState.isReadTransaction());
+    }
+
+    @Test
+    public void transactionCreatedWithNormalTimestampShouldNotBeReadOnly() throws IOException {
+        final TransactionState transactionState = TransactionStateUtils.newTransactionState();
+        transactionState.addTxItem(TransactionItemSerializerTest.getTransactionItem());
+
+        assertFalse("normal timestamp should not be read only transaction", transactionState.isReadTransaction());
     }
 
     @Test
