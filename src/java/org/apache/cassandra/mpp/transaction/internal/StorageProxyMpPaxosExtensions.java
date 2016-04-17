@@ -283,11 +283,38 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
+    public static String phasesForReplicaGroup(ReplicasGroup rg) {
+        return "ReplicaGroup: \t" + rg.getAllReplicasInThatGroup().stream().map(replica -> {
+          return replica.getHostAddress() + " -> " + replica.getPhase().toString() + "\t";
+        }).reduce((s1,s2) -> s1 + s2).get();
+    }
+
+    public static String phasesForReplicaGroups(Collection<ReplicasGroup> replicaGroups) {
+        return replicaGroups.stream().map(rg -> phasesForReplicaGroup(rg)).reduce((s1,s2) -> s1 + s2).get();
+    }
+
     public static Phase findNextPhaseForReplica(Replica replica, Collection<ReplicasGroup> replicaGroups)
     {
         Phase minimumPhaseAmongAllReplicaGroups = findMinimumPhaseAmongAllReplicaGroups(replicaGroups);
+        if(minimumPhaseAmongAllReplicaGroups.ordinal() < replica.getPhase().ordinal()) {
+            return getNextExpectedPhase(minimumPhaseAmongAllReplicaGroups);
+        }
+
         Phase nextExpectedPhase = getNextExpectedPhase(minimumPhaseAmongAllReplicaGroups);
-        return findNextPhaseForReplica(replica, minimumPhaseAmongAllReplicaGroups, nextExpectedPhase);
+        Phase nextPhaseForReplica = findNextPhaseForReplica(replica, minimumPhaseAmongAllReplicaGroups, nextExpectedPhase);
+        logger.debug("Replica {} is in phase {} and minimum phase among quorum is {}. Computed next phase to be {} Phases for replica groups are {}", replica.getHostAddress(),
+                     replica.getPhase(), minimumPhaseAmongAllReplicaGroups, nextPhaseForReplica, phasesForReplicaGroups(replicaGroups));
+
+        // This doesn't work well, it is too simple because phases in enum and their ordinals do not match with expected path transitions. Rollback causes trouble.
+//        if(nextPhaseForReplica.ordinal() > minimumPhaseAmongAllReplicaGroups.ordinal() + 1) {
+//            logger.error("Replica {} skips too many phases Replica phase {}. minimum among quorum {} next for replica {} ERROR Replica phase",
+//                         replica.getHostAddress(),
+//                         replica.getPhase(),
+//                         minimumPhaseAmongAllReplicaGroups,
+//                         nextExpectedPhase);
+//        }
+
+        return nextPhaseForReplica;
     }
 
     public static TransitionId findNextTransitionId(Replica replica, Phase nextPhaseForReplica)
