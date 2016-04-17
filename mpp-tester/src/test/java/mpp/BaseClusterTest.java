@@ -227,7 +227,7 @@ public abstract class BaseClusterTest
     }
 
     protected Stream<NamedNodeProbe> getNodeProbesNamedStream() {
-        return Stream.of(new NamedNodeProbe(getNodeProbe1(), "Node1"), new NamedNodeProbe(getNodeProbe2(), "Node3"), new NamedNodeProbe(getNodeProbe3(), "Node3"));
+        return Stream.of(new NamedNodeProbe(getNodeProbe1(), "Node1"), new NamedNodeProbe(getNodeProbe2(), "Node2"), new NamedNodeProbe(getNodeProbe3(), "Node3"));
     }
 
     protected Session getSessionN1()

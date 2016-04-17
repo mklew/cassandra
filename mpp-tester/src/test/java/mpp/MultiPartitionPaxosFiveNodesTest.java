@@ -629,6 +629,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         protected Collection<CounterAndItsTable> counters;
 
+        private Session session;
+
         private CounterExecutor(int iterations, String name, Collection<CounterAndItsTable> countersThatExist)
         {
             this.iterations = iterations;
@@ -639,9 +641,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         }
 
         public void prepare() {
-            Session session = getAnySession();
+            session = getAnySession();
             this.counters = counters.stream().map(counter -> counter.copy(session)).collect(toList());
-            session.close();
         }
 
         public CompletableFuture<CounterExecutorResults> getCounterExecutorResultsFuture()
@@ -680,6 +681,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 currentIteration++;
             }
             CounterExecutorResults computedResults = computeResults();
+            session.close();
             resultsF.complete(computedResults);
         }
 
@@ -691,7 +693,6 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         private void runIteration(int iteration)
         {
-            Session session = getAnySession();
             getCounters().forEach(counter -> counter.refresh(session));
 
             TransactionState transactionState = beginTransaction(session);
@@ -748,7 +749,6 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 iterationResults.add(iterationResult);
             }
 
-            session.close();
         }
     }
 
