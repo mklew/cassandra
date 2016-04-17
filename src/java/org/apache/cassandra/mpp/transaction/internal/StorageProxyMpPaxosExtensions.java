@@ -532,6 +532,7 @@ public class StorageProxyMpPaxosExtensions
         Collection<Replica> allReplicas = replicaGroups.iterator().next().getAllReplicas();
         CommonStateHolder commonState = new CommonStateHolder();
         allReplicas.forEach(replica -> {
+            replica.setPhase(startFromPrePreparePhase);
             ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new ReplicaInPrePreparedPhase(transactionState, state, replica, Optional.<MpPaxosId>empty(), null), commonState);
             replica.setHolder(holder);
         });
@@ -554,6 +555,7 @@ public class StorageProxyMpPaxosExtensions
         allReplicas.forEach(replica -> {
             ReplicaInPhaseHolder holder = new ReplicaInPhaseHolder(new ReplicaInPreparedPhase(inProgressTransactionState, state, replica, Optional.empty(), null, ballot, false), commonState);
             replica.setHolder(holder);
+            replica.setPhase(Phase.PREPARE_PHASE);
         });
 
 //        List<ReplicaGroupInPhaseHolder> inPhases = replicasGroupAndOwnedItems.stream().map(rg -> {
@@ -565,12 +567,12 @@ public class StorageProxyMpPaxosExtensions
 //        }).map(ReplicaGroupInPhaseHolder::new)
 //                                                                             .collect(Collectors.toList());
 
-        List<ReplicasGroup> inPhases = replicasGroupAndOwnedItems.stream()
+        List<ReplicasGroup> replicaGroups = replicasGroupAndOwnedItems.stream()
                                                     .map(ReplicasGroupAndOwnedItems::getReplicasGroup)
                                                     .collect(Collectors.toList());
 
         // TODO [MPP] It might be done if we see that transaction was rolled back.
-        ReplicaGroupsPhaseExecutor replicaGroupsPhaseExecutor = new ReplicaGroupsPhaseExecutor(inProgressTransactionState, Phase.AFTER_COMMIT_PHASE, inPhases, replicasGroupAndOwnedItems.iterator().next().getAllReplicas());
+        ReplicaGroupsPhaseExecutor replicaGroupsPhaseExecutor = new ReplicaGroupsPhaseExecutor(inProgressTransactionState, Phase.AFTER_COMMIT_PHASE, replicaGroups, replicasGroupAndOwnedItems.iterator().next().getAllReplicas());
         replicaGroupsPhaseExecutor.setIsRepairing(true);
         return replicaGroupsPhaseExecutor;
     }
