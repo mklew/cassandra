@@ -1,8 +1,10 @@
-drop keyspace mpptest;
+DROP KEYSPACE  IF EXISTS mpptest;
 
-drop keyspace mpptest_counters;
+DROP KEYSPACE  IF EXISTS mpptest_counters;
 
-drop keyspace mpptest_counters_other;
+DROP KEYSPACE  IF EXISTS mpptest_counters_other;
+
+DROP KEYSPACE  IF EXISTS mpptest_counters_bounds;
 
 CREATE KEYSPACE "mpptest" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3} ;
 
@@ -33,4 +35,16 @@ CREATE KEYSPACE "mpptest_counters_other" WITH replication = {'class': 'SimpleStr
 create table mpptest_counters_other.counter1 (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
 
 create table mpptest_counters_other.named_counter1 (id text, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
+CREATE KEYSPACE "mpptest_counters_bounds" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
+
+CREATE TABLE mpptest_counters_bounds.counter_one_for_all (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
+ALTER TABLE mpptest_counters_bounds.counter_one_for_all WITH extensions = { 'transaction_conflict_bounds' : 'ONE_FOR_ALL' };
+
+CREATE TABLE mpptest_counters_bounds.counter_two_slices (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
+ALTER TABLE mpptest_counters_bounds.counter_two_slices WITH extensions = { 'transaction_conflict_bounds' : 'TOKEN_RANGE_SLICES', 'token_range_slices' : '2' };
+
+
 
