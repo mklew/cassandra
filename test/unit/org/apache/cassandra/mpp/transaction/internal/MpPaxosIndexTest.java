@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -27,6 +28,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.junit.Before;
@@ -69,6 +72,11 @@ public class MpPaxosIndexTest
     final TransactionItem ti2_1 = newTransactionItem(ksName, cf2Name, token1);
     final TransactionItem ti2_2 = newTransactionItem(ksName, cf2Name, token2);
     final TransactionItem ti2_3 = newTransactionItem(ksName, cf2Name, token3);
+
+    Collection<TransactionItem> createTransactionItems(int startToken, int endToken)
+    {
+        return IntStream.range(startToken, endToken).mapToObj((i) -> newTransactionItem(ksName, cfName, i)).collect(Collectors.toList());
+    }
 
 
     private DeleteTransactionsDataServiceStub deleteTransactionsDataService;
@@ -362,6 +370,10 @@ public class MpPaxosIndexTest
         return transactionState;
     }
 
+    private TransactionState newTransactionState(Collection<TransactionItem> items) {
+        return newTransactionState(items.toArray(new TransactionItem [items.size()]));
+    }
+
     private TransactionState newTransactionStateForReadOnly(TransactionItem item) {
         return TransactionStateUtils.createReadOnlyTransaction(item.getToken(), item.getKsName(), item.getCfName());
     }
@@ -553,6 +565,32 @@ public class MpPaxosIndexTest
         assertTransactionDataNotDeleted(tx1.id());
         assertTransactionDataNotDeleted(tx2.id());
     }
+
+    @Test
+    public void testSizeOfMppIndexBasedOnStrategy() {
+        mpPaxosIndex.setMppIndexKeys(new MppIndexKeysImpl() {
+            public TransactionConflictBounds findConflictBounds(String ksName, String cfName)
+            {
+                // Ignores cfName so it is ONE_FOR_ALL for all CFs
+                return TransactionConflictBounds.ONE_FOR_ALL_BOUNDS;
+            }
+        });
+
+        // these creates all transaction items in same CF so expected size of paxos participants is 2 for single key
+        TransactionState tx1 = newTransactionState(createTransactionItems(1, 1000));
+        TransactionState tx2 = newTransactionState(createTransactionItems(500, 1000));
+
+
+        Assert.assertEquals(tx1.getTransactionItems().size(), 999);
+
+        mpPaxosIndex.acquireForMppPaxos(tx1);
+        mpPaxosIndex.acquireForMppPaxos(tx2);
+
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().size());
+
+        Assert.assertEquals(2, mpPaxosIndex.getIndexUnsafe().entrySet().iterator().next().getValue().getParticipantsUnsafe().size());
+    }
+
 
 
     // TODO [MPP]:
