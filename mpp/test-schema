@@ -1,3 +1,9 @@
+drop keyspace mpptest;
+
+drop keyspace mpptest_counters;
+
+drop keyspace mpptest_counters_other;
+
 CREATE KEYSPACE "mpptest" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3} ;
 
 create table mpptest.user_items (user_name varchar, item_id uuid, item_description text, primary key (user_name, item_id));
@@ -5,13 +11,6 @@ create table mpptest.user_items (user_name varchar, item_id uuid, item_descripti
 create table mpptest.items (item_id uuid, item_description text, price text, primary key (item_id));
 
 create table mpptest.users_by_items (item_id uuid, user_name varchar, primary key (item_id, user_name));
-
-create table mpptest.users_by_items (item_id uuid, user_name varchar, primary key (item_id, user_name));
-
-insert into mpptest.items (item_id, item_description, price) values (uuid(), 'some description', 'some price') USING TRANSACTION 55033639-59b5-4270-821a-792d68e675cc;
-
-
-## Counters schema
 
 CREATE KEYSPACE "mpptest_counters" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
 
