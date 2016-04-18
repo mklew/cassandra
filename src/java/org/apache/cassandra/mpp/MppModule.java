@@ -22,8 +22,10 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.mpp.transaction.MppIndexKeys;
 import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.internal.MpPaxosIndex;
+import org.apache.cassandra.mpp.transaction.internal.MppIndexKeysImpl;
 import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
 import org.apache.cassandra.mpp.transaction.internal.NativeReadTransactionDataRequestExecutor;
 import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
@@ -52,12 +54,14 @@ public class MppModule
     public static MppModule createModule(MppNetworkService mppNetworkService)
     {
         logger.info("MppModule is being created");
+        MppIndexKeys mppIndexKeys = new MppIndexKeysImpl();
         final MppServiceImpl service = new MppServiceImpl();
         final PrivateMemtableStorageImpl privateMemtableStorage = new PrivateMemtableStorageImpl();
         MpPaxosIndex mpPaxosIndex = new MpPaxosIndex();
 
         mpPaxosIndex.setDeleteTransactionsDataService(privateMemtableStorage);
         mpPaxosIndex.setJmxRolledBackTxsInfo(service);
+        mpPaxosIndex.setMppIndexKeys(mppIndexKeys);
 
         final NativeReadTransactionDataRequestExecutor nativeReadTransactionDataRequestExecutor = new NativeReadTransactionDataRequestExecutor(MessagingService.instance());
 

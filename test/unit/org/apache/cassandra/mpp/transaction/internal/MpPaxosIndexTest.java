@@ -35,6 +35,7 @@ import org.junit.Test;
 import junit.framework.Assert;
 import org.apache.cassandra.SystemClock;
 import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
+import org.apache.cassandra.mpp.transaction.TransactionConflictBounds;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -55,6 +56,7 @@ public class MpPaxosIndexTest
 
     String ksName = "test_ks";
     String cfName = "cf1";
+    String cf2Name = "cf2";
     long token1 = 1;
     long token2 = 2;
     long token3 = 3;
@@ -64,6 +66,10 @@ public class MpPaxosIndexTest
     final TransactionItem ti2 = newTransactionItem(ksName, cfName, token2);
     final TransactionItem ti3 = newTransactionItem(ksName, cfName, token3);
     final TransactionItem ti4 = newTransactionItem(ksName, cfName, token4);
+    final TransactionItem ti2_1 = newTransactionItem(ksName, cf2Name, token1);
+    final TransactionItem ti2_2 = newTransactionItem(ksName, cf2Name, token2);
+    final TransactionItem ti2_3 = newTransactionItem(ksName, cf2Name, token3);
+
 
     private DeleteTransactionsDataServiceStub deleteTransactionsDataService;
 
@@ -78,8 +84,16 @@ public class MpPaxosIndexTest
                 return txState -> txState.getTransactionItems().stream();
             }
         };
+        MppIndexKeysImpl mppIndexKeys = new MppIndexKeysImpl()
+        {
+            public TransactionConflictBounds findConflictBounds(String ksName, String cfName)
+            {
+                return TransactionConflictBounds.COMMON_TX_ITEMS_BOUNDS;
+            }
+        };
         deleteTransactionsDataService = new DeleteTransactionsDataServiceStub();
         mpPaxosIndex.setDeleteTransactionsDataService(deleteTransactionsDataService);
+        mpPaxosIndex.setMppIndexKeys(mppIndexKeys);
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -112,9 +126,9 @@ public class MpPaxosIndexTest
             Assert.assertTrue("Should proceed because there are no conflicts to be checked", result.canProceed());
         });
 
-        final MpPaxosIndex.MpPaxosParticipant participant = mpPaxosIndex.getIndexUnsafe().get(ti1).getParticipantsUnsafe().iterator().next();
-        final MpPaxosIndex.MpPaxosParticipant participantForTi2 = mpPaxosIndex.getIndexUnsafe().get(ti2).getParticipantsUnsafe().iterator().next();
-        final MpPaxosIndex.MpPaxosParticipant participantForTi3 = mpPaxosIndex.getIndexUnsafe().get(ti3).getParticipantsUnsafe().iterator().next();
+        final MpPaxosIndex.MpPaxosParticipant participant = mpPaxosIndex.getIndexUnsafe(ti1).getParticipantsUnsafe().iterator().next();
+        final MpPaxosIndex.MpPaxosParticipant participantForTi2 = mpPaxosIndex.getIndexUnsafe(ti2).getParticipantsUnsafe().iterator().next();
+        final MpPaxosIndex.MpPaxosParticipant participantForTi3 = mpPaxosIndex.getIndexUnsafe(ti3).getParticipantsUnsafe().iterator().next();
 
         Assert.assertSame(participant, participantForTi2);
         Assert.assertSame(participant, participantForTi3);
@@ -141,10 +155,10 @@ public class MpPaxosIndexTest
         Assert.assertFalse(tx2Results.canProceed());
         Assert.assertTrue(tx2Results.hasToCheckForConflicts());
 
-        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().get(ti1).getParticipantsUnsafe().size());
-        Assert.assertEquals(2, mpPaxosIndex.getIndexUnsafe().get(ti2).getParticipantsUnsafe().size());
-        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().get(ti3).getParticipantsUnsafe().size());
-        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe().get(ti4).getParticipantsUnsafe().size());
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe(ti1).getParticipantsUnsafe().size());
+        Assert.assertEquals(2, mpPaxosIndex.getIndexUnsafe(ti2).getParticipantsUnsafe().size());
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe(ti3).getParticipantsUnsafe().size());
+        Assert.assertEquals(1, mpPaxosIndex.getIndexUnsafe(ti4).getParticipantsUnsafe().size());
 
         assertParticipantsInOrder(ti2, tx1, tx2);
 
@@ -156,7 +170,7 @@ public class MpPaxosIndexTest
     }
 
     public void assertParticipantsInOrder(TransactionItem ti, TransactionState ... txs) {
-        final MpPaxosIndex.MppPaxosRoundPointers mppPaxosRoundPointers = mpPaxosIndex.getIndexUnsafe().get(ti);
+        final MpPaxosIndex.MppPaxosRoundPointers mppPaxosRoundPointers = mpPaxosIndex.getIndexUnsafe(ti);
         final LinkedHashSet<MpPaxosIndex.MpPaxosParticipant> participantsUnsafe = (LinkedHashSet<MpPaxosIndex.MpPaxosParticipant>) mppPaxosRoundPointers.getParticipantsUnsafe();
         final Iterator<MpPaxosIndex.MpPaxosParticipant> iterator = participantsUnsafe.iterator();
         for (TransactionState tx : txs)
@@ -202,7 +216,7 @@ public class MpPaxosIndexTest
 
     private MpPaxosIndex.MpPaxosParticipant findParticipantForStateAndItem(TransactionState tx, TransactionItem ti)
     {
-        return mpPaxosIndex.getIndexUnsafe().get(ti).getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst().get();
+        return mpPaxosIndex.getIndexUnsafe(ti).getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst().get();
     }
 
     /**
@@ -331,7 +345,7 @@ public class MpPaxosIndexTest
 
         final MpPaxosIndex.MppIndexResultActions tx2AfterRecheck = mpPaxosIndex.acquireAndReCheck(tx2);
 
-        Assert.assertEquals(MpPaxosIndex.CheckForRollbackResult.result, tx2AfterRecheck);
+        Assert.assertEquals(tx2AfterRecheck.toString(), MpPaxosIndex.CheckForRollbackResult.result, tx2AfterRecheck);
         Assert.assertTrue("Should check for rollback", tx2AfterRecheck.needsToCheckForRollback());
     }
 
@@ -486,6 +500,60 @@ public class MpPaxosIndexTest
         Assert.assertFalse("Should be idempotent operation", mpPaxosIndex.acquireAndFindPaxosId(tx1).isPresent());
 
     }
+
+    @Test
+    public void testWhenBoundsAreOneForAll() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2, ti4);
+        final TransactionState tx3 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx4 = newTransactionState(ti4);
+
+        MppIndexKeysImpl mppIndexKeys = new MppIndexKeysImpl()
+        {
+            public TransactionConflictBounds findConflictBounds(String ksName, String cfName)
+            {
+                return TransactionConflictBounds.ONE_FOR_ALL_BOUNDS;
+            }
+        };
+
+        mpPaxosIndex.setMppIndexKeys(mppIndexKeys);
+
+        final Optional<MpPaxosId> r4 = mpPaxosIndex.acquireForMppPaxos(tx4);
+        final Optional<MpPaxosId> r3 = mpPaxosIndex.acquireForMppPaxos(tx3);
+        final Optional<MpPaxosId> r2 = mpPaxosIndex.acquireForMppPaxos(tx2);
+        final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
+
+        Assert.assertTrue(r4.isPresent());
+        Assert.assertEquals(r4, r3);
+        Assert.assertEquals(r4, r2);
+        Assert.assertEquals(r4, r1);
+
+        mpPaxosIndex.acquireAndMarkAsCommitted(tx2, System.currentTimeMillis());
+        assertTransactionDataDeleted(tx1.id());
+        assertTransactionDataDeleted(tx3.id());
+        assertTransactionDataDeleted(tx4.id());
+    }
+
+    @Test
+    public void testBoundsOneForAllArePerColumnFamily() {
+        final TransactionState tx1 = newTransactionState(ti1, ti2, ti3);
+        final TransactionState tx2 = newTransactionState(ti2_2, ti2_1);
+
+        final Optional<MpPaxosId> r1 = mpPaxosIndex.acquireForMppPaxos(tx1);
+        final Optional<MpPaxosId> r2 = mpPaxosIndex.acquireForMppPaxos(tx2);
+
+        Assert.assertTrue(r1.isPresent());
+        Assert.assertTrue(r2.isPresent());
+
+        Assert.assertTrue(!r1.equals(r2));
+
+        mpPaxosIndex.acquireAndMarkAsCommitted(tx2, System.currentTimeMillis());
+        mpPaxosIndex.acquireAndMarkAsCommitted(tx1, System.currentTimeMillis());
+
+        assertTransactionDataNotDeleted(tx1.id());
+        assertTransactionDataNotDeleted(tx2.id());
+    }
+
 
     // TODO [MPP]:
         // TODO actually check for conflict

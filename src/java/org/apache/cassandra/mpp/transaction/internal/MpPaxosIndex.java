@@ -46,6 +46,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
+import org.apache.cassandra.mpp.transaction.MppIndexKey;
+import org.apache.cassandra.mpp.transaction.MppIndexKeys;
 import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -67,11 +69,12 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     private static final Logger logger = LoggerFactory.getLogger(MpPaxosIndex.class);
 
-    private Map<TransactionItem, MppPaxosRoundPointers> index = new HashMap<>();
+    private Map<MppIndexKey, MppPaxosRoundPointers> index = new HashMap<>();
 
     private DeleteTransactionsDataService deleteTransactionsDataService;
 
     private JmxRolledBackTxsInfo jmxRolledBackTxsInfo;
+    private MppIndexKeys mppIndexKeys;
 
     public JmxRolledBackTxsInfo getJmxRolledBackTxsInfo()
     {
@@ -93,9 +96,19 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         this.deleteTransactionsDataService = deleteTransactionsDataService;
     }
 
-    public Map<TransactionItem, MppPaxosRoundPointers> getIndexUnsafe()
+    Map<MppIndexKey, MppPaxosRoundPointers> getIndexUnsafe()
     {
         return index;
+    }
+
+    public MppPaxosRoundPointers getIndexUnsafe(TransactionItem transactionItem) {
+        MppIndexKey mppIndexKey = computeKey(transactionItem);
+        return getIndexUnsafe().get(mppIndexKey);
+    }
+
+    private MppIndexKey computeKey(TransactionItem transactionItem)
+    {
+        return mppIndexKeys.computeKey(transactionItem.getKsName(), transactionItem.getCfName(), transactionItem);
     }
 
     /**
@@ -107,7 +120,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
      */
     public MppIndexResultActions addItToIndex(TransactionState transactionState, List<TransactionItem> items)
     {
-        final Map<TransactionItem, Optional<MppPaxosRoundPointers>> gotIndex = getIndexForItems(items);
+        final Map<MppIndexKey, Optional<MppPaxosRoundPointers>> gotIndex = getIndexForItems(items);
 
         if (wholeIndexIsEmpty(gotIndex))
         {
@@ -136,12 +149,12 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         }
     }
 
-    private Map<TransactionItem, List<MpPaxosParticipant>> getParticipantsUntil(Map<TransactionItem, Optional<MppPaxosRoundPointers>> gotIndex, MpPaxosParticipant paxosParticipant)
+    private Map<MppIndexKey, List<MpPaxosParticipant>> getParticipantsUntil(Map<MppIndexKey, Optional<MppPaxosRoundPointers>> gotIndex, MpPaxosParticipant paxosParticipant)
     {
         return getParticipantsUntilTx(gotIndex, paxosParticipant.getTransactionState());
     }
 
-    private Map<TransactionItem, List<MpPaxosParticipant>> getParticipantsUntilTx(Map<TransactionItem, Optional<MppPaxosRoundPointers>> gotIndex, TransactionState txState)
+    private Map<MppIndexKey, List<MpPaxosParticipant>> getParticipantsUntilTx(Map<MppIndexKey, Optional<MppPaxosRoundPointers>> gotIndex, TransactionState txState)
     {
         return gotIndex.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
                                                                      v -> v.getValue()
@@ -154,9 +167,24 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     }
 
 
-    private Map<TransactionItem, Optional<MppPaxosRoundPointers>> getIndexForItems(List<TransactionItem> items)
+    private Map<MppIndexKey, Optional<MppPaxosRoundPointers>> getIndexForItems(List<TransactionItem> items)
     {
-        return items.stream().collect(Collectors.toMap(Function.identity(), ti -> Optional.ofNullable(getIndexUnsafe().get(ti))));
+        return items.stream().map(this::computeKey).distinct().collect(Collectors.toMap(Function.identity(), k -> Optional.ofNullable(getIndexUnsafe().get(k))));
+    }
+
+    private Map<TransactionItem, List<TransactionState>> transformIndexKeysToItems(List<TransactionItem> items, Map<MppIndexKey, List<TransactionState>> needToResolveConflictWithThese) {
+        Map<MppIndexKey, List<TransactionItem>> groupedBySameIndexKey = items.stream().collect(Collectors.groupingBy(this::computeKey));
+
+        return needToResolveConflictWithThese.entrySet().stream().flatMap(e -> {
+            MppIndexKey key = e.getKey();
+            List<TransactionState> value = e.getValue();
+
+            List<TransactionItem> transactionItems = groupedBySameIndexKey.get(key);
+
+            Map<TransactionItem, List<TransactionState>> txItemToStates = transactionItems.stream().collect(Collectors.toMap(Function.<TransactionItem>identity(), x -> value));
+
+            return txItemToStates.entrySet().stream();
+        }).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     /**
@@ -181,7 +209,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     {
         final List<TransactionItem> items = getTransactionItemsOwnedByThisNodeSorted(paxosParticipant.getTransactionState());
 
-        final Map<TransactionItem, Optional<MppPaxosRoundPointers>> indexForItems = getIndexForItems(items);
+        final Map<MppIndexKey, Optional<MppPaxosRoundPointers>> indexForItems = getIndexForItems(items);
 
 
         final Collection<MpPaxosParticipant> conflictingParticipants = paxosParticipant.getParticipantsToRollback();
@@ -192,8 +220,8 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
         // these are guys with whom it still has to resolve conflict.
         // these are participants until paxosParticipant.
-        final Map<TransactionItem, List<MpPaxosParticipant>> participantsUntil = getParticipantsUntil(indexForItems, paxosParticipant);
-        final Map<TransactionItem, List<TransactionState>> needToResolveConflictWithThese = filterAndMapParticipants(participantsUntil, par -> !paxosParticipant.hasResolvedConflictWith(par), MpPaxosParticipant::getTransactionState);
+        final Map<MppIndexKey, List<MpPaxosParticipant>> participantsUntil = getParticipantsUntil(indexForItems, paxosParticipant);
+        final Map<MppIndexKey, List<TransactionState>> needToResolveConflictWithThese = filterAndMapParticipants(participantsUntil, par -> !paxosParticipant.hasResolvedConflictWith(par), MpPaxosParticipant::getTransactionState);
 
         final Set<TransactionState> txToCheckForConflictWith = getSetOfValues(needToResolveConflictWithThese);
         if(paxosRoundsFromConflictingTransactions.isEmpty() && txToCheckForConflictWith.isEmpty()) {
@@ -201,7 +229,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
             final UUID paxosId = inititatePaxosState();
             paxosParticipant.joinRound(paxosId);
             logger.debug("PaxosParticipant TxID {} creates paxos round with ID {}", paxosParticipant.getTransactionState().getTransactionId(), paxosId);
-            return new MppIndexResultActions(Sets.newHashSet(paxosId), needToResolveConflictWithThese, paxosParticipant);
+            return new MppIndexResultActions(Sets.newHashSet(paxosId), transformIndexKeysToItems(items, needToResolveConflictWithThese), paxosParticipant);
         }
         else if(paxosRoundsFromConflictingTransactions.size() == 1 && txToCheckForConflictWith.isEmpty()) {
             // All conflicts were resolved and there is only single paxos round -> This is expected use case
@@ -221,15 +249,15 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
             // TODO log it
         }
 
-        return new MppIndexResultActions(paxosRoundsFromConflictingTransactions, needToResolveConflictWithThese, paxosParticipant);
+        return new MppIndexResultActions(paxosRoundsFromConflictingTransactions, transformIndexKeysToItems(items, needToResolveConflictWithThese), paxosParticipant);
     }
 
-    private static Map<TransactionItem, List<MpPaxosParticipant>> filterParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate)
+    private static Map<MppIndexKey, List<MpPaxosParticipant>> filterParticipants(Map<MppIndexKey, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate)
     {
         return filterAndMapParticipants(participantsMap, predicate, Function.identity());
     }
 
-    private static <T> Map<TransactionItem, List<T>> filterAndMapParticipants(Map<TransactionItem, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate, Function<MpPaxosParticipant, T> mapper)
+    private static <T> Map<MppIndexKey, List<T>> filterAndMapParticipants(Map<MppIndexKey, List<MpPaxosParticipant>> participantsMap, Predicate<MpPaxosParticipant> predicate, Function<MpPaxosParticipant, T> mapper)
     {
         return participantsMap
                .entrySet()
@@ -335,6 +363,16 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     public boolean acquireAndRollback(TransactionState transactionState)
     {
         return acquireAndRemoveSelfInternal(transactionState);
+    }
+
+    public void setMppIndexKeys(MppIndexKeys mppIndexKeys)
+    {
+        this.mppIndexKeys = mppIndexKeys;
+    }
+
+    public MppIndexKeys getMppIndexKeys()
+    {
+        return mppIndexKeys;
     }
 
 
@@ -476,13 +514,13 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         final TransactionState transactionState = mpPaxosParticipant.getTransactionState();
         final List<TransactionItem> itsItems = getTransactionItemsOwnedByThisNodeSorted(transactionState);
         itsItems.forEach(item -> {
-            final MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe().get(item);
+            final MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe(item);
             if (mppPaxosRoundPointers != null)
             {
                 mppPaxosRoundPointers.removeParticipant(mpPaxosParticipant);
                 if (mppPaxosRoundPointers.isEmpty())
                 {
-                    getIndexUnsafe().remove(item);
+                    getIndexUnsafe().remove(computeKey(item));
                 }
             }
         });
@@ -533,7 +571,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     private Optional<MpPaxosParticipant> findParticipant(TransactionItem item, TransactionState tx)
     {
-        MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe().get(item);
+        MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe(item);
         if(mppPaxosRoundPointers != null) {
             return mppPaxosRoundPointers.getParticipantsUnsafe().stream().filter(p -> p.getTransactionState().equals(tx)).findFirst();
         }
@@ -561,7 +599,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         return getSetOfValues(participants);
     }
 
-    private static <T> Set<T> getSetOfValues(Map<TransactionItem, List<T>> participants)
+    private static <K,T> Set<T> getSetOfValues(Map<K, List<T>> participants)
     {
         return participants.entrySet().stream().map(Map.Entry::getValue).flatMap(Collection::stream).collect(Collectors.toSet());
     }
@@ -793,6 +831,17 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         {
             transactionHasCommittedInternal(transactionId, timestampOfCommit);
         }
+
+        public String toString()
+        {
+            return "MpPaxosParticipant{" +
+                   "paxosId=" + paxosId +
+                   ", transactionState=" + transactionState +
+                   ", nonConflictingTransactionIds=" + nonConflictingTransactionIds +
+                   ", hasToRollback=" + hasToRollback +
+                   ", wasRolledBack=" + wasRolledBack +
+                   '}';
+        }
     }
 
 
@@ -811,7 +860,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         return paxosId;
     }
 
-    private static boolean wholeIndexIsEmpty(Map<TransactionItem, Optional<MppPaxosRoundPointers>> getIndex)
+    private static boolean wholeIndexIsEmpty(Map<MppIndexKey, Optional<MppPaxosRoundPointers>> getIndex)
     {
         return getIndex.entrySet().stream().allMatch(e -> !e.getValue().isPresent());
     }
@@ -882,6 +931,15 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
             Preconditions.checkState(canProceed());
             return potentialPaxosRounds.iterator().next();
         }
+
+        public String toString()
+        {
+            return "MppIndexResultActions{" +
+                   "paxosParticipant=" + paxosParticipant +
+                   ", potentialPaxosRounds=" + potentialPaxosRounds +
+                   ", conflictsToBeChecked=" + conflictsToBeChecked +
+                   '}';
+        }
     }
 
     /**
@@ -920,7 +978,8 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     private void acquireIndexForItems(TransactionState transactionState, BiConsumer<MpPaxosIndex, List<TransactionItem>> mpPaxosIndex, List<TransactionItem> ownedByThisNode)
     {
         final List<Lock> locks = ownedByThisNode.stream()
-                                                .map(toLockKey)
+                                                .map(this::computeKey)
+                                                .distinct()
                                                 .map(LOCKS::get)
                                                 .collect(Collectors.toList());
         final ArrayDeque<Lock> reversedLocks = locks.stream().collect(Collectors.toCollection(ArrayDeque::new));
@@ -985,7 +1044,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         else {
             Preconditions.checkArgument(items.size() == 1, "TransactionState for read should have single item, but had " + items.size() + " and they are " + items);
             TransactionItem item = items.iterator().next();
-            MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe().get(item);
+            MppPaxosRoundPointers mppPaxosRoundPointers = getIndexUnsafe(item);
             if(mppPaxosRoundPointers != null) {
                 return mppPaxosRoundPointers.getParticipantsUnsafe().stream().filter(p -> p.isParticipatingInPaxosRound()).filter(p -> p.getPaxosId().isPresent())
                                             .map(p -> p.getPaxosId().get()).map(id -> (MpPaxosId) new MpPaxosIdImpl(id)).findFirst();
@@ -1047,48 +1106,6 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
     {
         return TRANSACTION_ITEMS_OWNED_BY_THIS_NODE;
     }
-
-    private static final Function<TransactionItem, LockKey> toLockKey = txItem -> new LockKey(txItem.getKsName(), txItem.getCfName(), (Long) txItem.getToken().getTokenValue());
-
-    private static class LockKey
-    {
-        private LockKey(String keyspace, String cf, Long token)
-        {
-            this.keyspace = keyspace;
-            this.cf = cf;
-            this.token = token;
-        }
-
-        private final String keyspace;
-
-        private final String cf;
-
-        private final Long token;
-
-
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            LockKey lockKey = (LockKey) o;
-
-            if (!cf.equals(lockKey.cf)) return false;
-            if (!keyspace.equals(lockKey.keyspace)) return false;
-            if (!token.equals(lockKey.token)) return false;
-
-            return true;
-        }
-
-        public int hashCode()
-        {
-            int result = keyspace.hashCode();
-            result = 31 * result + cf.hashCode();
-            result = 31 * result + token.hashCode();
-            return result;
-        }
-    }
-
 
 
     // TODO [MPP] rename it later
