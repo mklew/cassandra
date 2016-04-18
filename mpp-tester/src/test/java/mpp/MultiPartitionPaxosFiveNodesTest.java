@@ -398,7 +398,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         return Arrays.asList(ks1NamedCounter1_1C, ks1NamedCounter1_2C, ks1NamedCounter2_1C, ks2NamedCounter1_1C, ks2NamedCounter1_2C);
     }
 
-    public List<CounterColumnIncrementerExecutor> createCounterExecutors(int iterations, Collection<CounterAndItsTable> countersThatExist) {
+    public List<CounterExecutor> createCounterExecutors(int iterations, Collection<CounterAndItsTable> countersThatExist) {
         CounterColumnIncrementerExecutor counter1Executor = new CounterColumnIncrementerExecutor(iterations, "Counter1Exe", countersThatExist, "counter1");
         CounterColumnIncrementerExecutor counter2Executor = new CounterColumnIncrementerExecutor(iterations, "Counter2Exe", countersThatExist, "counter2");
         CounterColumnIncrementerExecutor counter3Executor = new CounterColumnIncrementerExecutor(iterations, "Counter3Exe", countersThatExist, "counter3");
@@ -439,7 +439,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     @Test
     public void runTestUsingCounters() throws Throwable {
         boolean checkForConverganceOfCommitsAndRollbacks = false;
-        int iterations = 10;
+        int iterations = 100;
         // There counters exist from previous test because they use named keys. Need to reset them
         Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
         Session anySession = getAnySession();
@@ -447,10 +447,14 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
 
         // TODO [MPP] Modify number of counter executors
-        List<CounterColumnIncrementerExecutor> counterExecutors = createCounterExecutors(iterations, counters);
+        List<CounterExecutor> counterExecutors = createCounterExecutors(iterations, counters);
 
+        runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
+    private void runTestCase(boolean checkForConverganceOfCommitsAndRollbacks, int iterations, Session anySession, Collection<CounterAndItsTable> counters, List<CounterExecutor> counterExecutors) throws InterruptedException, java.util.concurrent.ExecutionException
+    {
         ExecutorService executorService = Executors.newFixedThreadPool(counterExecutors.size());
-
         // Prepare all counter executors
         counterExecutors.forEach(counterExecutor -> counterExecutor.prepare());
 
