@@ -32,9 +32,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import com.google.common.base.Preconditions;
@@ -280,6 +280,17 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                    ", counterColumnToExpectedCount=" + counterColumnToExpectedCount +
                    '}';
         }
+
+        public Object getCounterId()
+        {
+            if(MppCountersTestSchema.TABLES_WHICH_HAVE_UUID.contains(table))
+            {
+                return UUID.fromString(counterId);
+            }
+            else {
+                return counterId;
+            }
+        }
     }
 
     private static class CounterExecutorResults {
@@ -452,6 +463,65 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
     }
 
+    @Test
+    public void runTestUsingOneForAllBounds() throws Throwable {
+        boolean checkForConverganceOfCommitsAndRollbacks = false;
+        int iterations = 20;
+
+        int numberOfOneForAllCounters = 5;
+
+        // These counters should all be conflicting with each other.
+        Collection<CounterAndItsTable> countersOneForAll = IntStream.rangeClosed(1, numberOfOneForAllCounters).mapToObj(i -> counterOneForAll()).collect(Collectors.toList());
+
+        Collection<CounterAndItsTable> countersToPersist = countersOneForAll;
+
+        Session anySession = getAnySession();
+        // reset counters & refresh counters
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+
+        // TODO [MPP] Modify number of counter executors
+        List<CounterExecutor> counterExecutors = createCounterExecutors(iterations, counters);
+
+        runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
+    // 62 C, 38 R
+    @Test
+    public void runTestUsingSliceBounds() throws Throwable {
+        boolean checkForConverganceOfCommitsAndRollbacks = false;
+        int iterations = 20;
+
+        int numberOfOneForAllCounters = 5;
+
+        // These counters should all be conflicting with each other.
+        Collection<CounterAndItsTable> countersWithTwoSlices = IntStream.rangeClosed(1, numberOfOneForAllCounters).mapToObj(i -> counterTwoSlices()).collect(Collectors.toList());
+
+        Collection<CounterAndItsTable> countersToPersist = countersWithTwoSlices;
+
+        Session anySession = getAnySession();
+        // reset counters & refresh counters
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+
+        // TODO [MPP] Modify number of counter executors
+        List<CounterExecutor> counterExecutors = createCounterExecutors(iterations, counters);
+
+        runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
+    private CounterAndItsTable counterTwoSlices()
+    {
+        CountersSchemaHelpers.CounterData counterTwoSlices = MppCountersTestSchema.counterTwoSlices.createCounterData(UUIDs.random(), 0,0,0,0,0);
+        CounterAndItsTable counterTwoSlicesWithTable = new CounterAndItsTable(counterTwoSlices, MppCountersTestSchema.counterTwoSlices);
+        return counterTwoSlicesWithTable;
+    }
+
+    private CounterAndItsTable counterOneForAll()
+    {
+        CountersSchemaHelpers.CounterData counterOneForAll = MppCountersTestSchema.counterOneForAll.createCounterData(UUIDs.random(), 0, 0, 0, 0, 0);
+        CounterAndItsTable counterOneForAllWithTable = new CounterAndItsTable(counterOneForAll, MppCountersTestSchema.counterOneForAll);
+        return counterOneForAllWithTable;
+    }
+
     private void runTestCase(boolean checkForConverganceOfCommitsAndRollbacks, int iterations, Session anySession, Collection<CounterAndItsTable> counters, List<CounterExecutor> counterExecutors) throws InterruptedException, java.util.concurrent.ExecutionException
     {
         ExecutorService executorService = Executors.newFixedThreadPool(counterExecutors.size());
@@ -542,7 +612,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                                                        expectedCounterCount.keyspace,
                                                        expectedCounterCount.table);
 
-                            SimpleStatement statement = new SimpleStatement(cql, expectedCounterCount.counterId);
+                            SimpleStatement statement = new SimpleStatement(cql, expectedCounterCount.getCounterId());
                             statement.setConsistencyLevel(ConsistencyLevel.QUORUM);
 
                             ResultSet counterQueryResult = anySession.execute(statement);
@@ -838,15 +908,22 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 if (currentCount != expectedCount)
                 {
                     String msg = String.format("Current count of counter column %s with ID %s from %s.%s is %s and exepcted count is %s",
-                                                  columnName, counterAndItsTable.counter.id, counterAndItsTable.table.keyspaceName,
-                                                  counterAndItsTable.table.tableName, String.valueOf(currentCount), String.valueOf(expectedCount));
+                                               columnName, counterAndItsTable.counter.id, counterAndItsTable.table.keyspaceName,
+                                               counterAndItsTable.table.tableName, String.valueOf(currentCount), String.valueOf(expectedCount));
                     System.out.println(msg);
                 }
                 return currentCount;
             }).collect(Collectors.toSet());
 
-            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
-                                                                     + " has partially committed results. Results are " + setOfCounterValues);
+            if(setOfCounterValues.size() != 1)
+            {
+                System.err.println("Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+                                   + " has partially committed results. Results are " + setOfCounterValues);
+                return false;
+            }
+            // TODO [MPP] Removed assertion about convergence.
+//            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+//                                                                     + " has partially committed results. Results are " + setOfCounterValues);
 
             currentCount = setOfCounterValues.iterator().next();
 

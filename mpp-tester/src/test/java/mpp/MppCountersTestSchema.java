@@ -18,6 +18,8 @@
 
 package mpp;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 import com.datastax.driver.core.ConsistencyLevel;
@@ -31,6 +33,18 @@ public class MppCountersTestSchema
 {
     static String counters = "mpptest_counters";
 
+    static Set<String> TABLES_WHICH_HAVE_UUID = new HashSet<>();
+
+    static {
+        TABLES_WHICH_HAVE_UUID.add("counter1");
+        TABLES_WHICH_HAVE_UUID.add("counter2");
+        TABLES_WHICH_HAVE_UUID.add("counter3");
+        TABLES_WHICH_HAVE_UUID.add("counter4");
+        TABLES_WHICH_HAVE_UUID.add("stop_after_proposed");
+        TABLES_WHICH_HAVE_UUID.add("counter_one_for_all");
+        TABLES_WHICH_HAVE_UUID.add("counter_two_slices");
+    }
+
     static CountersSchemaHelpers.CounterTable countersCounter1 = new CountersSchemaHelpers.CounterTable(counters, "counter1");
     static CountersSchemaHelpers.CounterTable countersCounter2 = new CountersSchemaHelpers.CounterTable(counters, "counter2");
     static CountersSchemaHelpers.CounterTable countersCounter3 = new CountersSchemaHelpers.CounterTable(counters, "counter3");
@@ -42,8 +56,13 @@ public class MppCountersTestSchema
 
     static String counterKeyspace2 = "mpptest_counters_other";
 
+    static String boundsKeyspace = "mpptest_counters_bounds";
+
     static CountersSchemaHelpers.CounterTable otherCounters = new CountersSchemaHelpers.CounterTable(counterKeyspace2, "counter1");
     static CountersSchemaHelpers.NamedCounterTable otherCountersNamed = new CountersSchemaHelpers.NamedCounterTable(counterKeyspace2, "named_counter1");
+
+    static CountersSchemaHelpers.CounterTable counterOneForAll = new CountersSchemaHelpers.CounterTable(boundsKeyspace, "counter_one_for_all");
+    static CountersSchemaHelpers.CounterTable counterTwoSlices = new CountersSchemaHelpers.CounterTable(boundsKeyspace, "counter_two_slices");
 
 
     public static CountersSchemaHelpers.CounterData inititateCounterData(CountersSchemaHelpers.CounterTable counterTable, UUID counterId, Session session) {
