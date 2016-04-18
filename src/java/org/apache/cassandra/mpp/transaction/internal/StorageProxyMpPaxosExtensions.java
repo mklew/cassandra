@@ -262,9 +262,14 @@ public class StorageProxyMpPaxosExtensions
     public static Phase getMaximumPhaseSharedByQuorum(Collection<WithPhase> withPhases)
     {
         int size = withPhases.size();
-        int quorum = size / 2 + 1;
-        List<Phase> collected = withPhases.stream().map(WithPhase::getPhase).sorted().collect(Collectors.toList());
-        return collected.get(quorum - 1);
+        if(size == 2) {
+            return withPhases.stream().map(WithPhase::getPhase).sorted().findFirst().get();
+        }
+        else {
+            int quorum = size / 2 + 1;
+            List<Phase> collected = withPhases.stream().map(WithPhase::getPhase).sorted().collect(Collectors.toList());
+            return collected.get(quorum - 1);
+        }
     }
 
     public static Phase findNextPhaseForReplica(Replica replica, Phase minimumPhaseAmongAllReplicaGroups, Phase nextExpectedPhase)
@@ -458,7 +463,7 @@ public class StorageProxyMpPaxosExtensions
         }
     }
 
-    enum TransitionId
+    public enum TransitionId
     {
         NOOP, TO_PRE_PREPARED, TO_PREPARED, TO_PROPOSED, TO_COMMITTED, TO_PREPARED_FROM_REPARING,
     }
@@ -741,6 +746,9 @@ public class StorageProxyMpPaxosExtensions
                     ReplicasGroup replicasGroup = replicaGroupInPhaseHolder;
 
                     List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+                    if(allReplicasInThatGroup.size() == 2) {
+                        logger.debug("2ReplicasInGroup {}  TxId {} Phase of replica groups {}", allReplicasInThatGroup, transactionState.getTransactionId(), phasesForReplicaGroups(replicaGroups));
+                    }
 
                     List<TransitionResult> transitionResults = allReplicasInThatGroup.stream().map(Replica::getReplicaInPhaseHolder).map(x -> x.getTransitionResult()).collect(Collectors.toList());
                     Phase quorumPhaseAfterTransition = getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
@@ -980,6 +988,11 @@ public class StorageProxyMpPaxosExtensions
                             logger.debug("Marking replicaGroupInReparingInProgressPhase as done");
                             repairing.isRepairDone = true;
                         }
+                        else {
+                            // Checked during test that it does not happen.
+                            logger.debug("CASE_OTHER_REPAIR Repairing future has completed with result {} or error {}, but it uses different executor. Expected executor of Tx {} but it was {}",
+                                         String.valueOf(result), String.valueOf(ex), repairInProgressPaxosExecutor.transactionState.getTransactionId(), repairing.repairInProgressPaxosExecutor.transactionState.getTransactionId());
+                        }
                         return null;
                     });
 
@@ -1193,12 +1206,10 @@ public class StorageProxyMpPaxosExtensions
         }
         else if (fromPhase == Phase.NO_PHASE && toPhase == Phase.PRE_PREPARE_PHASE)
         {
-//            return transitionToPrePrepared;
             return TransitionId.TO_PRE_PREPARED;
         }
         else if (fromPhase == Phase.PRE_PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE)
         {
-//            return transitionToPrepared;
             return TransitionId.TO_PREPARED;
         }
         else if (fromPhase == Phase.PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE)
@@ -1208,24 +1219,20 @@ public class StorageProxyMpPaxosExtensions
         }
         else if (fromPhase == Phase.BEGIN_AND_REPAIR_PHASE && toPhase == Phase.PREPARE_PHASE)
         {
-//            return transitionToPreparedFromReparing;
             return TransitionId.TO_PREPARED_FROM_REPARING;
         }
         else if (fromPhase == Phase.PREPARE_PHASE && toPhase == Phase.PROPOSE_PHASE)
         {
-//            return transitionToProposed;
             return TransitionId.TO_PROPOSED;
         }
         else if (fromPhase == Phase.PROPOSE_PHASE && toPhase == Phase.COMMIT_PHASE)
         {
             return TransitionId.TO_COMMITTED;
-//            return transitionToCommitted;
         }
         else if (toPhase == Phase.PREPARE_PHASE)
         {
             // ignoring current phase, because it just has to go back couple of phases.
             return TransitionId.TO_PREPARED;
-//            return transitionToPrepared;
         }
         else if(fromPhase == Phase.AFTER_COMMIT_PHASE)
         {

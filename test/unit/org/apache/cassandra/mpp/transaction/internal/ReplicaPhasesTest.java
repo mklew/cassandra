@@ -143,6 +143,26 @@ public class ReplicaPhasesTest
         Assert.assertEquals(StorageProxyMpPaxosExtensions.TransitionId.TO_PREPARED, transitionId);
     }
 
+    @Test
+    public void reproduceError2() throws Throwable {
+        /**
+         * ReplicaGroup: 	127.0.0.1 -> PROPOSE_PHASE	127.0.0.2 -> PRE_PREPARE_PHASE	127.0.0.3 -> PRE_PREPARE_PHASE
+         ReplicaGroup: 	127.0.0.2 -> PRE_PREPARE_PHASE	127.0.0.3 -> PRE_PREPARE_PHASE	127.0.0.4 -> ROLLBACK_PHASE
+         ReplicaGroup: 	127.0.0.5 -> PRE_PREPARE_PHASE	127.0.0.1 -> PROPOSE_PHASE	127.0.0.2 -> PRE_PREPARE_PHASE
+         */
+        Replica replica1 = new Replica(InetAddress.getByName("127.0.0.1"), Phase.PROPOSE_PHASE);
+        Replica replica2 = new Replica(InetAddress.getByName("127.0.0.2"), Phase.PRE_PREPARE_PHASE);
+
+        ReplicasGroup rg1 = new ReplicasGroup(Arrays.asList(replica1, replica2));
+
+        List<ReplicasGroup> replicaGroups = Arrays.asList(rg1);
+        Phase nextPhaseForReplica = StorageProxyMpPaxosExtensions.findNextPhaseForReplica(replica1, replicaGroups);
+        Assert.assertEquals(Phase.PREPARE_PHASE, nextPhaseForReplica);
+
+        StorageProxyMpPaxosExtensions.TransitionId transitionId = StorageProxyMpPaxosExtensions.transitionToPhase(replica1.getPhase(), nextPhaseForReplica);
+        Assert.assertEquals(StorageProxyMpPaxosExtensions.TransitionId.TO_PREPARED, transitionId);
+    }
+
 
     private static ReplicasGroup createReplicaGroup(Phase phase1, Phase phase2, Phase phase3) throws UnknownHostException
     {
