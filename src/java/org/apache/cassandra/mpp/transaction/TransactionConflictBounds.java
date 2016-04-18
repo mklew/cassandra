@@ -18,15 +18,20 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Optional;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 
 import com.datastax.driver.core.PublicTokenRangeFactory;
 import com.datastax.driver.core.TokenRange;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.internal.TransactionConflictBoundsStrategy;
+import org.apache.cassandra.serializers.UTF8Serializer;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -34,6 +39,10 @@ import org.apache.cassandra.mpp.transaction.internal.TransactionConflictBoundsSt
  */
 public class TransactionConflictBounds
 {
+    public final static String CF_METADATA_EXTENSION_TRANSACTION_CONFLICT_BOUNDS = "transaction_conflict_bounds";
+
+    public final static String CF_METADATA_EXTENSION_TOKEN_RANGE_SLICES = "token_range_slices";
+
     public static TransactionConflictBounds COMMON_TX_ITEMS_BOUNDS = new TransactionConflictBounds(TransactionConflictBoundsStrategy.COMMON_TX_ITEMS, Optional.<Integer>empty());
 
     public static TransactionConflictBounds ONE_FOR_ALL_BOUNDS = new TransactionConflictBounds(TransactionConflictBoundsStrategy.ONE_FOR_ALL, Optional.<Integer>empty());
@@ -80,8 +89,30 @@ public class TransactionConflictBounds
     }
 
     public static TransactionConflictBounds findConflictBoundsStrategy(String ksName, String cfName) {
-        // TODO [MPP] Should be taken from CfMetaData.
-        // This should be backward-compatible
-        return new TransactionConflictBounds(TransactionConflictBoundsStrategy.COMMON_TX_ITEMS, Optional.<Integer>empty());
+        CFMetaData cfMetaData = Keyspace.open(ksName).getColumnFamilyStore(cfName).metadata;
+
+        ImmutableMap<String, ByteBuffer> extensions = cfMetaData.params.extensions;
+
+        TransactionConflictBoundsStrategy strategy = findStrategy(extensions);
+
+        if(strategy == TransactionConflictBoundsStrategy.TOKEN_RANGE_SLICES) {
+            // find token range slices parameter
+            String slicesAsString = UTF8Serializer.instance.deserialize(extensions.get(CF_METADATA_EXTENSION_TOKEN_RANGE_SLICES));
+            int slices = Integer.parseInt(slicesAsString);
+            return new TransactionConflictBounds(strategy, Optional.of(slices));
+        }
+        else
+        {
+            return new TransactionConflictBounds(strategy, Optional.empty());
+        }
+    }
+
+    private static TransactionConflictBoundsStrategy findStrategy(ImmutableMap<String, ByteBuffer> extensions)
+    {
+        if(extensions.containsKey(CF_METADATA_EXTENSION_TRANSACTION_CONFLICT_BOUNDS)) {
+            String strategyStr = UTF8Serializer.instance.deserialize(extensions.get(CF_METADATA_EXTENSION_TRANSACTION_CONFLICT_BOUNDS));
+            return TransactionConflictBoundsStrategy.valueOf(strategyStr);
+        }
+        else return TransactionConflictBoundsStrategy.COMMON_TX_ITEMS; // default
     }
 }
