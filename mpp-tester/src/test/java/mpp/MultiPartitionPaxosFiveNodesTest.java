@@ -85,7 +85,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         }
 
         public void persist(Session session) {
-            table.persist(counter, session, ConsistencyLevel.ALL);
+            table.persist(counter, session, ConsistencyLevel.QUORUM);
         }
 
         public void refresh(Session session)
@@ -539,7 +539,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                                                        expectedCounterCount.table);
 
                             SimpleStatement statement = new SimpleStatement(cql, expectedCounterCount.counterId);
-                            statement.setConsistencyLevel(ConsistencyLevel.ALL);
+                            statement.setConsistencyLevel(ConsistencyLevel.QUORUM);
 
                             ResultSet counterQueryResult = anySession.execute(statement);
                             int actualCounterValue = counterQueryResult.one().getInt(columnName);
@@ -910,7 +910,19 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
     @Before
     public void clearListsOfCommittedAndRolledBack() {
-        getNodeProbesStream().forEach(nodeProbe -> nodeProbe.getMppProxy().clearLists());
+        getNodeProbesStream().forEach(nodeProbe -> {
+            try {
+                clearListsOnNodeProbe(nodeProbe);
+            }
+            catch (RuntimeException e) {
+                // ignore
+            }
+        });
+    }
+
+    private void clearListsOnNodeProbe(NodeProbe nodeProbe)
+    {
+        nodeProbe.getMppProxy().clearLists();
     }
 
     private static class ReplicaTransactionsSummary {
