@@ -80,12 +80,12 @@ public class FiveNodesClusterTest extends BaseClusterTest
 
     protected Stream<NodeProbe> getNodeProbesStream()
     {
-        return Stream.concat(super.getNodeProbesStream(), Stream.of(getNodeProbe4(), getNodeProbe5()));
+        return Stream.concat(super.getNodeProbesStream(), Stream.of(getNodeProbe4(), getNodeProbe5())).filter(np -> np != null);
     }
 
     protected Stream<NamedNodeProbe> getNodeProbesNamedStream()
     {
         return Stream.concat(super.getNodeProbesNamedStream(), Stream.of(new NamedNodeProbe(getNodeProbe4(), "Node4"),
-                                                                         new NamedNodeProbe(getNodeProbe5(), "Node5")));
+                                                                         new NamedNodeProbe(getNodeProbe5(), "Node5"))).filter(nnp -> nnp.nodeProbe != null);
     }
 }
