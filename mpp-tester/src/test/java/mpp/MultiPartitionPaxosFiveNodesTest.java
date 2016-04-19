@@ -409,6 +409,22 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         return Arrays.asList(ks1NamedCounter1_1C, ks1NamedCounter1_2C, ks1NamedCounter2_1C, ks2NamedCounter1_1C, ks2NamedCounter1_2C);
     }
 
+    /**
+     *
+     * Ex1  C 13       R 7
+     * Ex2  C 12       R 8
+     * Ex3  C 9        R 11
+     * Ex4  C 14       R 6
+     * Ex5  C 14       R 6
+     *
+     * 20 iterators x 5 executors = 100 transactions.
+     *
+     * 13 + 12 + 9 + 14 + 14 =  62 committed transactions.
+     *
+     * @param iterations
+     * @param countersThatExist
+     * @return
+     */
     public List<CounterExecutor> createCounterExecutors(int iterations, Collection<CounterAndItsTable> countersThatExist) {
         CounterColumnIncrementerExecutor counter1Executor = new CounterColumnIncrementerExecutor(iterations, "Counter1Exe", countersThatExist, "counter1");
         CounterColumnIncrementerExecutor counter2Executor = new CounterColumnIncrementerExecutor(iterations, "Counter2Exe", countersThatExist, "counter2");
@@ -417,8 +433,24 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         CounterColumnIncrementerExecutor counter5Executor = new CounterColumnIncrementerExecutor(iterations, "Counter5Exe", countersThatExist, "counter5");
 
         // TODO [MPP] Returning only single executor to test if test works just as single transaction inserting some other data.
-//        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
-        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
+        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor);
+//        return Arrays.asList(counter1Executor);
+    }
+
+    public List<CounterExecutor> createCounterExecutorsV2(int iterations, Collection<CounterAndItsTable> countersThatExist) {
+        CounterExecutor counter1Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter1Exe", countersThatExist, "counter1");
+        CounterExecutor counter2Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter2Exe", countersThatExist, "counter2");
+        CounterExecutor counter3Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter3Exe", countersThatExist, "counter3");
+        CounterExecutor counter4Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter4Exe", countersThatExist, "counter4");
+        CounterExecutor counter5Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter5Exe", countersThatExist, "counter5");
+
+        // TODO [MPP] Returning only single executor to test if test works just as single transaction inserting some other data.
+        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor);
 //        return Arrays.asList(counter1Executor, counter2Executor);
 //        return Arrays.asList(counter1Executor);
     }
@@ -459,6 +491,22 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
         // TODO [MPP] Modify number of counter executors
         List<CounterExecutor> counterExecutors = createCounterExecutors(iterations, counters);
+
+        runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
+    @Test
+    public void runTestUsingCountersVol2() throws Throwable {
+        boolean checkForConverganceOfCommitsAndRollbacks = false;
+        int iterations = 100;
+        // There counters exist from previous test because they use named keys. Need to reset them
+        Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
+        Session anySession = getAnySession();
+        // reset counters & refresh counters
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+
+        // TODO [MPP] Modify number of counter executors
+        List<CounterExecutor> counterExecutors = createCounterExecutorsV2(iterations, counters);
 
         runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
     }
@@ -638,7 +686,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             }
         }).get();
 
-        executorService.awaitTermination(Math.max(5,(int)(iterations * 1.5)), TimeUnit.SECONDS);
+//        executorService.awaitTermination(Math.max(5,(int)(iterations * 1.5)), TimeUnit.SECONDS);
         anySession.close();
     }
 
@@ -917,7 +965,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
             if(setOfCounterValues.size() != 1)
             {
-                System.err.println("Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+                System.err.println("ERROR ! ! ! Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
                                    + " has partially committed results. Results are " + setOfCounterValues);
                 return false;
             }
@@ -931,6 +979,188 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 int currentCounterColumnValue = getCounterValue(counter);
 
                 return currentCounterColumnValue == expectedCount;
+            });
+        }
+
+        void setCounterValue(CounterAndItsTable<?,?,?> counterAndTable, int currentCount) {
+            if ("counter1".equals(columnName))
+            {
+                counterAndTable.counter.counter1 = currentCount;
+            }
+            else if ("counter2".equals(columnName))
+            {
+                counterAndTable.counter.counter2 = currentCount;
+            }
+            else if ("counter3".equals(columnName))
+            {
+                counterAndTable.counter.counter3 = currentCount;
+            }
+            else if ("counter4".equals(columnName))
+            {
+                counterAndTable.counter.counter4 = currentCount;
+            }
+            else if ("counter5".equals(columnName))
+            {
+                counterAndTable.counter.counter5 = currentCount;
+            }
+            else
+            {
+                throw new RuntimeException("BAAD column name");
+            }
+        }
+
+        int getCounterValue(CounterAndItsTable<?,?,?> counterAndTable) {
+            if ("counter1".equals(columnName))
+            {
+                return counterAndTable.counter.counter1;
+            }
+            else if ("counter2".equals(columnName))
+            {
+                return counterAndTable.counter.counter2;
+            }
+            else if ("counter3".equals(columnName))
+            {
+                return counterAndTable.counter.counter3;
+            }
+            else if ("counter4".equals(columnName))
+            {
+                return counterAndTable.counter.counter4;
+            }
+            else if ("counter5".equals(columnName))
+            {
+                return counterAndTable.counter.counter5;
+            }
+            else
+            {
+                throw new RuntimeException("BAAD column name");
+            }
+        }
+    }
+
+    private class CounterColumnIncrementerExecutorVol2 extends CounterExecutor {
+
+        private final String columnName;
+
+//        private int currentCount = 0;
+
+//        private int expectedCount = 0;
+
+        private Map<Object, Integer> counterIdToExpectedCount = new HashMap<>();
+
+        private Map<Object, Integer> counterIdToCurrentCount = new HashMap<>();
+
+        private CounterColumnIncrementerExecutorVol2(int iterations, String name, Collection<CounterAndItsTable> countersThatExist, String columnName)
+        {
+            super(iterations, name, countersThatExist);
+            this.columnName = columnName;
+        }
+
+        public void prepare()
+        {
+            super.prepare();
+            counters.forEach(counter -> {
+                counterIdToCurrentCount.put(counter.counter.id, getCounterValue(counter));
+                counterIdToExpectedCount.put(counter.counter.id, getCounterValue(counter));
+            });
+        }
+
+        protected IterationResult toIterationResult(TransactionState transactionState, IterationExpectations expectations, boolean successfullyCommitted, Session session, int iteration)
+        {
+            if(successfullyCommitted) {
+                return new IterationResult(iteration, transactionState.id(), successfullyCommitted, expectations.incrementOfs);
+            }
+            else {
+                return new IterationResult(iteration, transactionState.id(), successfullyCommitted, Collections.emptyList());
+            }
+        }
+
+        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session)
+        {
+            // For each counter increment counter 1 table
+//            expectedCount = currentCount + 1;
+            List<IncrementOf> expectedIncrements = getCounters().stream().map(counterAndTable -> {
+                int expectedCount = counterIdToCurrentCount.get(counterAndTable.counter.id) + 1;
+                counterIdToExpectedCount.put(counterAndTable.counter.id, expectedCount);
+
+                // TODO [MPP] Stupid version first.
+                if ("counter1".equals(columnName))
+                {
+                    counterAndTable.counter.counter1 = expectedCount;
+                }
+                else if ("counter2".equals(columnName))
+                {
+                    counterAndTable.counter.counter2 = expectedCount;
+                }
+                else if ("counter3".equals(columnName))
+                {
+                    counterAndTable.counter.counter3 = expectedCount;
+                }
+                else if ("counter4".equals(columnName))
+                {
+                    counterAndTable.counter.counter4 = expectedCount;
+                }
+                else if ("counter5".equals(columnName))
+                {
+                    counterAndTable.counter.counter5 = expectedCount;
+                }
+                else
+                {
+                    throw new RuntimeException("BAAD column name");
+                }
+                return new IncrementOf(counterAndTable.table.keyspaceName, counterAndTable.table.tableName, counterAndTable.counter.id.toString(), columnName);
+            }).collect(toList());
+
+            // Persist changes using transaction
+            TransactionState changedTransactionState = getCounters().stream().map(counterAndTable -> {
+                return counterAndTable.persistUsingTransactionOnlyColumn(transactionState, session, columnName);
+            }).reduce(TransactionState::merge).get();
+
+            IterationExpectations iterationExpectations = new IterationExpectations(expectedIncrements);
+
+            return Pair.create(iterationExpectations, changedTransactionState);
+        }
+
+        protected boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session)
+        {
+            // if we do query on counters and their counter matches expected counter, then transaction was committed.
+
+            // We can also check that all counters are in sync, because there is a single counter executor that increments single counter column
+            Set<Integer> setOfCounterValues = getCounters().stream().map(counterAndItsTable -> {
+                SimpleStatement selectCounterById = new SimpleStatement(String.format("SELECT %s FROM %s.%s WHERE id = ?", columnName, counterAndItsTable.table.keyspaceName,
+                                                                                      counterAndItsTable.table.tableName), counterAndItsTable.counter.id);
+                selectCounterById.setConsistencyLevel(ConsistencyLevel.LOCAL_TRANSACTIONAL);
+                ResultSet resultSet = session.execute(selectCounterById);
+                int currentCount = resultSet.one().getInt(columnName);
+                setCounterValue(counterAndItsTable, currentCount);
+                Integer expectedCount = counterIdToExpectedCount.get(counterAndItsTable.counter.id);
+                if (currentCount != expectedCount)
+                {
+                    String msg = String.format("Current count of counter column %s with ID %s from %s.%s is %s and exepcted count is %s",
+                                               columnName, counterAndItsTable.counter.id, counterAndItsTable.table.keyspaceName,
+                                               counterAndItsTable.table.tableName, String.valueOf(currentCount), String.valueOf(expectedCount));
+                    System.out.println(msg);
+                }
+
+                counterIdToCurrentCount.put(counterAndItsTable.counter.id, currentCount);
+                return currentCount;
+            }).collect(Collectors.toSet());
+
+            if(setOfCounterValues.size() != 1)
+            {
+                System.err.println("ERROR ! ! ! Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+                                   + " has partially committed results. Results are " + setOfCounterValues);
+                return false;
+            }
+            // TODO [MPP] Removed assertion about convergence.
+//            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+//                                                                     + " has partially committed results. Results are " + setOfCounterValues);
+
+//            currentCount = setOfCounterValues.iterator().next();
+
+            return getCounters().stream().allMatch(counter -> {
+                int currentCounterColumnValue = getCounterValue(counter);
+
+                return currentCounterColumnValue == counterIdToExpectedCount.get(counter.counter.id);
             });
         }
 

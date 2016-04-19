@@ -19,6 +19,7 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.net.InetAddress;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
@@ -494,6 +496,10 @@ public class StorageProxyMpPaxosExtensions
         Phase phaseAfterTransition();
 
         ReplicaInPhase getReplicaInPhase();
+
+        default boolean failedToTransition() {
+            return !wasTransitionSuccessful();
+        }
     }
 
     public static class TransitionResultImpl implements TransitionResult
@@ -627,6 +633,8 @@ public class StorageProxyMpPaxosExtensions
 
         Collection<ReplicasGroup> replicasInPhase;
 
+        Collection<String> historyOfTransitionsDebug = new ArrayList<>();
+
         private PhaseExecutorResult phaseExecutorResult = null;
 
         private boolean isRepairing = false;
@@ -663,12 +671,18 @@ public class StorageProxyMpPaxosExtensions
             return areInSamePhase() && (findMinimumPhaseAmongAllReplicaGroups() == isDoneWhen);
         }
 
+        static Predicate<Replica> failedToTransitionAndMovedToBeginAndRepair = replica -> {
+            TransitionResult transitionResult = replica.getReplicaInPhaseHolder().getTransitionResult();
+            return transitionResult.failedToTransition() && transitionResult.phaseAfterTransition() == Phase.BEGIN_AND_REPAIR_PHASE;
+        };
+
         /**
          *
          * @return {@code true if has to rollback}
          */
         boolean runTransitionsForEachReplica()
         {
+            historyOfTransitionsDebug.add(phasesForReplicaGroups(replicasInPhase));
             Collection<ReplicasGroup> replicaGroups = replicasInPhase;
 
             logger.debug("Will run transitions for each replica. ReplicaGroups size: {}", replicaGroups.size());
@@ -707,10 +721,10 @@ public class StorageProxyMpPaxosExtensions
             });
 
             logger.debug("Transitions for replica groups are done. Time to evaluate responses");
+            String phaseForReplicaGroupsBefore = phasesForReplicaGroups(replicaGroups);
 
             // For each replica group
             Map<Replica, Phase> replicaToProposedPhase = new HashMap<>();
-
             // After transition, some replicas could not transition forward. Their phase must be accepted.
             replicas.forEach(replica -> {
                 TransitionResult transitionResult = replica.getReplicaInPhaseHolder().getTransitionResult();
@@ -725,18 +739,44 @@ public class StorageProxyMpPaxosExtensions
                 }
             });
 
+            String phaseForReplicaGroupsAfter = phasesForReplicaGroups(replicaGroups);
 
+            // TODO find replicas that failed and transitioned to begin and repair
+            List<Replica> replicasThatTransitionedToBeginAndRepair = replicas.stream().filter(failedToTransitionAndMovedToBeginAndRepair).collect(Collectors.toList());
+            if(!replicasThatTransitionedToBeginAndRepair.isEmpty()) {
+                replicasThatTransitionedToBeginAndRepair.stream().map(replica -> {
+                    List<ReplicasGroup> replicaGroupsForReplica = replicaGroups.stream().filter(rg -> rg.hasReplica(replica)).collect(Collectors.toList());
+                    return Pair.create(replica, replicaGroupsForReplica);
+                }).forEach(p -> {
+                    Replica replica = p.left;
+                    List<ReplicasGroup> rgs = p.right;
 
-            boolean existsReplicaGroupWhichHasQuorumOfRollbacks = replicasInPhase.stream().map(replicaGroupInPhaseHolder -> {
-                ReplicasGroup replicasGroup = replicaGroupInPhaseHolder;
+                    // Replicas in each ReplicaGroup cannot be further than in PREPARED, because it is illegal to do PROPOSE when there is in progress proposal.
+                    // It might be timing and ordering issue that they didn't transition to BEGIN_AND_REPAIR
 
-                List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+                    rgs.forEach(rg -> {
+                        rg.getAllReplicasInThatGroup().stream()
+                          .filter(r -> !r.equals(replica)) // different than replica that transitioned to BEGIN_AND_REPAIR
+                          .filter(failedToTransitionAndMovedToBeginAndRepair.negate()) // and that didn't have same transition
+                          .filter(r -> r.getReplicaInPhaseHolder().getTransitionResult().phaseAfterTransition().ordinal() >= Phase.PREPARE_PHASE.ordinal())
+                          .forEach(r -> {
+                              // This replica should have seen in progress proposal. Either way. It cannot be further than PREPARE PHASE and definitely cannot do PROPOSE
+                              TransitionResult transitionResult = r.getReplicaInPhaseHolder().getTransitionResult();
+                              if(transitionResult.phaseAfterTransition().ordinal() > Phase.PREPARE_PHASE.ordinal()) {
+                                  logger.error("CASE_FURTHER_IN_PHASE_WHEN_REPAIRING replica {} is further than allowed in phase. TxId {} Its phase {}. Phases for replica groups before {} History of phases {}",
+                                               r, transactionState.getTransactionId(), transitionResult.phaseAfterTransition(), phaseForReplicaGroupsBefore, historyOfTransitionsDebug);
+                              }
 
-                List<TransitionResult> transitionResults = allReplicasInThatGroup.stream().map(Replica::getReplicaInPhaseHolder).map(x -> x.getTransitionResult()).collect(Collectors.toList());
-                return getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
-            }).filter(Phase.ROLLBACK_PHASE::equals).findAny().isPresent();
+                              // Override transition
+                              replicaToProposedPhase.put(r, Phase.BEGIN_AND_REPAIR_PHASE);
+//                              r.getReplicaInPhaseHolder().setReplicaInPhase(transitionResult.getReplicaInPhase());
+//                              r.setPhase(Phase.BEGIN_AND_REPAIR_PHASE); // I know by filtering that it has reached at least PREPARE.
+                          });
+                    });
+                });
+            }
 
-            if(existsReplicaGroupWhichHasQuorumOfRollbacks) {
+            if(doesReplicaGroupWithQuorumOfRollbacksExist()) {
                 // TODO [MPP] If there is a replica group from which quorum of replicas transitioned into rollback phase, then we need to rollback whole transaction.
                 return true;
             }
@@ -746,7 +786,8 @@ public class StorageProxyMpPaxosExtensions
                     ReplicasGroup replicasGroup = replicaGroupInPhaseHolder;
 
                     List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
-                    if(allReplicasInThatGroup.size() == 2) {
+
+                    if(allReplicasInThatGroup.size() == 2) { // for debug.
                         logger.debug("2ReplicasInGroup {}  TxId {} Phase of replica groups {}", allReplicasInThatGroup, transactionState.getTransactionId(), phasesForReplicaGroups(replicaGroups));
                     }
 
@@ -781,6 +822,16 @@ public class StorageProxyMpPaxosExtensions
             });
 
             return false;
+        }
+
+        private boolean doesReplicaGroupWithQuorumOfRollbacksExist()
+        {
+            return replicasInPhase.stream().map(replicasGroup -> {
+                List<Replica> allReplicasInThatGroup = replicasGroup.getAllReplicasInThatGroup();
+
+                List<TransitionResult> transitionResults = allReplicasInThatGroup.stream().map(Replica::getReplicaInPhaseHolder).map(x -> x.getTransitionResult()).collect(Collectors.toList());
+                return getMaximumPhaseSharedByQuorum(transitionResults.stream().map(x -> (WithPhase) x).collect(Collectors.toList()));
+            }).filter(Phase.ROLLBACK_PHASE::equals).findAny().isPresent();
         }
 
         public void tryToExecute()
@@ -1194,7 +1245,11 @@ public class StorageProxyMpPaxosExtensions
      */
     public static TransitionId transitionToPhase(Phase fromPhase, Phase toPhase)
     {
-        if (fromPhase == toPhase)
+        if (fromPhase == Phase.PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE)
+        {
+            return TransitionId.TO_PREPARED;
+        }
+        else if (fromPhase == toPhase)
         {
             return TransitionId.NOOP;
         }
@@ -1210,11 +1265,6 @@ public class StorageProxyMpPaxosExtensions
         }
         else if (fromPhase == Phase.PRE_PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE)
         {
-            return TransitionId.TO_PREPARED;
-        }
-        else if (fromPhase == Phase.PREPARE_PHASE && toPhase == Phase.PREPARE_PHASE)
-        {
-//            return transitionToPrepared; // TODO [MPP] This will make replica group refresh its ballot, could be NOOP operation.
             return TransitionId.TO_PREPARED;
         }
         else if (fromPhase == Phase.BEGIN_AND_REPAIR_PHASE && toPhase == Phase.PREPARE_PHASE)
