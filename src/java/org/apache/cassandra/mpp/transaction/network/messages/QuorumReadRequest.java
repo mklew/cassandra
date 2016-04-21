@@ -25,8 +25,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-
-import com.google.common.base.Preconditions;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -52,10 +50,10 @@ public class QuorumReadRequest implements MppRequestMessage
 
     public QuorumReadRequest(UUID transactionId, List<TransactionItem> transactionItems)
     {
-        Preconditions.checkArgument(!transactionItems.isEmpty(), "Expected to have non empty list of transaction items");
+        // TODO [MPP] Uncomment it
+//        Preconditions.checkArgument(!transactionItems.isEmpty(), "Expected to have non empty list of transaction items");
         this.transactionId = transactionId;
         this.transactionItems = transactionItems;
-
     }
 
     public MppResponseMessage executeInLocalContext(NodeContext context)
