@@ -46,5 +46,9 @@ CREATE TABLE mpptest_counters_bounds.counter_two_slices (id uuid, counter1 int, 
 
 ALTER TABLE mpptest_counters_bounds.counter_two_slices WITH extensions = { 'transaction_conflict_bounds' : 'TOKEN_RANGE_SLICES', 'token_range_slices' : '2' };
 
+CREATE TABLE mpptest_counters_bounds.counter_many_slices (id uuid, counter1 int, counter2 int, counter3 int, counter4 int, counter5 int, primary key (id));
+
+ALTER TABLE mpptest_counters_bounds.counter_many_slices WITH extensions = { 'transaction_conflict_bounds' : 'TOKEN_RANGE_SLICES', 'token_range_slices' : '100000' };
+
 
 

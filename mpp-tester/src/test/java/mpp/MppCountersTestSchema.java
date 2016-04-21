@@ -43,6 +43,7 @@ public class MppCountersTestSchema
         TABLES_WHICH_HAVE_UUID.add("stop_after_proposed");
         TABLES_WHICH_HAVE_UUID.add("counter_one_for_all");
         TABLES_WHICH_HAVE_UUID.add("counter_two_slices");
+        TABLES_WHICH_HAVE_UUID.add("counter_many_slices");
     }
 
     static CountersSchemaHelpers.CounterTable countersCounter1 = new CountersSchemaHelpers.CounterTable(counters, "counter1");
@@ -63,6 +64,7 @@ public class MppCountersTestSchema
 
     static CountersSchemaHelpers.CounterTable counterOneForAll = new CountersSchemaHelpers.CounterTable(boundsKeyspace, "counter_one_for_all");
     static CountersSchemaHelpers.CounterTable counterTwoSlices = new CountersSchemaHelpers.CounterTable(boundsKeyspace, "counter_two_slices");
+    static CountersSchemaHelpers.CounterTable counterALotOfSlices = new CountersSchemaHelpers.CounterTable(boundsKeyspace, "counter_many_slices");
 
 
     public static CountersSchemaHelpers.CounterData inititateCounterData(CountersSchemaHelpers.CounterTable counterTable, UUID counterId, Session session) {

@@ -172,7 +172,7 @@ public class MppServiceImpl implements MppService
                 return true;
             }
             else if (StorageProxyMpPaxosExtensions.PhaseExecutorResult.ROLLED_BACK == executorResult) {
-                rollbackTransactionInternal(transactionState, replicasAndOwnedItems);
+//                rollbackTransactionInternal(transactionState, replicasAndOwnedItems);
                 return false;
             }
             else
@@ -182,7 +182,7 @@ public class MppServiceImpl implements MppService
         }
         catch (TransactionRolledBackException e)
         {
-            rollbackTransactionInternal(e.getRolledBackTransaction(), replicasAndOwnedItems);
+//            rollbackTransactionInternal(e.getRolledBackTransaction(), replicasAndOwnedItems);
             throw e;
         }
     }

@@ -440,6 +440,23 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 //        return Arrays.asList(counter1Executor);
     }
 
+    public List<CounterExecutor> createCounterExecutorsWithIndependentCounters(int iterations, Collection<CounterAndItsTable> countersThatExist) {
+        Preconditions.checkArgument(countersThatExist.size() >= 5);
+        ArrayList<CounterAndItsTable> counterAndItsTables = new ArrayList<>(countersThatExist);
+        CounterColumnIncrementerExecutor counter1Executor = new CounterColumnIncrementerExecutor(iterations, "Counter1Exe", Collections.singletonList(counterAndItsTables.get(0)), "counter1");
+        CounterColumnIncrementerExecutor counter2Executor = new CounterColumnIncrementerExecutor(iterations, "Counter2Exe", Collections.singletonList(counterAndItsTables.get(1)), "counter2");
+        CounterColumnIncrementerExecutor counter3Executor = new CounterColumnIncrementerExecutor(iterations, "Counter3Exe", Collections.singletonList(counterAndItsTables.get(2)), "counter3");
+        CounterColumnIncrementerExecutor counter4Executor = new CounterColumnIncrementerExecutor(iterations, "Counter4Exe", Collections.singletonList(counterAndItsTables.get(3)), "counter4");
+        CounterColumnIncrementerExecutor counter5Executor = new CounterColumnIncrementerExecutor(iterations, "Counter5Exe", Collections.singletonList(counterAndItsTables.get(4)), "counter5");
+
+        // TODO [MPP] Returning only single executor to test if test works just as single transaction inserting some other data.
+        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor);
+//        return Arrays.asList(counter1Executor);
+    }
+
     public List<CounterExecutor> createCounterExecutorsV2(int iterations, Collection<CounterAndItsTable> countersThatExist) {
         CounterExecutor counter1Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter1Exe", countersThatExist, "counter1");
         CounterExecutor counter2Executor = new CounterColumnIncrementerExecutorVol2(iterations, "Counter2Exe", countersThatExist, "counter2");
@@ -496,9 +513,26 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     }
 
     @Test
+    public void runTestUsingCountersWithIndependentTransactions() throws Throwable {
+        boolean checkForConverganceOfCommitsAndRollbacks = false;
+        int iterations = 25;
+        // There counters exist from previous test because they use named keys. Need to reset them
+        Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
+        Session anySession = getAnySession();
+        // reset counters & refresh counters
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+
+        // TODO [MPP] Modify number of counter executors
+        List<CounterExecutor> counterExecutors = createCounterExecutorsWithIndependentCounters(iterations, counters);
+
+        runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
+
+    @Test
     public void runTestUsingCountersVol2() throws Throwable {
         boolean checkForConverganceOfCommitsAndRollbacks = false;
-        int iterations = 100;
+        int iterations = 300;
         // There counters exist from previous test because they use named keys. Need to reset them
         Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
         Session anySession = getAnySession();
@@ -533,13 +567,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
     }
 
-    // 62 C, 38 R
     @Test
     public void runTestUsingSliceBounds() throws Throwable {
         boolean checkForConverganceOfCommitsAndRollbacks = false;
         int iterations = 20;
 
-        int numberOfOneForAllCounters = 5;
+        int numberOfOneForAllCounters = 100;
 
         // These counters should all be conflicting with each other.
         Collection<CounterAndItsTable> countersWithTwoSlices = IntStream.rangeClosed(1, numberOfOneForAllCounters).mapToObj(i -> counterTwoSlices()).collect(Collectors.toList());
@@ -556,11 +589,40 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
     }
 
+    @Test
+    public void runTestUsingSliceBoundsWithALofOfSlices() throws Throwable {
+        boolean checkForConverganceOfCommitsAndRollbacks = false;
+        int iterations = 20;
+
+        int numberOfOneForAllCounters = 2;
+
+        // These counters should all be conflicting with each other.
+        Collection<CounterAndItsTable> countersWithTwoSlices = IntStream.rangeClosed(1, numberOfOneForAllCounters).mapToObj(i -> counterALotOfSlices()).collect(Collectors.toList());
+
+        Collection<CounterAndItsTable> countersToPersist = countersWithTwoSlices;
+
+        Session anySession = getAnySession();
+        // reset counters & refresh counters
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+
+        // TODO [MPP] Modify number of counter executors
+        List<CounterExecutor> counterExecutors = createCounterExecutors(iterations, counters);
+
+        runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
     private CounterAndItsTable counterTwoSlices()
     {
-        CountersSchemaHelpers.CounterData counterTwoSlices = MppCountersTestSchema.counterTwoSlices.createCounterData(UUIDs.random(), 0,0,0,0,0);
+        CountersSchemaHelpers.CounterData counterTwoSlices = MppCountersTestSchema.counterTwoSlices.createCounterData(UUIDs.random(), 0, 0, 0, 0, 0);
         CounterAndItsTable counterTwoSlicesWithTable = new CounterAndItsTable(counterTwoSlices, MppCountersTestSchema.counterTwoSlices);
         return counterTwoSlicesWithTable;
+    }
+
+    private CounterAndItsTable counterALotOfSlices()
+    {
+        CountersSchemaHelpers.CounterData counterData = MppCountersTestSchema.counterALotOfSlices.createCounterData(UUIDs.random(), 0,0,0,0,0);
+        CounterAndItsTable counterALotOfSLicesWithTable = new CounterAndItsTable(counterData, MppCountersTestSchema.counterALotOfSlices);
+        return counterALotOfSLicesWithTable;
     }
 
     private CounterAndItsTable counterOneForAll()
@@ -970,8 +1032,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 return false;
             }
             // TODO [MPP] Removed assertion about convergence.
-//            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
-//                                                                     + " has partially committed results. Results are " + setOfCounterValues);
+            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+                                                                     + " has partially committed results. Results are " + setOfCounterValues);
 
             currentCount = setOfCounterValues.iterator().next();
 
@@ -1151,9 +1213,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                                    + " has partially committed results. Results are " + setOfCounterValues);
                 return false;
             }
-            // TODO [MPP] Removed assertion about convergence.
-//            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
-//                                                                     + " has partially committed results. Results are " + setOfCounterValues);
+            Preconditions.checkState(setOfCounterValues.size() == 1, "Transaction " + transactionState.getTransactionId() + " run by executor which increments column " + columnName
+                                                                     + " has partially committed results. Results are " + setOfCounterValues);
 
 //            currentCount = setOfCounterValues.iterator().next();
 
