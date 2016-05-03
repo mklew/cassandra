@@ -19,14 +19,16 @@
 package org.apache.cassandra.mpp.transaction.internal;
 
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.db.SystemKeyspace.MPP_TRANSACTION_LOG;
 
 /**
  * this is trivial implementation based on in memory maps.
@@ -39,9 +41,25 @@ public class MppTransactionLogImpl implements MppTransactionLog
 {
     private static final Logger logger = LoggerFactory.getLogger(MppTransactionLogImpl.class);
 
-    Set<TransactionId> committed = ConcurrentHashMap.newKeySet();
+    public TxLog checkTransaction(TransactionId transactionId) {
+        String req = "SELECT * FROM system.%s WHERE transaction_id = ?";
+        UntypedResultSet results = executeInternal(String.format(req, MPP_TRANSACTION_LOG), transactionId.unwrap());
+        if(results.isEmpty()) {
+            return TxLog.UNKNOWN;
+        }
+        else {
+            boolean isCommitted = results.one().getBoolean("committed");
+            if(isCommitted) {
+                return TxLog.COMMITTED;
+            }
+            else return TxLog.ROLLED_BACK;
+        }
+    }
 
-    Set<TransactionId> rolledBack = ConcurrentHashMap.newKeySet();
+    private void insert(TransactionId transactionId, boolean committed) {
+        String req = "INSERT INTO system.%s (transaction_id, committed) VALUES (?,?)";
+        executeInternal(String.format(req, MPP_TRANSACTION_LOG), transactionId.unwrap(), committed);
+    }
 
     public void appendCommitted(TransactionId transactionId)
     {
@@ -51,7 +69,7 @@ public class MppTransactionLogImpl implements MppTransactionLog
         }
         else
         {
-            committed.add(transactionId);
+            insert(transactionId, true);
         }
     }
 
@@ -63,25 +81,19 @@ public class MppTransactionLogImpl implements MppTransactionLog
         }
         else
         {
-            rolledBack.add(transactionId);
+            insert(transactionId, false);
         }
     }
 
     public Optional<TxLog> checkTransactionInLog(TransactionId transactionId)
     {
-        boolean inCommitted = this.committed.contains(transactionId);
-        boolean rolledBack = this.rolledBack.contains(transactionId);
-
-        if(inCommitted && rolledBack) {
-            String msg = "Transaction with TxId " + transactionId + " was in committed log and in rolled back log. Something is very bad";
-            logger.error(msg + " Will throw runtime exception with same message");
-            throw new RuntimeException(msg);
+        TxLog txLog = checkTransaction(transactionId);
+        if(txLog == TxLog.UNKNOWN) {
+            return Optional.empty();
         }
-
-        if(inCommitted)
-            return Optional.of(TxLog.COMMITTED);
-        else if(rolledBack)
-            return Optional.of(TxLog.ROLLED_BACK);
-        else return Optional.empty();
+        else
+        {
+            return Optional.of(txLog);
+        }
     }
 }

@@ -106,6 +106,7 @@ public class MppExtensionServices
     {
         mppModule = MppModule.createModule(mppNetworkService);
         MppServicesLocator.setInstance(mppModule.getMppService());
+        MppServicesLocator.setTransactionLog(mppModule.getTransactionLog());
     }
 
     public void stop()

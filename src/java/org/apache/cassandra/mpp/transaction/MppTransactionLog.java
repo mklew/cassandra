@@ -27,7 +27,7 @@ import java.util.Optional;
 public interface MppTransactionLog
 {
     enum TxLog {
-        ROLLED_BACK, COMMITTED
+        ROLLED_BACK, COMMITTED, UNKNOWN
     }
 
     void appendCommitted(TransactionId transactionId);

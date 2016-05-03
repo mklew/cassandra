@@ -24,9 +24,11 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.mpp.transaction.MppIndexKeys;
 import org.apache.cassandra.mpp.transaction.MppService;
+import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.internal.MpPaxosIndex;
 import org.apache.cassandra.mpp.transaction.internal.MppIndexKeysImpl;
 import org.apache.cassandra.mpp.transaction.internal.MppServiceImpl;
+import org.apache.cassandra.mpp.transaction.internal.MppTransactionLogImpl;
 import org.apache.cassandra.mpp.transaction.internal.NativeReadTransactionDataRequestExecutor;
 import org.apache.cassandra.mpp.transaction.internal.PrivateMemtableStorageImpl;
 import org.apache.cassandra.mpp.transaction.internal.ReadTransactionDataServiceImpl;
@@ -42,13 +44,15 @@ public class MppModule
 {
     private final ReadTransactionDataServiceImpl readTransactionDataService;
     private final MppService mppService;
+    private final MppTransactionLog transactionLog;
 
     private static final Logger logger = LoggerFactory.getLogger(MppModule.class);
 
-    public MppModule(MppService service, ReadTransactionDataServiceImpl readTransactionDataService)
+    public MppModule(MppService service, ReadTransactionDataServiceImpl readTransactionDataService, MppTransactionLog transactionLog)
     {
         this.mppService = service;
         this.readTransactionDataService = readTransactionDataService;
+        this.transactionLog = transactionLog;
     }
 
     public static MppModule createModule(MppNetworkService mppNetworkService)
@@ -58,6 +62,8 @@ public class MppModule
         final MppServiceImpl service = new MppServiceImpl();
         final PrivateMemtableStorageImpl privateMemtableStorage = new PrivateMemtableStorageImpl();
         MpPaxosIndex mpPaxosIndex = new MpPaxosIndex();
+
+        MppTransactionLog transactionLog = new MppTransactionLogImpl();
 
         mpPaxosIndex.setDeleteTransactionsDataService(privateMemtableStorage);
         mpPaxosIndex.setJmxRolledBackTxsInfo(service);
@@ -74,12 +80,17 @@ public class MppModule
         service.setMessagingService(MessagingService.instance());
         service.setHintsService((mutation, destination) -> StorageProxy.submitHint(mutation, destination, null));
 
-        return new MppModule(service, readTransactionDataService);
+        return new MppModule(service, readTransactionDataService, transactionLog);
     }
 
     public MppService getMppService()
     {
         return mppService;
+    }
+
+    public MppTransactionLog getTransactionLog()
+    {
+        return transactionLog;
     }
 
     @VisibleForTesting

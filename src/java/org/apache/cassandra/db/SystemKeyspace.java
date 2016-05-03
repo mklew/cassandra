@@ -87,6 +87,7 @@ public final class SystemKeyspace
     public static final String BATCHES = "batches";
     public static final String PAXOS = "paxos";
     public static final String MULTI_PARTITION_PAXOS = "multi_partition_paxos";
+    public static final String MPP_TRANSACTION_LOG = "mpp_transaction_log";
     public static final String BUILT_INDEXES = "IndexInfo";
     public static final String LOCAL = "local";
     public static final String PEERS = "peers";
@@ -150,6 +151,15 @@ public final class SystemKeyspace
             + "proposal_ballot timeuuid,"
             + "proposal_version int,"
             + "PRIMARY KEY (paxos_id))")
+    .compaction(CompactionParams.lcs(emptyMap()));
+
+    private static final CFMetaData MppTransactionLog =
+    compile(MPP_TRANSACTION_LOG,
+            "transaction log",
+            "CREATE TABLE %s ("
+            + "transaction_id UUID,"
+            + "committed boolean,"
+            + "PRIMARY KEY (transaction_id))")
     .compaction(CompactionParams.lcs(emptyMap()));
 
     private static final CFMetaData BuiltIndexes =
@@ -439,6 +449,7 @@ public final class SystemKeyspace
                          Batches,
                          Paxos,
                          MultiPartitionPaxos,
+                         MppTransactionLog,
                          Local,
                          Peers,
                          PeerEvents,

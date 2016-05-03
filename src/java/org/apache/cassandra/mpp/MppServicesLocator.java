@@ -21,6 +21,7 @@ package org.apache.cassandra.mpp;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.mpp.transaction.MppService;
+import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
 
 /**
@@ -30,6 +31,8 @@ import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
 public class MppServicesLocator
 {
     private static MppService mppService;
+
+    private static MppTransactionLog transactionLog;
 
     private MppServicesLocator()
     {
@@ -49,5 +52,16 @@ public class MppServicesLocator
     public static void setInstance(MppService mppService)
     {
         MppServicesLocator.mppService = mppService;
+    }
+
+    public static void setTransactionLog(MppTransactionLog transactionLog)
+    {
+        MppServicesLocator.transactionLog = transactionLog;
+    }
+
+    public static MppTransactionLog getTransactionLog()
+    {
+        Preconditions.checkNotNull(transactionLog, "MppServiceLocator has not been initialized with transactionLog");
+        return transactionLog;
     }
 }
