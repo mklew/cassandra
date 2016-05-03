@@ -22,11 +22,13 @@ import java.io.IOException;
 import java.util.Optional;
 
 import org.apache.cassandra.mpp.MppServicesLocator;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -37,8 +39,9 @@ public class MpPrePrepareVerbHandler implements IVerbHandler<MpPrePrepare>
     public void doVerb(MessageIn<MpPrePrepare> message, int id) throws IOException
     {
         MpPrePrepare prePrepare = message.payload;
-        Optional<MpPaxosId> mpPaxosId = MppServicesLocator.getInstance().prePrepareMultiPartitionPaxos(prePrepare);
-        MpPrePrepareResponse response = MpPrePrepareResponse.from(mpPaxosId);
+
+        Pair<Optional<MpPaxosId>, TxLog> mpPaxosId = MppServicesLocator.getInstance().prePrepareMultiPartitionPaxos(prePrepare);
+        MpPrePrepareResponse response = MpPrePrepareResponse.from(mpPaxosId.left, mpPaxosId.right);
         MessageOut<MpPrePrepareResponse> reply = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, response, MpPrePrepareResponse.serializer);
         MessagingService.instance().sendReply(reply, id, message.from);
     }

@@ -25,6 +25,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.mpp.transaction.TxLog;
 
 public class MpPrepareResponse
 {
@@ -34,6 +35,8 @@ public class MpPrepareResponse
 
     public final boolean rolledBack;
 
+    public final TxLog txLog;
+
     /*
      * To maintain backward compatibility (see #6023), the meaning of inProgressCommit is a bit tricky.
      * If promised is true, then that's the last accepted commit. If promise is false, that's just
@@ -42,7 +45,7 @@ public class MpPrepareResponse
     public final MpCommit inProgressCommit;
     public final MpCommit mostRecentCommit;
 
-    public MpPrepareResponse(boolean promised, boolean rolledBack, MpCommit inProgressCommit, MpCommit mostRecentCommit)
+    public MpPrepareResponse(boolean promised, boolean rolledBack, MpCommit inProgressCommit, MpCommit mostRecentCommit, TxLog txLog)
     {
 //        assert inProgressCommit.update.partitionKey().equals(mostRecentCommit.update.partitionKey());
 //        assert inProgressCommit.update.metadata() == mostRecentCommit.update.metadata();
@@ -51,6 +54,7 @@ public class MpPrepareResponse
         this.rolledBack = rolledBack;
         this.mostRecentCommit = mostRecentCommit;
         this.inProgressCommit = inProgressCommit;
+        this.txLog = txLog;
     }
 
     @Override
@@ -67,6 +71,7 @@ public class MpPrepareResponse
             out.writeBoolean(response.rolledBack);
             MpCommit.serializer.serialize(response.inProgressCommit, out, version);
             MpCommit.serializer.serialize(response.mostRecentCommit, out, version);
+            TxLog.serializer.serialize(response.txLog, out, version);
         }
 
         public MpPrepareResponse deserialize(DataInputPlus in, int version) throws IOException
@@ -75,14 +80,16 @@ public class MpPrepareResponse
             boolean rolledBack = in.readBoolean();
             MpCommit inProgress = MpCommit.serializer.deserialize(in, version);
             MpCommit mostRecent = MpCommit.serializer.deserialize(in, version);
-            return new MpPrepareResponse(success, rolledBack, inProgress, mostRecent);
+            TxLog txLog = TxLog.serializer.deserialize(in, version);
+            return new MpPrepareResponse(success, rolledBack, inProgress, mostRecent, txLog);
         }
 
         public long serializedSize(MpPrepareResponse response, int version)
         {
             return TypeSizes.sizeof(response.promised)
                       + MpCommit.serializer.serializedSize(response.inProgressCommit, version)
-                      + MpCommit.serializer.serializedSize(response.mostRecentCommit, version);
+                      + MpCommit.serializer.serializedSize(response.mostRecentCommit, version)
+                      + TxLog.serializer.serializedSize(response.txLog, version);
         }
     }
 }

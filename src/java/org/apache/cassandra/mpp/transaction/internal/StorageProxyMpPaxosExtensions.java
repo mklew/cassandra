@@ -58,6 +58,7 @@ import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.mpp.MppServicesLocator;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
@@ -777,7 +778,15 @@ public class StorageProxyMpPaxosExtensions
             }
 
             if(doesReplicaGroupWithQuorumOfRollbacksExist()) {
-                // TODO [MPP] If there is a replica group from which quorum of replicas transitioned into rollback phase, then we need to rollback whole transaction.
+                // [MPP] If there is a replica group from which quorum of replicas transitioned into rollback phase, then we need to rollback whole transaction.
+
+                // all replicas that did not transition to rollback phase, so either successful transitions or failed ones, but failed for other reasons than rollback
+                // should get a message to perform local rollback
+                replicas.stream()
+                        .filter(p -> p.getReplicaInPhaseHolder().getTransitionResult().phaseAfterTransition() != Phase.ROLLBACK_PHASE)
+                        .forEach(r -> {
+                            MppServicesLocator.getInstance().notifyAboutRollback(r, transactionState);
+                        });
                 return true;
             }
             else {
@@ -920,17 +929,27 @@ public class StorageProxyMpPaxosExtensions
         MpPrePrepareMpPaxosCallback callback = ((MppServiceImpl) MppServicesLocator.getInstance()).prePrepareReplica(replicaInPhase.getTransactionState(), replicaInPhase.getReplica(), null);
         callback.await();
 
-        Map<InetAddress, Optional<MpPaxosId>> responsesByReplica = callback.getResponsesByReplica();
+        Map<InetAddress, Pair<Optional<MpPaxosId>, TxLog>> responsesByReplica = callback.getResponsesByReplica();
 
-        if (responsesByReplica.size() == 1 && responsesByReplica.entrySet().iterator().next().getValue().isPresent())
+        if (responsesByReplica.size() == 1 && responsesByReplica.entrySet().iterator().next().getValue().right == TxLog.COMMITTED) {
+            // this transaction has been tried again and it turns out it was committed
+            return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true);
+        }
+        else if(responsesByReplica.size() == 1 && responsesByReplica.entrySet().iterator().next().getValue().right == TxLog.ROLLED_BACK) {
+            // this transaction has been tried again and it turns out it was rolled back
+            return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false);
+        }
+        else if (responsesByReplica.size() == 1 &&  responsesByReplica.entrySet().iterator().next().getValue().left.isPresent())
         {
-            // success
-            ReplicaInPrePreparedPhase replicaInPrePreparedPhase = new ReplicaInPrePreparedPhase(replicaInPhase.getTransactionState(), replicaInPhase.getState(), replicaInPhase.getReplica(), responsesByReplica, null);
+            // successfully pre prepared
+            Map.Entry<InetAddress, Pair<Optional<MpPaxosId>, TxLog>> e = responsesByReplica.entrySet().iterator().next();
+            Map<InetAddress, Optional<MpPaxosId>> map = Collections.singletonMap(e.getKey(), e.getValue().left);
+            ReplicaInPrePreparedPhase replicaInPrePreparedPhase = new ReplicaInPrePreparedPhase(replicaInPhase.getTransactionState(), replicaInPhase.getState(), replicaInPhase.getReplica(), map, null);
             return new TransitionResultImpl(replicaInPrePreparedPhase, Phase.PRE_PREPARE_PHASE, true);
         }
         else
         {
-            // failed transition
+            // failed transition, no response from replica
             return new TransitionResultImpl(replicaInPhase, Phase.NO_PHASE, false);
         }
     };
@@ -942,6 +961,14 @@ public class StorageProxyMpPaxosExtensions
         int requiredParticipants = 1;
         MpPrepareCallback summary = inPhase.getSummary();
 
+        if(summary != null && TxLog.COMMITTED == summary.txLog) {
+            return new TransitionResultImpl(inPhase, Phase.AFTER_COMMIT_PHASE, true);
+        }
+
+        if(summary != null && TxLog.ROLLED_BACK == summary.txLog) {
+            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
+        }
+
         if (summary != null && summary.wasRolledBack())
         {
             return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
@@ -952,6 +979,15 @@ public class StorageProxyMpPaxosExtensions
         MpCommit toPrepare = MpCommit.newPrepare(inPhase.getTransactionState(), ballot);
         summary = preparePaxos(toPrepare, liveEndpoints, requiredParticipants, consistencyForPaxos, null);
 
+        if(summary != null && TxLog.COMMITTED == summary.txLog) {
+            return new TransitionResultImpl(inPhase, Phase.AFTER_COMMIT_PHASE, true);
+        }
+
+        if(summary != null && TxLog.ROLLED_BACK == summary.txLog) {
+            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
+        }
+
+        // TODO [MPP] this is probably redundant after introducing transaction log
         if(summary.wasRolledBack()) {
             return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
         }
@@ -1185,7 +1221,17 @@ public class StorageProxyMpPaxosExtensions
 
         List<InetAddress> participants = Collections.singletonList(replicaInPhase.getReplica().getHost());
         try {
-            boolean proposed = proposePaxos(proposal, participants, 1, inPrepared.timeOutProposalIfPartialResponses, consistencyForPaxos, null);
+            Pair<Boolean, TxLog> proposedResult = proposePaxos(proposal, participants, 1, inPrepared.timeOutProposalIfPartialResponses, consistencyForPaxos, null);
+            TxLog txLog = proposedResult.right;
+
+            if(txLog == TxLog.COMMITTED) {
+                return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true);
+            }
+            else if(txLog == TxLog.ROLLED_BACK) {
+                return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false);
+            }
+
+            boolean proposed = proposedResult.left;
             logger.debug("PaxosProposed response is {} for replica {}, TxId {}", proposed, replicaInPhase.getReplica(), replicaInPhase.getTransactionState().getTransactionId());
 
             if (proposed)
@@ -1365,7 +1411,7 @@ public class StorageProxyMpPaxosExtensions
     /**
      * @param proposal has ballot that was prepared + transaction state
      */
-    private static boolean proposePaxos(MpCommit proposal, List<InetAddress> endpoints,
+    private static Pair<Boolean, TxLog> proposePaxos(MpCommit proposal, List<InetAddress> endpoints,
                                         int requiredParticipants, boolean timeoutIfPartial,
                                         ConsistencyLevel consistencyLevel, ReplicasGroupsOperationCallback replicasGroupOperationCallback)
     throws WriteTimeoutException
@@ -1381,6 +1427,11 @@ public class StorageProxyMpPaxosExtensions
         }
         logger.debug("Awaiting MP_PAXOS_PROPOSE callback for tx id {}", proposal.update.getTransactionId());
         callback.await();
+
+        if(callback.getTxLog() != null && callback.getTxLog() != TxLog.UNKNOWN) {
+            return Pair.create(false, callback.getTxLog());
+        }
+
         if (callback.wasRolledBack())
         {
             logger.info("Callback from proposal says that transaction id {} was rolled back. Throwing excpetion", proposal.update.getTransactionId());
@@ -1389,13 +1440,13 @@ public class StorageProxyMpPaxosExtensions
         if (callback.isSuccessful())
         {
             logger.debug("MP_PAXOS_PROPOSE callback was successful. Tx ID {}", proposal.update.getTransactionId());
-            return true;
+            return Pair.create(true, TxLog.UNKNOWN);
         }
 
         if (timeoutIfPartial && !callback.isFullyRefused())
             throw new WriteTimeoutException(WriteType.CAS, consistencyLevel, callback.getAcceptCount(), requiredParticipants);
         logger.debug("MP_PAXOS_PROPOSE callback was not successful, returning false. Tx ID {}", proposal.update.getTransactionId());
-        return false;
+        return Pair.create(false, TxLog.UNKNOWN);
     }
 
     private static void commitPaxos3(MpCommit proposal, ConsistencyLevel consistencyLevel, boolean shouldHint, Replica replica) throws WriteTimeoutException

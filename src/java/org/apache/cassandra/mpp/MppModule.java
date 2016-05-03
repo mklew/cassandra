@@ -68,6 +68,7 @@ public class MppModule
         mpPaxosIndex.setDeleteTransactionsDataService(privateMemtableStorage);
         mpPaxosIndex.setJmxRolledBackTxsInfo(service);
         mpPaxosIndex.setMppIndexKeys(mppIndexKeys);
+        mpPaxosIndex.setTransactionLog(transactionLog);
 
         final NativeReadTransactionDataRequestExecutor nativeReadTransactionDataRequestExecutor = new NativeReadTransactionDataRequestExecutor(MessagingService.instance());
 
@@ -79,6 +80,7 @@ public class MppModule
         service.setMpPaxosIndex(mpPaxosIndex);
         service.setMessagingService(MessagingService.instance());
         service.setHintsService((mutation, destination) -> StorageProxy.submitHint(mutation, destination, null));
+        service.setTransactionLog(transactionLog);
 
         return new MppModule(service, readTransactionDataService, transactionLog);
     }

@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.net.MessageIn;
 
@@ -41,6 +42,8 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
     public MpCommit mostRecentCommit;
     public MpCommit mostRecentInProgressCommit;
     public MpCommit mostRecentInProgressCommitWithUpdate;
+    public TxLog txLog;
+
     private final TransactionState transactionState;
 
     private final Map<InetAddress, MpCommit> commitsByReplica = new ConcurrentHashMap<>();
@@ -61,6 +64,14 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
     {
         MpPrepareResponse response = message.payload;
         logger.debug("Prepare response {} from {}", response, message.from);
+        this.txLog = message.payload.txLog;
+
+        if(txLog != TxLog.UNKNOWN) {
+            logger.debug("Prepare response says that transaction {} exists in transaction log at replica {} tx log is {}", transactionState.getTransactionId(), message.from, txLog);
+            while (latch.getCount() > 0)
+                latch.countDown();
+            return;
+        }
 
         if(message.payload.rolledBack) {
             logger.debug("Prepare response says that transaction {} was rolled back at replica {} We will rollback that transaction completely", transactionState.getTransactionId(), message.from);
@@ -69,6 +80,8 @@ public class MpPrepareCallback extends AbstractMpPaxosCallback<MpPrepareResponse
                 latch.countDown();
             return;
         }
+
+
 
         // In case of clock skew, another node could be proposing with ballot that are quite a bit
         // older than our own. In that case, we record the more recent commit we've received to make

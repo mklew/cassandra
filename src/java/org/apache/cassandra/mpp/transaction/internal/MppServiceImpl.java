@@ -56,11 +56,13 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.TransactionRolledBackException;
 import org.apache.cassandra.mpp.transaction.HintsService;
 import org.apache.cassandra.mpp.transaction.MppService;
+import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.client.TransactionStateUtils;
@@ -75,6 +77,7 @@ import org.apache.cassandra.service.mppaxos.MpPrePrepare;
 import org.apache.cassandra.service.mppaxos.MpPrePrepareMpPaxosCallback;
 import org.apache.cassandra.service.mppaxos.ReplicasGroupsOperationCallback;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 /**
@@ -94,6 +97,7 @@ public class MppServiceImpl implements MppService
     private MessagingService messagingService;
 
     private HintsService hintsService;
+    private MppTransactionLog transactionLog;
 
     public void setHintsService(HintsService hintsService)
     {
@@ -249,6 +253,13 @@ public class MppServiceImpl implements MppService
         }
     }
 
+    public void notifyAboutRollback(Replica replica, TransactionState transactionState)
+    {
+        logger.debug("notifyAboutRollback replica {} tx id {}", replica, transactionState.getTransactionId());
+        MessageOut<TransactionState> message = new MessageOut<>(MessagingService.Verb.MP_ROLLBACK, transactionState, TransactionStateSerializer.instance);
+        messagingService.sendOneWay(message, replica.getHost());
+    }
+
     public void rollbackTransactionLocal(TransactionState transactionState)
     {
         TransactionId id = transactionState.id();
@@ -257,6 +268,7 @@ public class MppServiceImpl implements MppService
             privateMemtableStorage.removePrivateData(id);
         }
         mpPaxosIndex.acquireAndRollback(transactionState);
+        transactionLog.appendRolledBack(transactionState.id());
     }
 
     public Collection<TransactionId> getInProgressTransactions()
@@ -432,11 +444,14 @@ public class MppServiceImpl implements MppService
         logger.debug("transactionData.applyAllMutationsIfNotTruncated. TxId {}", transactionState.getTransactionId());
         transactionData.applyAllMutationsIfNotTruncated(timestamp);
         mpPaxosIndex.acquireAndMarkAsCommitted(transactionState, timestamp);
+        // TODO [MPP] If these are two seperate operations (commit and self removal) then it leaves window where new transaction can join same round.
+        // TODO [MPP] It isn't really bad, because round for committed transaction is finished anyway.
         mpPaxosIndex.acquireAndRemoveSelf(transactionState);
         // TODO [MPP] Private data should also have a retension, probably of same length as paxos state.
         // It can be deleted if none of replicas miss Most Recent Commit
         // It can be deleted on next paxos round
         privateMemtableStorage.removePrivateData(transactionState.id());
+        transactionLog.appendCommitted(transactionState.id());
         logger.info("multiPartitionPaxosCommitPhase is done. TxId {}", transactionState.getTransactionId());
         jmxAddToCommitted(transactionState);
     }
@@ -512,15 +527,23 @@ public class MppServiceImpl implements MppService
         }
     }
 
-    public Optional<MpPaxosId> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare)
+    public Pair<Optional<MpPaxosId>, TxLog> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare)
     {
-        logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}", prePrepare.getTransactionState().getTransactionId());
-        Optional<MpPaxosId> mpPaxosId = mpPaxosIndex.acquireForMppPaxos(prePrepare.getTransactionState());
-        logger.info("prePrepareMultiPartitionPaxos making transaction data consistent. TxID {}", prePrepare.getTransactionState().getTransactionId());
-        makeTransactionDataConsistent(prePrepare.getTransactionState());
+        TxLog txLog = transactionLog.findTxLog(prePrepare.getTransactionState().id());
+        if(txLog != TxLog.UNKNOWN)
+        {
+            // it was either rolled back or committed.
+            return Pair.create(Optional.empty(), txLog);
+        }
+        else {
+            logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}", prePrepare.getTransactionState().getTransactionId());
+            Optional<MpPaxosId> mpPaxosId = mpPaxosIndex.acquireForMppPaxos(prePrepare.getTransactionState());
+            logger.info("prePrepareMultiPartitionPaxos making transaction data consistent. TxID {}", prePrepare.getTransactionState().getTransactionId());
+            makeTransactionDataConsistent(prePrepare.getTransactionState());
 
-        logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}, is paxos round present: {}, paxos id is: {}", prePrepare.getTransactionState().getTransactionId(), mpPaxosId.isPresent(), mpPaxosId.map(id -> id.getPaxosId().toString()).orElse("not defined"));
-        return mpPaxosId;
+            logger.info("prePrepareMultiPartitionPaxos begins: transaction id: {}, is paxos round present: {}, paxos id is: {}", prePrepare.getTransactionState().getTransactionId(), mpPaxosId.isPresent(), mpPaxosId.map(id -> id.getPaxosId().toString()).orElse("not defined"));
+            return Pair.create(mpPaxosId, txLog);
+        }
     }
 
     private boolean transactionNotFrozenAlready(TransactionState transactionState)
@@ -653,5 +676,10 @@ public class MppServiceImpl implements MppService
     public Optional<MpPaxosId> acquireAndFindPaxosId(TransactionState transactionState)
     {
         return mpPaxosIndex.acquireAndFindPaxosId(transactionState);
+    }
+
+    public void setTransactionLog(MppTransactionLog transactionLog)
+    {
+        this.transactionLog = transactionLog;
     }
 }

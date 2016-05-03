@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.net.MessageIn;
 
 /**
@@ -49,6 +50,7 @@ public class MpProposeCallback extends AbstractMpPaxosCallback<MpProposeResponse
     private final int requiredAccepts;
     private final boolean failFast;
     private final AtomicBoolean rolledBack = new AtomicBoolean(false);
+    private TxLog txLog;
 
     public MpProposeCallback(int totalTargets, int requiredTargets, boolean failFast, ConsistencyLevel consistency, ReplicasGroupsOperationCallback replicasGroupOperationCallback)
     {
@@ -61,6 +63,8 @@ public class MpProposeCallback extends AbstractMpPaxosCallback<MpProposeResponse
     {
         logger.debug("Propose response {} from {}", msg.payload, msg.from);
 
+        this.txLog = msg.payload.txLog;
+
         if (msg.payload.promised)
             accepts.incrementAndGet();
 
@@ -69,7 +73,7 @@ public class MpProposeCallback extends AbstractMpPaxosCallback<MpProposeResponse
 
         latch.countDown();
 
-        if (isSuccessful() || (failFast && (latch.getCount() + accepts.get() < requiredAccepts)) || wasRolledBack())
+        if (isSuccessful() || (failFast && (latch.getCount() + accepts.get() < requiredAccepts)) || wasRolledBack() || txLog != TxLog.UNKNOWN)
         {
             while (latch.getCount() > 0)
                 latch.countDown();
@@ -83,6 +87,11 @@ public class MpProposeCallback extends AbstractMpPaxosCallback<MpProposeResponse
 
     public boolean wasRolledBack() {
         return rolledBack.get();
+    }
+
+    public TxLog getTxLog()
+    {
+        return txLog;
     }
 
     public boolean isSuccessful()

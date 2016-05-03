@@ -26,6 +26,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.mpp.transaction.TxLog;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -33,15 +34,18 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  */
 public class MpProposeResponse
 {
-    boolean promised;
+    final boolean promised;
 
-    boolean rolledback;
+    final boolean rolledback;
 
-    public MpProposeResponse(boolean promised, boolean rolledback)
+    final TxLog txLog;
+
+    public MpProposeResponse(boolean promised, boolean rolledback, TxLog txLog)
     {
         Preconditions.checkArgument(!(promised && rolledback), "Cannot be promised and rolled back at same time");
         this.promised = promised;
         this.rolledback = rolledback;
+        this.txLog = txLog;
     }
 
     public static final MpProposeResponseSerializer serializer = new MpProposeResponseSerializer();
@@ -52,18 +56,22 @@ public class MpProposeResponse
         {
             out.writeBoolean(mpProposeResponse.promised);
             out.writeBoolean(mpProposeResponse.rolledback);
+            TxLog.serializer.serialize(mpProposeResponse.txLog, out, version);
         }
 
         public MpProposeResponse deserialize(DataInputPlus in, int version) throws IOException
         {
             boolean promised = in.readBoolean();
             boolean rolledBack = in.readBoolean();
-            return new MpProposeResponse(promised, rolledBack);
+            TxLog txLog = TxLog.serializer.deserialize(in, version);
+            return new MpProposeResponse(promised, rolledBack, txLog);
         }
 
         public long serializedSize(MpProposeResponse mpProposeResponse, int version)
         {
-            return TypeSizes.sizeof(mpProposeResponse.promised) + TypeSizes.sizeof(mpProposeResponse.rolledback);
+            return TypeSizes.sizeof(mpProposeResponse.promised) +
+                   TypeSizes.sizeof(mpProposeResponse.rolledback) +
+                    TxLog.serializer.serializedSize(mpProposeResponse.txLog, version);
         }
     }
 }

@@ -35,10 +35,12 @@ import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.mpp.transaction.internal.JmxRolledBackTxsInfo;
 import org.apache.cassandra.mpp.transaction.internal.MppHint;
+import org.apache.cassandra.mpp.transaction.internal.Replica;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MppServiceMXBean;
 import org.apache.cassandra.service.mppaxos.MpPrePrepare;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -117,11 +119,13 @@ public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex, 
 
     void makeTransactionDataConsistent(TransactionState transactionState);
 
-    Optional<MpPaxosId> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare);
+    Pair<Optional<MpPaxosId>, TxLog> prePrepareMultiPartitionPaxos(MpPrePrepare prePrepare);
 
     void multiPartitionPaxosCommitPhase(TransactionState transactionState, long ballot);
 
     void submitHints(List<MppHint> hints);
 
     void transactionalRead(TransactionState transactionState, ConsistencyLevel consistencyLevel, ClientState state);
+
+    void notifyAboutRollback(Replica replica, TransactionState transactionState);
 }

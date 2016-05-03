@@ -26,6 +26,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosIdImpl;
 import org.apache.cassandra.serializers.UUIDSerializer;
@@ -39,19 +40,21 @@ import org.apache.cassandra.utils.UUIDGen;
 public class MpPrePrepareResponse
 {
     Optional<MpPaxosId> paxosId;
+    TxLog txLog;
 
     public static final MpPrePrepareResponseSerializer serializer = new MpPrePrepareResponseSerializer();
 
     private static final int SIZE_OF_UUID = TypeSizes.sizeof(UUIDGen.getTimeUUID());
 
-    public MpPrePrepareResponse(Optional<MpPaxosId> paxosId)
+    public MpPrePrepareResponse(Optional<MpPaxosId> paxosId, TxLog txLog)
     {
         this.paxosId = paxosId;
+        this.txLog = txLog;
     }
 
-    public static MpPrePrepareResponse from(Optional<MpPaxosId> mpPaxosId)
+    public static MpPrePrepareResponse from(Optional<MpPaxosId> mpPaxosId, TxLog txLog)
     {
-        return new MpPrePrepareResponse(mpPaxosId);
+        return new MpPrePrepareResponse(mpPaxosId, txLog);
     }
 
     public static class MpPrePrepareResponseSerializer implements IVersionedSerializer<MpPrePrepareResponse>
@@ -71,6 +74,8 @@ public class MpPrePrepareResponse
                     throw new RuntimeException(e);
                 }
             });
+
+            TxLog.serializer.serialize(mpPrePrepareResponse.txLog, out, version);
         }
 
         public MpPrePrepareResponse deserialize(DataInputPlus in, int version) throws IOException
@@ -80,17 +85,22 @@ public class MpPrePrepareResponse
             {
                 final UUID id = UUIDSerializer.instance.deserialize(ByteBufferUtil.read(in, SIZE_OF_UUID));
                 MpPaxosIdImpl mpPaxosId = new MpPaxosIdImpl(id);
-                return new MpPrePrepareResponse(Optional.of(mpPaxosId));
+
+                TxLog txLog = TxLog.serializer.deserialize(in, version);
+
+                return new MpPrePrepareResponse(Optional.of(mpPaxosId), txLog);
             }
             else
             {
-                return new MpPrePrepareResponse(Optional.empty());
+                TxLog txLog = TxLog.serializer.deserialize(in, version);
+                return new MpPrePrepareResponse(Optional.empty(), txLog);
             }
         }
 
         public long serializedSize(MpPrePrepareResponse mpPrePrepareResponse, int version)
         {
-            return 1 + mpPrePrepareResponse.paxosId.map(x -> TypeSizes.sizeof(x.getPaxosId())).orElse(0);
+            return 1 + mpPrePrepareResponse.paxosId.map(x -> TypeSizes.sizeof(x.getPaxosId())).orElse(0)
+                   + TxLog.serializer.serializedSize(mpPrePrepareResponse.txLog, version);
         }
     }
 }

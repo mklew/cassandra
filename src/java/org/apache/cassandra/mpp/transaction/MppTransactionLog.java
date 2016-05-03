@@ -33,6 +33,8 @@ public interface MppTransactionLog
 
     Optional<TxLog> checkTransactionInLog(TransactionId transactionId);
 
+    TxLog findTxLog(TransactionId transactionId);
+
     default boolean existsInLog(TransactionId transactionId) {
         return checkTransactionInLog(transactionId).isPresent();
     }

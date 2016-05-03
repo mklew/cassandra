@@ -48,6 +48,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.mpp.transaction.DeleteTransactionsDataService;
 import org.apache.cassandra.mpp.transaction.MppIndexKey;
 import org.apache.cassandra.mpp.transaction.MppIndexKeys;
+import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.MultiPartitionPaxosIndex;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
@@ -75,6 +76,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
 
     private JmxRolledBackTxsInfo jmxRolledBackTxsInfo;
     private MppIndexKeys mppIndexKeys;
+    private MppTransactionLog transactionLog;
 
     public JmxRolledBackTxsInfo getJmxRolledBackTxsInfo()
     {
@@ -375,6 +377,11 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         return mppIndexKeys;
     }
 
+    public void setTransactionLog(MppTransactionLog transactionLog)
+    {
+        this.transactionLog = transactionLog;
+    }
+
 
     private static class RemoveParticipantsFromIndex {
         Stream<MpPaxosParticipant> participants;
@@ -467,6 +474,7 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
         return participantsToRollback.map(par -> {
                     par.markThatItHasToRollback();
                     getDeleteTransactionsDataService().deleteAllPrivateTransactionData(par.getTransactionState().id());
+                    appendToTransactionLogAsRolledBack(par);
                     maybeNotifyAboutRollback(par);
                     par.markItWasRolledBack();
 
@@ -496,6 +504,13 @@ public class MpPaxosIndex implements MultiPartitionPaxosIndex
                    .map(Optional::get)
                    .map(par -> new RemoveParticipantsFromIndex(Stream.of(par), getTransactionItemsOwnedByThisNodeSorted(par.getTransactionState()).stream()))
                    .reduce(RemoveParticipantsFromIndex.reducer);
+    }
+
+    private void appendToTransactionLogAsRolledBack(MpPaxosParticipant par)
+    {
+        if(transactionLog != null) {
+            transactionLog.appendRolledBack(par.getTransactionState().id());
+        }
     }
 
     private void maybeNotifyAboutRollback(MpPaxosParticipant par)

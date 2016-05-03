@@ -28,8 +28,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.apache.cassandra.mpp.transaction.paxos.MpPaxosId;
 import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
@@ -39,7 +41,7 @@ public class MpPrePrepareMpPaxosCallback extends AbstractMpPaxosCallback<MpPrePr
 {
     private static final Logger logger = LoggerFactory.getLogger(MpPrePrepareMpPaxosCallback.class);
 
-    private final Map<InetAddress, Optional<MpPaxosId>> responsesByReplica = new ConcurrentHashMap<>();
+    private final Map<InetAddress, Pair<Optional<MpPaxosId>, TxLog>> responsesByReplica = new ConcurrentHashMap<>();
 
     private final AtomicInteger roundsPrepared = new AtomicInteger(0);
 
@@ -54,12 +56,12 @@ public class MpPrePrepareMpPaxosCallback extends AbstractMpPaxosCallback<MpPrePr
     {
         InetAddress replica = msg.from;
         Optional<MpPaxosId> paxosId = msg.payload.paxosId;
-        logger.debug("MpPrePrepareMpPaxos response {} from {}", paxosId, replica);
+        logger.debug("MpPrePrepareMpPaxos response {} tx log {} from replica {}", paxosId, msg.payload.txLog, replica);
 
-        responsesByReplica.put(replica, paxosId);
+        responsesByReplica.put(replica, Pair.create(paxosId, msg.payload.txLog));
 
         // count prepared rounds.
-        if (msg.payload.paxosId.isPresent())
+        if (msg.payload.paxosId.isPresent() || msg.payload.txLog != TxLog.UNKNOWN)
             roundsPrepared.incrementAndGet();
 
         latch.countDown();
@@ -72,7 +74,7 @@ public class MpPrePrepareMpPaxosCallback extends AbstractMpPaxosCallback<MpPrePr
         }
     }
 
-    public Map<InetAddress, Optional<MpPaxosId>> getResponsesByReplica()
+    public Map<InetAddress, Pair<Optional<MpPaxosId>, TxLog>> getResponsesByReplica()
     {
         return responsesByReplica;
     }

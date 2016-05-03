@@ -18,11 +18,40 @@
 
 package org.apache.cassandra.mpp.transaction;
 
+import java.io.IOException;
+
+import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+
 /**
 * @author Marek Lewandowski <marek.m.lewandowski@gmail.com>
 * @since 03/05/16
 */
 public enum TxLog
 {
-    ROLLED_BACK, COMMITTED, UNKNOWN
+    ROLLED_BACK, COMMITTED, UNKNOWN;
+
+    public static TxLogSerializer serializer = new TxLogSerializer();
+
+    public static class TxLogSerializer implements IVersionedSerializer<TxLog> {
+
+        public void serialize(TxLog txLog, DataOutputPlus out, int version) throws IOException
+        {
+            out.writeInt(txLog.ordinal());
+        }
+
+        public TxLog deserialize(DataInputPlus in, int version) throws IOException
+        {
+            int ordinal = in.readInt();
+            TxLog[] values = TxLog.values();
+            return values[ordinal];
+        }
+
+        public long serializedSize(TxLog txLog, int version)
+        {
+            return TypeSizes.sizeof(txLog.ordinal());
+        }
+    }
 }

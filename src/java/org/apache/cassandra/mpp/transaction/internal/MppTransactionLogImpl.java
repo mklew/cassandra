@@ -97,4 +97,9 @@ public class MppTransactionLogImpl implements MppTransactionLog
             return Optional.of(txLog);
         }
     }
+
+    public TxLog findTxLog(TransactionId transactionId)
+    {
+        return checkTransaction(transactionId);
+    }
 }
