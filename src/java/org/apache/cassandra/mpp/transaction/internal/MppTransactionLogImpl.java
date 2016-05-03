@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.TransactionId;
+import org.apache.cassandra.mpp.transaction.TxLog;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.SystemKeyspace.MPP_TRANSACTION_LOG;

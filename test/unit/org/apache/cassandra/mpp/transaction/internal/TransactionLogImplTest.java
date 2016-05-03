@@ -29,6 +29,7 @@ import org.apache.cassandra.mpp.transaction.MppCQLTester;
 import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
+import org.apache.cassandra.mpp.transaction.TxLog;
 import org.joda.time.DateTime;
 
 /**
@@ -52,9 +53,9 @@ public class TransactionLogImplTest extends MppCQLTester
 
         Assert.assertTrue(transactionLog.txWasCommitted(id1));
 
-        Optional<MppTransactionLog.TxLog> txLog = transactionLog.checkTransactionInLog(id1);
+        Optional<TxLog> txLog = transactionLog.checkTransactionInLog(id1);
         Assert.assertTrue(txLog.isPresent());
-        Assert.assertEquals(MppTransactionLog.TxLog.COMMITTED, txLog.get());
+        Assert.assertEquals(TxLog.COMMITTED, txLog.get());
 
         transactionLog.appendRolledBack(id1); // cannot append twice
         Assert.assertTrue(transactionLog.txWasCommitted(id1));
