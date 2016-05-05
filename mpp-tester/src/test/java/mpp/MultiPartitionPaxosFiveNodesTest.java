@@ -548,7 +548,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
      */
     @Test
     public void rollbackTestCase() throws Throwable {
-        int iterations = 100;
+        int iterations = 16;
         Collection<CounterAndItsTable> countersToPersist = createRandomCounters(iterations * 2);
         Session anySession = getAnySession();
         ArrayList<CounterAndItsTable> counters = new ArrayList<>(persistInitialCounterValues(anySession, countersToPersist));
@@ -566,11 +566,14 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         // Acutal execution on seperate thead pool
         counterExecutors.forEach(executorService::execute);
 
-
+        CountDownLatch latch = new CountDownLatch(1);
         allResults.thenAccept(results -> {
+            System.out.println("thenAccept results");
             List<IterationInformation> iterationInformation = nextTwoExecutor.getIterationInformation();
+            System.out.println("iterationInformation size " + iterationInformation.size());
 
             iterationInformation.stream().filter(ii -> !ii.isWasCommitted()).forEach(ii -> {
+                System.out.println("thenAccept results forEach");
                 // ii was rolled back.
                 // It means that counter at not even index, so at ii
                 int evenIdx = (ii.getIterationNumber() - 1) * 2;
@@ -585,10 +588,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 Assert.assertEquals("Odd counter should have 0 count when transaction was rolled back", 0, actualCounterOddCounter1Value);
 
                 Assert.assertTrue(actualCounterEvenCounter1Value == COUNT_ON_EVEN_ITERATIONS || actualCounterEvenCounter1Value == COUNT_ON_ODD_ITERATIONS);
-
+                System.out.println("After assertions");
             });
+            latch.countDown();
         }).get();
 
+        latch.await();
         anySession.close();
     }
 
@@ -596,7 +601,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     {
         String cql = String.format("SELECT %s FROM %s.%s WHERE id = ?", counterColumn,
                                    c.table.keyspaceName,
-                                   c.table);
+                                   c.table.tableName);
 
         SimpleStatement statement = new SimpleStatement(cql, c.counter.getId());
         statement.setConsistencyLevel(ConsistencyLevel.QUORUM);
