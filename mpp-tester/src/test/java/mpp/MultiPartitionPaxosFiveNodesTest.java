@@ -528,6 +528,92 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
     }
 
+    /**
+     * Scenario:
+     * There are 2 counter executors and N counters and I iterations where I = N/2
+     *
+     * First executor in iteration i, sets counter value to be V_1 in executors: c[i] and c[i+1]
+     * Second executor in iteration i, sets counter value to be V2_even or V2_odd for all counters at even indexes.
+     *
+     * After iterations are done, first executor has committed some transactions and rolled back some.
+     *
+     * If first executor did transaction and successfully committed it then:
+     *      counter[i+1] and counter[i] should be set to V_1
+     *
+     * If first executor did transaction and it was rolled back then:
+     *      counter[i+1] is equal to 0
+     *
+     *      Tx first was rolled back, then counter at odd position should have counter1 = 0 and counter at even position should be V2_even or V2_odd
+     *
+     */
+    @Test
+    public void rollbackTestCase() throws Throwable {
+        int iterations = 100;
+        Collection<CounterAndItsTable> countersToPersist = createRandomCounters(iterations * 2);
+        Session anySession = getAnySession();
+        ArrayList<CounterAndItsTable> counters = new ArrayList<>(persistInitialCounterValues(anySession, countersToPersist));
+        CounterExecutor nextTwoExecutor = new CounterExecutorIncNextTwo(iterations, "inc-next-two", counters);
+        CounterExecutor allEvenExecutor = new CounterExecutorIncAllEven(iterations, "inc-all-even", counters);
+        List<CounterExecutor> counterExecutors = Arrays.asList(nextTwoExecutor, allEvenExecutor);
+        ExecutorService executorService = Executors.newFixedThreadPool(counterExecutors.size());
+
+        // Prepare all counter executors
+        counterExecutors.forEach(counterExecutor -> counterExecutor.prepare());
+        // Collect futures of results.
+        List<CompletableFuture<CounterExecutorResults>> futureResults = counterExecutors.stream().map(counterExecutor -> counterExecutor.getCounterExecutorResultsFuture()).collect(toList());
+        CompletableFuture<List<CounterExecutorResults>> allResults = sequence(futureResults);
+
+        // Acutal execution on seperate thead pool
+        counterExecutors.forEach(executorService::execute);
+
+
+        allResults.thenAccept(results -> {
+            List<IterationInformation> iterationInformation = nextTwoExecutor.getIterationInformation();
+
+            iterationInformation.stream().filter(ii -> !ii.isWasCommitted()).forEach(ii -> {
+                // ii was rolled back.
+                // It means that counter at not even index, so at ii
+                int evenIdx = (ii.getIterationNumber() - 1) * 2;
+
+                CounterAndItsTable cEven = counters.get(evenIdx);
+                CounterAndItsTable cOdd = counters.get(evenIdx + 1);
+
+                String counterColumn = "counter1";
+                int actualCounterOddCounter1Value = fetchCounterColumnValue(anySession, cOdd, counterColumn);
+                int actualCounterEvenCounter1Value = fetchCounterColumnValue(anySession, cEven, counterColumn);
+
+                Assert.assertEquals("Odd counter should have 0 count when transaction was rolled back", 0, actualCounterOddCounter1Value);
+
+                Assert.assertTrue(actualCounterEvenCounter1Value == COUNT_ON_EVEN_ITERATIONS || actualCounterEvenCounter1Value == COUNT_ON_ODD_ITERATIONS);
+
+            });
+        }).get();
+
+        anySession.close();
+    }
+
+    private int fetchCounterColumnValue(Session anySession, CounterAndItsTable c, String counterColumn)
+    {
+        String cql = String.format("SELECT %s FROM %s.%s WHERE id = ?", counterColumn,
+                                   c.table.keyspaceName,
+                                   c.table);
+
+        SimpleStatement statement = new SimpleStatement(cql, c.counter.getId());
+        statement.setConsistencyLevel(ConsistencyLevel.QUORUM);
+
+        ResultSet counterQueryResult = anySession.execute(statement);
+        return counterQueryResult.one().getInt(counterColumn);
+    }
+
+    private static Collection<CounterAndItsTable> createRandomCounters(int numberOfCounters)
+    {
+        return IntStream.range(0, numberOfCounters).mapToObj(i -> {
+
+            CountersSchemaHelpers.CounterData counter = new CountersSchemaHelpers.CounterData(UUID.randomUUID(), 0, 0, 0, 0, 0);
+            return new CounterAndItsTable<>(counter, MppCountersTestSchema.countersCounter1);
+        }).collect(toList());
+    }
+
 
     @Test
     public void runTestUsingCountersVol2() throws Throwable {
@@ -709,6 +795,12 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                     return counter.counter.toString();
                 }).forEach(System.out::println);
 
+                System.out.println("Executor and number of their committed transactions:");
+                counterExecutors.forEach(counterExecutor -> {
+                    String msg = counterExecutor.name + " has committed: " + counterExecutor.numberOfCommittedTransactions() + " transactions";
+                    System.out.println(msg);
+                });
+
                 results.forEach(expectedResult -> {
                     System.out.println("Checking expected results by executor: " + expectedResult.resultsFromExecutorName);
 
@@ -774,6 +866,56 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         return counters;
     }
 
+    public static class IterationInformation {
+        int iterationNumber;
+
+        UUID transactionId;
+
+        boolean wasCommitted;
+
+        Exception exceptionAfterCommit;
+
+        public int getIterationNumber()
+        {
+            return iterationNumber;
+        }
+
+        public UUID getTransactionId()
+        {
+            return transactionId;
+        }
+
+        public boolean isWasCommitted()
+        {
+            return wasCommitted;
+        }
+
+        public Exception getExceptionAfterCommit()
+        {
+            return exceptionAfterCommit;
+        }
+
+        public void setIterationNumber(int iterationNumber)
+        {
+            this.iterationNumber = iterationNumber;
+        }
+
+        public void setTransactionId(UUID transactionId)
+        {
+            this.transactionId = transactionId;
+        }
+
+        public void setWasCommitted(boolean wasCommitted)
+        {
+            this.wasCommitted = wasCommitted;
+        }
+
+        public void setExceptionAfterCommit(Exception exceptionAfterCommit)
+        {
+            this.exceptionAfterCommit = exceptionAfterCommit;
+        }
+    }
+
     /**
      * Executor modifies Counters.
      *
@@ -814,6 +956,17 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         protected Collection<CounterAndItsTable> counters;
 
         private Session session;
+
+        private List<IterationInformation> iterationInformation = new ArrayList<>();
+
+        public List<IterationInformation> getIterationInformation()
+        {
+            return iterationInformation;
+        }
+
+        public long numberOfCommittedTransactions() {
+            return iterationInformation.stream().filter(ii -> ii.wasCommitted).count();
+        }
 
         private CounterExecutor(int iterations, String name, Collection<CounterAndItsTable> countersThatExist)
         {
@@ -869,22 +1022,35 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             resultsF.complete(computedResults);
         }
 
-        protected abstract IterationResult toIterationResult(TransactionState transactionState, IterationExpectations expectations, boolean successfullyCommitted, Session session, int iteration);
+        protected IterationResult toIterationResult(TransactionState transactionState, IterationExpectations expectations, boolean successfullyCommitted, Session session, int iteration) {
+            if(successfullyCommitted) {
+                return new IterationResult(iteration, transactionState.id(), successfullyCommitted, expectations.incrementOfs);
+            }
+            else {
+                return new IterationResult(iteration, transactionState.id(), successfullyCommitted, Collections.emptyList());
+            }
+        }
 
-        protected abstract Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session);
+        protected abstract Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session, int iteration);
 
         protected abstract boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session);
+
+        protected abstract void afterCommitStatement(boolean committed);
 
         private void runIteration(int iteration)
         {
             getCounters().forEach(counter -> counter.refresh(session));
-
+            IterationInformation ii = new IterationInformation();
+            iterationInformation.add(ii);
+            ii.setIterationNumber(iteration);
             TransactionState transactionState = beginTransaction(session);
             UUID transactionId = transactionState.getTransactionId();
 
+            ii.setTransactionId(transactionId);
+
             System.out.println("Transaction " + transactionId + " runs");
 
-            Pair<IterationExpectations, TransactionState> expectationsAndState = doInTransaction(transactionState, session);
+            Pair<IterationExpectations, TransactionState> expectationsAndState = doInTransaction(transactionState, session, iteration);
             transactionState = expectationsAndState.right;
             Boolean committed = null;
 
@@ -903,26 +1069,31 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 else {
                     System.out.println("Transaction with ID " + txId + " was rolled back");
                 }
+
+                ii.setWasCommitted(committed);
             }
             catch (Exception e)
             {
                 System.err.println("Exception occurred during commit of transaction" + e);
                 committed = false;
+
+                ii.setExceptionAfterCommit(e);
             }
 
             // Ignoring result of commitTransaction and checking it with query.
             // TODO this should only happen when timeout occurred, if there is no timeout then result of commitTransaction should be valid
 
+            // TODO [MPP] Skipping that checking so that only commit / rollback matters that can be compared with counter value.
+
             boolean reallyCommitted = checkIfItReallyWasCommitted(transactionState, session);
+//            if(committed != reallyCommitted)
+//            {
+//                log it
+//                System.out.println("Wrong commit result. Transaction with ID " + transactionState.getTransactionId() + " returned with committed=" + committed + " but in reality after checking with query it is committed=" + reallyCommitted);
+//            }
+//            committed = reallyCommitted;
 
-            if(committed != reallyCommitted)
-            {
-                // log it
-                System.out.println("Wrong commit result. Transaction with ID " + transactionState.getTransactionId() + " returned with committed=" + committed + " but in reality after checking with query it is committed=" + reallyCommitted);
-            }
-            committed = reallyCommitted;
-
-            // TODO [MPP] Check in JMX whether this transaction was really committed or not.
+            afterCommitStatement(committed);
 
             if(committed)  {
                 IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, true, session, iteration);
@@ -932,6 +1103,114 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
                 IterationResult iterationResult = toIterationResult(transactionState, expectationsAndState.left, false, session, iteration);
                 iterationResults.add(iterationResult);
             }
+
+        }
+    }
+
+    public class CounterExecutorIncNextTwo extends CounterExecutor {
+
+        private CounterExecutorIncNextTwo(int iterations, String name, Collection<CounterAndItsTable> countersThatExist)
+        {
+            super(iterations, name, countersThatExist);
+            Preconditions.checkArgument(countersThatExist.size() % 2 == 0);
+        }
+
+
+        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session, int iteration)
+        {
+            ArrayList<CounterAndItsTable> arr = new ArrayList<>(counters);
+
+
+            // iteration starts from 1,
+            int evenIdx = (iteration - 1) * 2; // 0 * 2 = 0, 1 * 2 = 2
+            // iteration 0 -> idx 0,1
+            // iteration 1 -> idx 2,3
+            CounterAndItsTable c1 = arr.get(evenIdx); // this is even index
+            CounterAndItsTable c2 = arr.get(evenIdx + 1); // this is odd index
+
+            c1.counter.counter1 = 1;
+            c2.counter.counter1 = 1;
+
+            TransactionState tx1 = c1.persistUsingTransactionOnlyColumn(transactionState, session, "counter1");
+            TransactionState tx2 = c2.persistUsingTransactionOnlyColumn(tx1, session, "counter1");
+
+
+            IncrementOf c1Inc = new IncrementOf(c1.table.keyspaceName, c1.table.tableName, c1.counter.getId().toString(), "counter1");
+            IncrementOf c2Inc = new IncrementOf(c2.table.keyspaceName, c2.table.tableName, c2.counter.getId().toString(), "counter1");
+            List<IncrementOf> incrementsOf = Arrays.asList(c1Inc, c2Inc);
+            IterationExpectations iterationExpectations = new IterationExpectations(incrementsOf);
+
+            return Pair.create(iterationExpectations, tx2);
+        }
+
+        protected boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session)
+        {
+            return false;
+        }
+
+        protected void afterCommitStatement(boolean committed)
+        {
+
+        }
+    }
+
+    public static int COUNT_ON_EVEN_ITERATIONS = 5;
+
+    public static int COUNT_ON_ODD_ITERATIONS = 10;
+
+    public class CounterExecutorIncAllEven extends CounterExecutor {
+
+        private CounterExecutorIncAllEven(int iterations, String name, Collection<CounterAndItsTable> countersThatExist)
+        {
+            super(iterations, name, countersThatExist);
+            Preconditions.checkArgument(countersThatExist.size() % 2 == 0);
+        }
+
+        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session, int iteration)
+        {
+            ArrayList<CounterAndItsTable> arr = new ArrayList<>(counters);
+
+            List<CounterAndItsTable> evenCounters = IntStream.range(0, arr.size())
+                                                        .filter(i -> i % 2 == 0)
+                                                        .mapToObj(i -> arr.get(i))
+                                                        .collect(Collectors.toList());
+
+            String counter1 = "counter1";
+
+            int countToSet = getCountInIteration(iteration);
+
+            List<Pair<IncrementOf, TransactionState>> collect = evenCounters.stream().map(c -> {
+                IncrementOf incrementOf = new IncrementOf(c.table.keyspaceName, c.table.tableName, c.counter.getId().toString(), counter1);
+
+                c.counter.counter1 = countToSet;
+
+                TransactionState tx = c.persistUsingTransactionOnlyColumn(transactionState, session, counter1);
+                return Pair.create(incrementOf, tx);
+            }).collect(toList());
+
+            TransactionState txState = collect.stream().map(p -> p.right).reduce(TransactionState::merge).get();
+
+            List<IncrementOf> increments = collect.stream().map(p -> p.left).collect(toList());
+
+            IterationExpectations iterationExpectations = new IterationExpectations(increments);
+
+            return Pair.create(iterationExpectations, txState);
+        }
+
+        private int getCountInIteration(int iteration)
+        {
+            if(iteration % 2 == 0)
+                return COUNT_ON_EVEN_ITERATIONS;
+            else return COUNT_ON_ODD_ITERATIONS;
+        }
+
+        protected boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session)
+        {
+            return false;
+        }
+
+        protected void afterCommitStatement(boolean committed)
+        {
 
         }
     }
@@ -960,7 +1239,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             }
         }
 
-        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session)
+        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session, int iteration)
         {
             // For each counter increment counter 1 table
             expectedCount = currentCount + 1;
@@ -1001,6 +1280,14 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             IterationExpectations iterationExpectations = new IterationExpectations(expectedIncrements);
 
             return Pair.create(iterationExpectations, changedTransactionState);
+        }
+
+
+        protected void afterCommitStatement(boolean committed)
+        {
+            if(committed) {
+                currentCount = expectedCount;
+            }
         }
 
         protected boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session)
@@ -1136,7 +1423,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             }
         }
 
-        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session)
+        protected Pair<IterationExpectations, TransactionState> doInTransaction(TransactionState transactionState, Session session, int iteration)
         {
             // For each counter increment counter 1 table
 //            expectedCount = currentCount + 1;
@@ -1180,6 +1467,11 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
             IterationExpectations iterationExpectations = new IterationExpectations(expectedIncrements);
 
             return Pair.create(iterationExpectations, changedTransactionState);
+        }
+
+        protected void afterCommitStatement(boolean committed)
+        {
+
         }
 
         protected boolean checkIfItReallyWasCommitted(TransactionState transactionState, Session session)
@@ -1524,11 +1816,19 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
 
             transactionState = counterAndItsTable.persistUsingTransaction(transactionState, session);
 
-            try {
+            try
+            {
                 // It should fail, because of special table name "stop_after_proposed", but before it fails it should propose that transaction
                 // successfully.
+                System.out.println("TxId=" + transactionState.getTransactionId());
                 ResultSet rows = commitTransaction(session, transactionState);
                 System.out.println("Commit transaction results" + rows);
+                Row one = rows.one();
+                UUID txId = one.getUUID("[tx_id]");
+                Preconditions.checkState(txId.equals(transactionState.getTransactionId()));
+                boolean committed = one.getBool("[committed]");
+
+                System.out.println("Commit transaction that should fail returns committed=" + committed + " txId=" + txId);
             }
             catch (Exception e) {
                 System.out.println("Commit transaction exception" + e);

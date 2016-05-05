@@ -60,7 +60,7 @@ public class MpPrepareResponse
     @Override
     public String toString()
     {
-        return String.format("PrepareResponse(%s, %s, %s)", promised, mostRecentCommit, inProgressCommit);
+        return String.format("PrepareResponse(%s, %s, %s txLog=%s)", promised, mostRecentCommit, inProgressCommit, txLog);
     }
 
     public static class PrepareResponseSerializer implements IVersionedSerializer<MpPrepareResponse>

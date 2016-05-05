@@ -501,6 +501,10 @@ public class StorageProxyMpPaxosExtensions
         default boolean failedToTransition() {
             return !wasTransitionSuccessful();
         }
+
+        default boolean isFinalTransition() {
+            return false;
+        }
     }
 
     public static class TransitionResultImpl implements TransitionResult
@@ -640,6 +644,8 @@ public class StorageProxyMpPaxosExtensions
 
         private boolean isRepairing = false;
 
+        private boolean doneByShortCut = false;
+
         public ReplicaGroupsPhaseExecutor(TransactionState transactionState, Phase isDoneWhen, Collection<ReplicasGroup> replicasInPhase, Collection<Replica> allReplicas)
         {
             this.isDoneWhen = isDoneWhen;
@@ -669,7 +675,7 @@ public class StorageProxyMpPaxosExtensions
 
         boolean isDone()
         {
-            return areInSamePhase() && (findMinimumPhaseAmongAllReplicaGroups() == isDoneWhen);
+            return doneByShortCut || areInSamePhase() && (findMinimumPhaseAmongAllReplicaGroups() == isDoneWhen);
         }
 
         static Predicate<Replica> failedToTransitionAndMovedToBeginAndRepair = replica -> {
@@ -711,15 +717,41 @@ public class StorageProxyMpPaxosExtensions
                     holder.setTransitionResult(new TransitionResultImpl(replica.getReplicaInPhaseHolder().getReplicaInPhase(), currentPhase, false));
                 }
                 catch (ClassCastException classCastException) {
-                    logger.error("ClassCastException caught. Replica is {} currentPhase {}, " +
-                                 "nextPhaseForReplica is {}, replica in phase class is {}",
-                                 replica.getHostAddress(), currentPhase,
+                    logger.error("ClassCastException caught. TxId {} Replica is {} currentPhase {}, " +
+                                 "nextPhaseForReplica is {}, replica in phase class is {} History of phases {}",
+                                 transactionState.getTransactionId(), replica.getHostAddress(), currentPhase,
                                  nextPhaseForReplica,
-                                 replicaInPhase.getClass().toString(),
+                                 replicaInPhase.getClass().toString(), historyOfTransitionsDebug,
                                  classCastException);
                     throw classCastException;
                 }
             });
+
+            Set<Phase> shortCut = replicas.stream().filter(replica -> replica.getReplicaInPhaseHolder().getTransitionResult().isFinalTransition())
+                                         .map(replica -> replica.getReplicaInPhaseHolder().getTransitionResult().getPhase()).collect(Collectors.toSet());
+            if(!shortCut.isEmpty()) {
+                if(shortCut.size() == 1) {
+                    logger.debug("CorrectFinalTransition Some replicas had final transition to {} TxId {}", shortCut.iterator().next(), transactionState.getTransactionId());
+                    Phase finalPhase = shortCut.iterator().next();
+                    if(finalPhase == Phase.ROLLBACK_PHASE) {
+                        doneByShortCut = true;
+                        return true;
+                    }
+                    else if(finalPhase == Phase.AFTER_COMMIT_PHASE) {
+                        doneByShortCut = true;
+                        return false;
+                    }
+                    else
+                    {
+                        throw new RuntimeException("Unexpected final phase " + finalPhase);
+                    }
+                }
+                else {
+                    logger.error("wrongFinalTransition Replicas had final transition, but different results. TxId {} Phases {}", transactionState.getTransactionId(), shortCut);
+                    throw new RuntimeException("Wrong final transition " +  shortCut);
+                }
+            }
+
 
             logger.debug("Transitions for replica groups are done. Time to evaluate responses");
             String phaseForReplicaGroupsBefore = phasesForReplicaGroups(replicaGroups);
@@ -933,11 +965,23 @@ public class StorageProxyMpPaxosExtensions
 
         if (responsesByReplica.size() == 1 && responsesByReplica.entrySet().iterator().next().getValue().right == TxLog.COMMITTED) {
             // this transaction has been tried again and it turns out it was committed
-            return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true);
+            logger.info("prePreparedTransitionsToAfterCommit Transaction id {} Log says it was committed", replicaInPhase.getTransactionState().getTransactionId());
+            return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true) {
+                public boolean isFinalTransition()
+                {
+                    return true;
+                }
+            };
         }
         else if(responsesByReplica.size() == 1 && responsesByReplica.entrySet().iterator().next().getValue().right == TxLog.ROLLED_BACK) {
             // this transaction has been tried again and it turns out it was rolled back
-            return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false);
+            logger.info("prePreparedTransitionsToRollback Transaction id {} Log says it was rolled back", replicaInPhase.getTransactionState().getTransactionId());
+            return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false) {
+                public boolean isFinalTransition()
+                {
+                    return true;
+                }
+            };
         }
         else if (responsesByReplica.size() == 1 &&  responsesByReplica.entrySet().iterator().next().getValue().left.isPresent())
         {
@@ -962,11 +1006,21 @@ public class StorageProxyMpPaxosExtensions
         MpPrepareCallback summary = inPhase.getSummary();
 
         if(summary != null && TxLog.COMMITTED == summary.txLog) {
-            return new TransitionResultImpl(inPhase, Phase.AFTER_COMMIT_PHASE, true);
+            return new TransitionResultImpl(inPhase, Phase.AFTER_COMMIT_PHASE, true) {
+                public boolean isFinalTransition()
+                {
+                    return true;
+                }
+            };
         }
 
         if(summary != null && TxLog.ROLLED_BACK == summary.txLog) {
-            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
+            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false) {
+                public boolean isFinalTransition()
+                {
+                    return true;
+                }
+            };
         }
 
         if (summary != null && summary.wasRolledBack())
@@ -980,11 +1034,21 @@ public class StorageProxyMpPaxosExtensions
         summary = preparePaxos(toPrepare, liveEndpoints, requiredParticipants, consistencyForPaxos, null);
 
         if(summary != null && TxLog.COMMITTED == summary.txLog) {
-            return new TransitionResultImpl(inPhase, Phase.AFTER_COMMIT_PHASE, true);
+            return new TransitionResultImpl(inPhase, Phase.AFTER_COMMIT_PHASE, true) {
+                public boolean isFinalTransition()
+                {
+                    return true;
+                }
+            };
         }
 
         if(summary != null && TxLog.ROLLED_BACK == summary.txLog) {
-            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false);
+            return new TransitionResultImpl(inPhase, Phase.ROLLBACK_PHASE, false) {
+                public boolean isFinalTransition()
+                {
+                    return true;
+                }
+            };
         }
 
         // TODO [MPP] this is probably redundant after introducing transaction log
@@ -1225,10 +1289,20 @@ public class StorageProxyMpPaxosExtensions
             TxLog txLog = proposedResult.right;
 
             if(txLog == TxLog.COMMITTED) {
-                return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true);
+                return new TransitionResultImpl(replicaInPhase, Phase.AFTER_COMMIT_PHASE, true) {
+                    public boolean isFinalTransition()
+                    {
+                        return true;
+                    }
+                };
             }
             else if(txLog == TxLog.ROLLED_BACK) {
-                return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false);
+                return new TransitionResultImpl(replicaInPhase, Phase.ROLLBACK_PHASE, false) {
+                    public boolean isFinalTransition()
+                    {
+                        return true;
+                    }
+                };
             }
 
             boolean proposed = proposedResult.left;

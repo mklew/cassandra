@@ -102,6 +102,10 @@ public class MpPaxosState
 //                Keyspace.open(toPrepare.update.metadata().ksName).getColumnFamilyStore(toPrepare.update.metadata().cfId).metric.casPrepare.addNano(System.nanoTime() - start);
             }
         }
+        else if(toPrepare.update.isReadTransaction()) {
+            // There are no transactions in index and this transaction is read-only. Tell it that node is prepared.
+            return new MpPrepareResponse(true, false, MpCommit.emptyCommit(), MpCommit.emptyCommit(), txLog);
+        }
         else {
             boolean notPromised = false;
             boolean wasRolledBack = TxLog.ROLLED_BACK == txLog;
