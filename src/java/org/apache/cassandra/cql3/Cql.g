@@ -650,10 +650,27 @@ flushTransactionStatement returns [FlushTransactionStatement.Parsed statement]
 commitTransactionStatement returns [CommitTransactionStatement.Parsed statement]
     @init {
         Term.Raw transactionStateJson = null;
+        boolean ifExists = false;
+        boolean ifNotExists = false;
     }
     :
         K_COMMIT K_TRANSACTION (K_AS K_JSON tsj=term { transactionStateJson = tsj; })
-        { $statement = new CommitTransactionStatement.Parsed(transactionStateJson); }
+        ( K_IF
+          cfCondition=columnFamilyName
+          K_WHERE wclauseCondition=whereClause
+          (K_EXISTS { ifExists = true; } |
+          K_NOT K_EXISTS { ifNotExists = true; } |
+          K_MATCHES conditions=updateConditions)
+        )?
+        {
+            WhereClause whereCondition = wclauseCondition == null ? WhereClause.empty() : wclauseCondition.build();
+            $statement = new CommitTransactionStatement.Parsed(transactionStateJson,
+            cfCondition,
+            whereCondition,
+            ifExists,
+            ifNotExists,
+            conditions == null ? Collections.<Pair<ColumnIdentifier.Raw, ColumnCondition.Raw>>emptyList() : conditions);
+        }
     ;
 
 createAggregateStatement returns [CreateAggregateStatement expr]
@@ -1890,6 +1907,7 @@ K_READ:             R E A D;
 K_FLUSH:            F L U S H;
 K_COMMIT:            C O M M I T;
 K_LOCALLY:          L O C A L L Y;
+K_MATCHES:          M A T C H E S;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

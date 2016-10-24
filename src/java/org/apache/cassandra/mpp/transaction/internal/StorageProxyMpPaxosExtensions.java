@@ -47,9 +47,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.exceptions.MultiPartitionPaxosTimeoutException;
 import org.apache.cassandra.exceptions.TransactionRolledBackException;
 import org.apache.cassandra.exceptions.UnavailableException;
@@ -75,6 +79,7 @@ import org.apache.cassandra.service.mppaxos.MpPrepareCallback;
 import org.apache.cassandra.service.mppaxos.MpProposeCallback;
 import org.apache.cassandra.service.mppaxos.ReplicasGroupsOperationCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -544,7 +549,11 @@ public class StorageProxyMpPaxosExtensions
     }
 
 
-    public static ReplicaGroupsPhaseExecutor createMultiPartitionPaxosPhaseExecutor(List<ReplicasGroupAndOwnedItems> replicaGroups, TransactionState transactionState, ClientState state)
+    public static ReplicaGroupsPhaseExecutor createMultiPartitionPaxosPhaseExecutor(
+       List<ReplicasGroupAndOwnedItems> replicaGroups,
+        TransactionState transactionState,
+        ClientState state,
+        Optional<CQL3CasRequest> casRequestOptional)
     {
         Phase noPhase = Phase.NO_PHASE;
         Collection<Replica> allReplicas = replicaGroups.iterator().next().getAllReplicas();
@@ -558,7 +567,11 @@ public class StorageProxyMpPaxosExtensions
                                                                 .map(ReplicasGroupAndOwnedItems::getReplicasGroup)
                                                                 .collect(Collectors.toList());
 
-        return new ReplicaGroupsPhaseExecutor(transactionState, Phase.AFTER_COMMIT_PHASE, inPhases, replicaGroups.iterator().next().getAllReplicas());
+        return new ReplicaGroupsPhaseExecutor(transactionState,
+                                              Phase.AFTER_COMMIT_PHASE,
+                                              inPhases,
+                                              replicaGroups.iterator().next().getAllReplicas(),
+                                              casRequestOptional);
     }
 
     public static ReplicaGroupsPhaseExecutor createMultiPartitionPaxosPhaseExecutorForRead(List<ReplicasGroupAndOwnedItems> replicaGroups, TransactionState transactionState, ClientState state)
@@ -585,7 +598,7 @@ public class StorageProxyMpPaxosExtensions
                                                     .collect(Collectors.toList());
 
         // Reading should finish after it successfully transitions into prepare phase, that happens after repair phase has finished.
-        return new ReplicaGroupsPhaseExecutor(transactionState, Phase.PREPARE_PHASE, inPhases, replicaGroups.iterator().next().getAllReplicas());
+        return new ReplicaGroupsPhaseExecutor(transactionState, Phase.PREPARE_PHASE, inPhases, replicaGroups.iterator().next().getAllReplicas(), Optional.<CQL3CasRequest>empty());
     }
 
     public static ReplicaGroupsPhaseExecutor createRepairInProgressPaxosExecutor(TransactionState inProgressTransactionState, ClientState state, UUID ballot)
@@ -615,7 +628,7 @@ public class StorageProxyMpPaxosExtensions
                                                     .collect(Collectors.toList());
 
         // TODO [MPP] It might be done if we see that transaction was rolled back.
-        ReplicaGroupsPhaseExecutor replicaGroupsPhaseExecutor = new ReplicaGroupsPhaseExecutor(inProgressTransactionState, Phase.AFTER_COMMIT_PHASE, replicaGroups, replicasGroupAndOwnedItems.iterator().next().getAllReplicas());
+        ReplicaGroupsPhaseExecutor replicaGroupsPhaseExecutor = new ReplicaGroupsPhaseExecutor(inProgressTransactionState, Phase.AFTER_COMMIT_PHASE, replicaGroups, replicasGroupAndOwnedItems.iterator().next().getAllReplicas(), Optional.<CQL3CasRequest>empty());
         replicaGroupsPhaseExecutor.setIsRepairing(true);
         return replicaGroupsPhaseExecutor;
     }
@@ -634,6 +647,7 @@ public class StorageProxyMpPaxosExtensions
 
         private final Collection<Replica> replicas;
         private final TransactionState transactionState;
+        private final Optional<CQL3CasRequest> casRequestOptional;
         Phase isDoneWhen;
 
         Collection<ReplicasGroup> replicasInPhase;
@@ -646,12 +660,33 @@ public class StorageProxyMpPaxosExtensions
 
         private boolean doneByShortCut = false;
 
-        public ReplicaGroupsPhaseExecutor(TransactionState transactionState, Phase isDoneWhen, Collection<ReplicasGroup> replicasInPhase, Collection<Replica> allReplicas)
+        private RowIterator rowIteratorForConditionalRow;
+
+        private boolean conditionIsOk = false;
+
+        private boolean finishedDueToCondition = false;
+
+        public boolean isFinishedDueToCondition()
+        {
+            return finishedDueToCondition;
+        }
+
+        public RowIterator getRowIteratorForConditionalRow()
+        {
+            return rowIteratorForConditionalRow;
+        }
+
+        public ReplicaGroupsPhaseExecutor(TransactionState transactionState,
+                                          Phase isDoneWhen,
+                                          Collection<ReplicasGroup> replicasInPhase,
+                                          Collection<Replica> allReplicas,
+                                          Optional<CQL3CasRequest> casRequestOptional)
         {
             this.isDoneWhen = isDoneWhen;
             this.replicasInPhase = replicasInPhase;
             this.replicas = allReplicas;
             this.transactionState = transactionState;
+            this.casRequestOptional = casRequestOptional;
         }
 
         public static Phase getCurrentPhaseOfReplicaGroup(ReplicasGroup rg) {
@@ -875,6 +910,33 @@ public class StorageProxyMpPaxosExtensions
             }).filter(Phase.ROLLBACK_PHASE::equals).findAny().isPresent();
         }
 
+        boolean evaluateCondition(CQL3CasRequest request) {
+            logger.debug("ReplicaGroupsPhaseExecutor evaluates condition");
+            SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
+            ConsistencyLevel readConsistency = ConsistencyLevel.LOCAL_QUORUM;
+            FilteredPartition current;
+            try (RowIterator rowIter = StorageProxy.readOne(readCommand, readConsistency))
+            {
+                current = FilteredPartition.create(rowIter);
+            }
+
+            boolean appliesTo = request.appliesTo(current);
+            if (!appliesTo)
+            {
+                logger.debug("ReplicaGroupsPhaseExecutor precondition does not match current values {}", current);
+//                casWriteMetrics.conditionNotMet.inc();
+                RowIterator rowIterator = current.rowIterator();
+                rowIteratorForConditionalRow = rowIterator;
+                finishedDueToCondition = true;
+            }
+            conditionIsOk = appliesTo;
+            return appliesTo;
+        }
+
+        public boolean isConditionFine() {
+            return !finishedDueToCondition && conditionIsOk;
+        }
+
         public void tryToExecute()
         {
             UUID txId = transactionState.getTransactionId();
@@ -887,6 +949,15 @@ public class StorageProxyMpPaxosExtensions
             {
                 Phase minimumPhaseAmongAllReplicaGroups = findMinimumPhaseAmongAllReplicaGroups();
                 logger.debug("Current groups minimum phase is {}", minimumPhaseAmongAllReplicaGroups);
+
+                if(Phase.PREPARE_PHASE == minimumPhaseAmongAllReplicaGroups && casRequestOptional.isPresent()) {
+                    // All replicas are in prepare phase, coordiator needs to evaluate condition before allowing replicas to proceed forward.
+                    boolean appliesTo = evaluateCondition(casRequestOptional.get());
+                    if(!appliesTo) {
+                        phaseExecutorResult = PhaseExecutorResult.FINISHED;
+                        return;
+                    }
+                }
 
                 // for testing purposes, it stops execution after transaction was proposed leaving it saved as "in progress"
                 if(Phase.PROPOSE_PHASE == minimumPhaseAmongAllReplicaGroups &&

@@ -548,7 +548,7 @@ public abstract class ModificationStatement implements CQLStatement
         return success ? rs : merge(rs, buildCasFailureResultSet(partition, columnsWithConditions, isBatch, options));
     }
 
-    private static ResultSet merge(ResultSet left, ResultSet right)
+    public static ResultSet merge(ResultSet left, ResultSet right)
     {
         if (left.size() == 0)
             return right;

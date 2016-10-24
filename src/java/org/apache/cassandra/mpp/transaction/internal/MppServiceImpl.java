@@ -42,6 +42,7 @@ import com.datastax.driver.core.utils.UUIDs;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.EmptyIterators;
@@ -59,6 +60,7 @@ import org.apache.cassandra.mpp.transaction.MppService;
 import org.apache.cassandra.mpp.transaction.MppTransactionLog;
 import org.apache.cassandra.mpp.transaction.PrivateMemtableStorage;
 import org.apache.cassandra.mpp.transaction.ReadTransactionDataService;
+import org.apache.cassandra.mpp.transaction.TransactionCommitResult;
 import org.apache.cassandra.mpp.transaction.TransactionData;
 import org.apache.cassandra.mpp.transaction.TransactionId;
 import org.apache.cassandra.mpp.transaction.TransactionTimeUUID;
@@ -155,29 +157,40 @@ public class MppServiceImpl implements MppService
 
     /**
      * It should block until end of transaction, and then return.
-     *  @param transactionState
+     * @param transactionState
      * @param consistencyLevel
      * @param options
      * @param clientState
+     * @param casRequestOptional
      */
-    public boolean commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState)
+    public TransactionCommitResult commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState, Optional<CQL3CasRequest> casRequestOptional)
     {
         logger.info("Commit transaction called with transaction state {} and consistency level {}", transactionState, consistencyLevel);
 
         List<ReplicasGroupAndOwnedItems> replicasAndOwnedItems = ForEachReplicaGroupOperations.groupItemsByReplicas(transactionState);
-        StorageProxyMpPaxosExtensions.ReplicaGroupsPhaseExecutor multiPartitionPaxosPhaseExecutor = StorageProxyMpPaxosExtensions.createMultiPartitionPaxosPhaseExecutor(replicasAndOwnedItems, transactionState, clientState);
+        StorageProxyMpPaxosExtensions.ReplicaGroupsPhaseExecutor multiPartitionPaxosPhaseExecutor =
+            StorageProxyMpPaxosExtensions.createMultiPartitionPaxosPhaseExecutor(replicasAndOwnedItems,
+                                                                                 transactionState,
+                                                                                 clientState,
+                                                                                 casRequestOptional);
 
         try
         {
             multiPartitionPaxosPhaseExecutor.tryToExecute(); // This is BLOCKING
             StorageProxyMpPaxosExtensions.PhaseExecutorResult executorResult = multiPartitionPaxosPhaseExecutor.getPhaseExecutorResult();
             Preconditions.checkState(executorResult != null, "When executor finished, it cannot have NULL phaseExecutorResult");
-            if(StorageProxyMpPaxosExtensions.PhaseExecutorResult.FINISHED == executorResult) {
-                return true;
+            if(StorageProxyMpPaxosExtensions.PhaseExecutorResult.FINISHED == executorResult
+               && multiPartitionPaxosPhaseExecutor.isFinishedDueToCondition()) {
+                return new TransactionCommitResult(false, multiPartitionPaxosPhaseExecutor.isConditionFine(), multiPartitionPaxosPhaseExecutor.getRowIteratorForConditionalRow());
+            }
+            else if(StorageProxyMpPaxosExtensions.PhaseExecutorResult.FINISHED == executorResult) {
+                // TODO [MPT] RowIterator is null
+                return new TransactionCommitResult(true, multiPartitionPaxosPhaseExecutor.isConditionFine(), null);
             }
             else if (StorageProxyMpPaxosExtensions.PhaseExecutorResult.ROLLED_BACK == executorResult) {
 //                rollbackTransactionInternal(transactionState, replicasAndOwnedItems);
-                return false;
+                // TODO [MPT] RowIterator is null
+                return new TransactionCommitResult(false, multiPartitionPaxosPhaseExecutor.isConditionFine(), null);
             }
             else
             {

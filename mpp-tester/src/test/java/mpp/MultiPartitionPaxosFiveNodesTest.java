@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,6 +42,7 @@ import com.google.common.base.Preconditions;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
@@ -433,8 +435,8 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         CounterColumnIncrementerExecutor counter5Executor = new CounterColumnIncrementerExecutor(iterations, "Counter5Exe", countersThatExist, "counter5");
 
         // TODO [MPP] Returning only single executor to test if test works just as single transaction inserting some other data.
-        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
-//        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
+//        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor, counter4Executor, counter5Executor);
+        return Arrays.asList(counter1Executor, counter2Executor, counter4Executor, counter5Executor);
 //        return Arrays.asList(counter1Executor, counter2Executor, counter3Executor);
 //        return Arrays.asList(counter1Executor, counter2Executor);
 //        return Arrays.asList(counter1Executor);
@@ -499,7 +501,7 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
     @Test
     public void runTestUsingCounters() throws Throwable {
         boolean checkForConverganceOfCommitsAndRollbacks = false;
-        int iterations = 100;
+        int iterations = 20;
         // There counters exist from previous test because they use named keys. Need to reset them
         Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
         Session anySession = getAnySession();
@@ -510,6 +512,132 @@ public class MultiPartitionPaxosFiveNodesTest extends FiveNodesClusterTest
         List<CounterExecutor> counterExecutors = createCounterExecutors(iterations, counters);
 
         runTestCase(checkForConverganceOfCommitsAndRollbacks, iterations, anySession, counters, counterExecutors);
+    }
+
+    @Test
+    public void runTestUsingConditionalTransaction() throws Throwable {
+        // 1. Create a counter A and counter B.
+        // 2. Initialize counter A to something, via update.
+        // 3. Run a transaction over counter A,B with condition on counter A that is not satisifed.
+        // 4.
+        //  Check that counter A, B were NOT updated by transaction
+        Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
+        Session anySession = getAnySession();
+
+        Iterator<CounterAndItsTable> iterator = countersToPersist.iterator();
+        CounterAndItsTable counterA = iterator.next();
+        CounterAndItsTable counterB = iterator.next();
+        counterA.counter.setCounter1(10);
+        counterA.counter.setCounter2(20);
+        counterA.counter.setCounter3(30);
+
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+        Iterator<CounterAndItsTable> it2 = counters.iterator();
+        counterA = it2.next();
+        counterB = it2.next();
+
+        Session txSession = getAnySession();
+        TransactionState transactionState = beginTransaction(txSession);
+
+        // In trasaction
+        counterA.counter.setCounter1(100);
+        counterB.counter.setCounter1(5);
+
+        TransactionState ts2 = counterA.persistUsingTransaction(transactionState, txSession);
+        TransactionState ts3 = counterB.persistUsingTransaction(ts2, txSession);
+
+        String keyspaceName = counterA.table.keyspaceName;
+        String tableName = counterA.table.tableName;
+        String counterAId = counterA.counter.getId().toString();
+        ResultSet resultSet = commitTransactionWithCond(txSession, ts3, "IF " + keyspaceName + "." + tableName + " WHERE id = '" + counterAId +
+                                                                   "' MATCHES counter1 = 11");
+
+        Row result = resultSet.one();
+
+        ColumnDefinitions columnDefinitions = result.getColumnDefinitions();
+//        boolean committed = result.getBool("[committed]");
+        int counter1 = result.getInt("counter1");
+        boolean applied = result.getBool("[applied]");
+
+//        System.out.println("Transaction committed=" + committed + " and applied=" + applied);
+        System.out.println("Transaction applied=" + applied + " counter1=" + counter1);
+        Assert.assertEquals(10, counter1);
+
+        txSession.close();
+        anySession.close();
+        Session assertionsSession = getAnySession();
+        counterB.refresh(assertionsSession);
+        counterA.refresh(assertionsSession);
+
+        Assert.assertEquals(0, counterB.counter.counter1);
+        Assert.assertEquals(0, counterB.counter.counter2);
+        Assert.assertEquals(0, counterB.counter.counter3);
+        Assert.assertEquals(0, counterB.counter.counter4);
+        Assert.assertEquals(0, counterB.counter.counter5);
+        Assert.assertEquals(10, counterA.counter.counter1);
+    }
+
+    @Test
+    public void runTestWithConditionalCommit() throws Throwable {
+        // 1. Create a counter A and counter B.
+        // 2. Initialize counter A to something, via update.
+        // 3. Run a transaction over counter A,B with condition on counter A that is not satisifed.
+        // 4.
+        //  Check that counter A, B were NOT updated by transaction
+        Collection<CounterAndItsTable> countersToPersist = createSampleOfNamedCounters();
+        Session anySession = getAnySession();
+
+        Iterator<CounterAndItsTable> iterator = countersToPersist.iterator();
+        CounterAndItsTable counterA = iterator.next();
+        CounterAndItsTable counterB = iterator.next();
+        counterA.counter.setCounter1(11); // SO IT MATCHES THE CONDITION
+        counterA.counter.setCounter2(20);
+        counterA.counter.setCounter3(30);
+
+        Collection<CounterAndItsTable> counters = persistInitialCounterValues(anySession, countersToPersist);
+        Iterator<CounterAndItsTable> it2 = counters.iterator();
+        counterA = it2.next();
+        counterB = it2.next();
+
+        Session txSession = getAnySession();
+        TransactionState transactionState = beginTransaction(txSession);
+
+        // In trasaction
+        counterA.counter.setCounter1(100);
+        counterB.counter.setCounter1(5);
+
+        TransactionState ts2 = counterA.persistUsingTransaction(transactionState, txSession);
+        TransactionState ts3 = counterB.persistUsingTransaction(ts2, txSession);
+
+        String keyspaceName = counterA.table.keyspaceName;
+        String tableName = counterA.table.tableName;
+        String counterAId = counterA.counter.getId().toString();
+        ResultSet resultSet = commitTransactionWithCond(txSession, ts3, "IF " + keyspaceName + "." + tableName + " WHERE id = '" + counterAId +
+                                                                        "' MATCHES counter1 = 11 AND counter2 = 20");
+
+        Row result = resultSet.one();
+
+        ColumnDefinitions columnDefinitions = result.getColumnDefinitions();
+        boolean committed = result.getBool("[committed]");
+//        int counter1 = result.getInt("counter1");
+        boolean applied = result.getBool("[applied]");
+
+        System.out.println("Transaction committed=" + committed + " and applied=" + applied);
+//        System.out.println("Transaction applied=" + applied);
+//        Assert.assertEquals(11, counter1);
+
+        txSession.close();
+        anySession.close();
+        Session assertionsSession = getAnySession();
+        counterB.refresh(assertionsSession);
+        counterA.refresh(assertionsSession);
+
+        Assert.assertEquals(5, counterB.counter.counter1);
+        Assert.assertEquals(0, counterB.counter.counter2);
+        Assert.assertEquals(0, counterB.counter.counter3);
+        Assert.assertEquals(0, counterB.counter.counter4);
+        Assert.assertEquals(0, counterB.counter.counter5);
+        Assert.assertEquals(100, counterA.counter.counter1);
     }
 
     @Test

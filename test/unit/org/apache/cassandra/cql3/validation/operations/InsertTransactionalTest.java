@@ -62,6 +62,8 @@ public class InsertTransactionalTest extends CQLTester
 
         UUID txId = UUIDGen.getTimeUUID(DateTime.now().minusSeconds(10).toInstant().getMillis());
 
+        System.out.println(txId);
+
         final FakeWriteOnlyPrivateMemtableStorage fakeStorage = new FakeWriteOnlyPrivateMemtableStorage();
 
         // TODO [MPP] if this is static then it will be shared between all unit tests which means that it might not work if tests are run in parallel.

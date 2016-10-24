@@ -18,28 +18,19 @@
 
 package org.apache.cassandra.mpp.transaction.internal;
 
-import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.utils.UUIDs;
-import junit.framework.Assert;
 import org.apache.cassandra.SystemClock;
-import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.mpp.transaction.MppCQLTester;
-import org.apache.cassandra.mpp.transaction.MppServiceUtils;
 import org.apache.cassandra.mpp.transaction.client.TransactionItem;
 import org.apache.cassandra.mpp.transaction.client.TransactionState;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.newTransactionItem;
@@ -51,8 +42,8 @@ import static org.apache.cassandra.mpp.transaction.MppTestingUtilities.newTransa
 public class CommitTransactionStatementTest extends MppCQLTester
 {
 
-    String ksName = "test_ks";
-    String cfName = "cf1";
+    String ksName = keyspace();
+    String cfName = createTableName();
     long token1 = 1;
     long token2 = 2;
     long token3 = 3;
@@ -85,17 +76,89 @@ public class CommitTransactionStatementTest extends MppCQLTester
         ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
         prepared.statement.validate(state);
 
-        final UUID txId = UUIDs.timeBased();
+//        final UUID txId = UUIDs.timeBased();
+//
+//        final ByteBuffer idBb = UUIDType.instance.decompose(txId);
+//        TransactionState transactionState = newTransactionState(ti1, ti2, ti3);
+//        String transactionStateAsJson = MppServiceUtils.getTransactionStateAsJson(transactionState);
+//        ByteBuffer decompose = UTF8Type.instance.decompose(transactionStateAsJson);
+//        QueryOptions options = QueryOptions.forInternalCalls(Collections.singletonList(decompose));
+//
+//        ResultMessage message = prepared.statement.executeInternal(queryState, options);
+//        ResultMessage.Rows rows = (ResultMessage.Rows) message;
+//        Assert.assertEquals("should have 3 rows", 3, rows.result.size());
+    }
 
-        final ByteBuffer idBb = UUIDType.instance.decompose(txId);
-        TransactionState transactionState = newTransactionState(ti1, ti2, ti3);
-        String transactionStateAsJson = MppServiceUtils.getTransactionStateAsJson(transactionState);
-        ByteBuffer decompose = UTF8Type.instance.decompose(transactionStateAsJson);
-        QueryOptions options = QueryOptions.forInternalCalls(Collections.singletonList(decompose));
+    @Test
+    public void shouldParseCommitTransactionWithIfExists() {
+        ClientState state = ClientState.forInternalCalls();
+        QueryState queryState = new QueryState(state);
+        String keyspace = keyspace();
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
+        String stmt = "COMMIT TRANSACTION AS JSON ? IF " + keyspace + "." + table + " WHERE k = 10 EXISTS";
 
-        ResultMessage message = prepared.statement.executeInternal(queryState, options);
-        ResultMessage.Rows rows = (ResultMessage.Rows) message;
-        Assert.assertEquals("should have 3 rows", 3, rows.result.size());
+        ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
+        prepared.statement.validate(state);
+    }
+
+    @Test
+    public void shouldParseCommitTransactionWithIfNotExists() {
+        ClientState state = ClientState.forInternalCalls();
+        QueryState queryState = new QueryState(state);
+        String keyspace = keyspace();
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
+        String stmt = "COMMIT TRANSACTION AS JSON ? IF " + keyspace + "." + table + " WHERE k = 10 NOT EXISTS";
+
+        ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
+        prepared.statement.validate(state);
+    }
+
+    @Test
+    public void shouldParseCommitTransactionWithIfCondition() {
+        ClientState state = ClientState.forInternalCalls();
+        QueryState queryState = new QueryState(state);
+        String keyspace = keyspace();
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
+        String stmt = "COMMIT TRANSACTION AS JSON ? IF " + keyspace + "." + table + " WHERE k = 10 MATCHES s = 'asd'";
+
+        ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
+        prepared.statement.validate(state);
+    }
+
+    @Test
+    public void shouldParseCommitTransactionWithTwoConditions() {
+        ClientState state = ClientState.forInternalCalls();
+        QueryState queryState = new QueryState(state);
+        String keyspace = keyspace();
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
+        String stmt = "COMMIT TRANSACTION AS JSON ? IF " + keyspace + "." + table + " WHERE k = 10 MATCHES s = 'asd' AND i > 100";
+
+        ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
+        prepared.statement.validate(state);
+    }
+
+    @Test
+    public void shouldParseCommitTransactionWithIfThreeConditions() {
+        ClientState state = ClientState.forInternalCalls();
+        QueryState queryState = new QueryState(state);
+        String keyspace = keyspace();
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, s text, i int)");
+        String stmt = "COMMIT TRANSACTION AS JSON ? IF " + keyspace + "." + table + " WHERE k = 10 MATCHES s = 'asd' AND i > 100 AND i < 200";
+
+        ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
+        prepared.statement.validate(state);
+    }
+
+    @Test
+    public void shouldParseCommitTransactionWithIfTwoConditionsAndTwoKeys() {
+        ClientState state = ClientState.forInternalCalls();
+        QueryState queryState = new QueryState(state);
+        String keyspace = keyspace();
+        String table = createTable("CREATE TABLE %s (k int, s text, i int, PRIMARY KEY (k,s)) ");
+        String stmt = "COMMIT TRANSACTION AS JSON ? IF " + keyspace + "." + table + " WHERE k = 10 and s = 'foo' MATCHES i > 100 AND i < 200";
+
+        ParsedStatement.Prepared prepared = QueryProcessor.parseStatement(stmt, queryState);
+        prepared.statement.validate(state);
     }
 
 

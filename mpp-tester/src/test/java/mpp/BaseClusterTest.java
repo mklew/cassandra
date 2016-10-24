@@ -111,6 +111,34 @@ public abstract class BaseClusterTest
         return session.execute("COMMIT TRANSACTION AS JSON '" + txStateJson + "'");
     }
 
+    protected static ResultSet commitTransactionWithCond(Session session, TransactionState transactionState, String cond)
+    {
+        final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);
+        String result;
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try
+        {
+            result = objectMapper.writeValueAsString(transactionStateDto);
+        }
+        catch (JsonProcessingException e)
+        {
+            throw new RuntimeException(e);
+        }
+        final String txStateJson = result;
+
+        // TODO [MPP] I get operation time out when trying to use prepared statement. None of hosts can handle that prepared statement.
+
+//        PreparedStatement preparedCommitTransactionStmt = sessionN1.prepare("COMMIT TRANSACTION AS JSON ?");
+//        BoundStatement boundStatement = preparedCommitTransactionStmt.bind("'" + txStateJson + "'");
+//        sessionN1.execute(boundStatement);
+
+        // Json had to be wrapped in single quotes
+        String query = "COMMIT TRANSACTION AS JSON '" + txStateJson + "' " + cond;
+        System.out.println("About to commit transaction:");
+        System.out.println(query);
+        return session.execute(query);
+    }
+
     protected static ResultSetFuture commitTransactionAsync(Session session, TransactionState transactionState)
     {
         final TransactionStateDto transactionStateDto = TransactionStateDto.fromTransactionState(transactionState);

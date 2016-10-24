@@ -26,6 +26,7 @@ import java.util.function.Consumer;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.TransactionalMutation;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -67,8 +68,9 @@ public interface MppService extends MppServiceMXBean, MultiPartitionPaxosIndex, 
      * @param consistencyLevel
      * @param options
      * @param clientState
+     * @param casRequestOptional
      */
-    boolean commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState);
+    TransactionCommitResult commitTransaction(TransactionState transactionState, ConsistencyLevel consistencyLevel, QueryOptions options, ClientState clientState, Optional<CQL3CasRequest> casRequestOptional);
 
     /**
      * This has to message all nodes that took part in transaction and tell them to get rid of private memtables
